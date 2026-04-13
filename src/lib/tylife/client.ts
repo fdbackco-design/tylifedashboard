@@ -30,12 +30,29 @@ async function delay(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** 공통 헤더 */
-function buildHeaders(): HeadersInit {
+/** 리스트 API 헤더 (POST /contract/list) */
+function buildListHeaders(): HeadersInit {
   return {
-    'Content-Type': 'application/json',
+    'Content-Type': 'application/json; charset=UTF-8',
+    Accept: '*/*',
+    Origin: TYLIFE_BASE_URL!,
+    Referer: `${TYLIFE_BASE_URL}/contract/`,
+    'X-Requested-With': 'XMLHttpRequest',
     Cookie: TYLIFE_SESSION_COOKIE!,
-    // TODO: 필요한 경우 User-Agent, Referer 등 추가
+  };
+}
+
+/** 상세 페이지 헤더 (GET /contract/{id}) */
+function buildDetailHeaders(): HeadersInit {
+  return {
+    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Cache-Control': 'no-cache',
+    Pragma: 'no-cache',
+    'Upgrade-Insecure-Requests': '1',
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    Referer: `${TYLIFE_BASE_URL}/contract/`,
+    Cookie: TYLIFE_SESSION_COOKIE!,
   };
 }
 
@@ -93,11 +110,12 @@ export async function fetchContractList(
 ): Promise<TyLifeListResponse> {
   assertServerEnv();
 
-  const body: TyLifeListRequest = { page, row_per_page: rowPerPage };
+  // TY Life API는 pageInfo 래퍼 구조 사용
+  const body = { pageInfo: { page: String(page), row_per_page: rowPerPage } };
 
   const res = await fetchWithRetry(`${TYLIFE_BASE_URL}/contract/list`, {
     method: 'POST',
-    headers: buildHeaders(),
+    headers: buildListHeaders(),
     body: JSON.stringify(body),
   });
 
@@ -158,7 +176,7 @@ export async function fetchContractDetailHtml(id: string): Promise<string> {
     `${TYLIFE_BASE_URL}/contract/${encodeURIComponent(id)}`,
     {
       method: 'GET',
-      headers: buildHeaders(),
+      headers: buildDetailHeaders(),
     },
   );
 
