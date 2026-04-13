@@ -127,15 +127,9 @@ async function processSingleContract(
 
     // 3. 조직원 upsert (먼저 처리 - FK 의존)
     const memberData = normalizeSalesMember({
-      id: externalId,
-      contract_code: contractCode,
-      customer_name: detail.customer_name,
-      join_date: detail.join_date,
-      status: detail.status,
-      unit_count: detail.unit_count,
       sales_member_name: detail.sales_member_name,
-      org_name: detail.org_name,
-      sales_member_id: detail.sales_member_external_id,
+      sales_member_external_id: detail.sales_member_external_id,
+      org_rank: detail.org_name,
     });
     const salesMemberId = await upsertSalesMember(db, memberData);
 

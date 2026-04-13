@@ -3,7 +3,7 @@
  * SSN 원문은 이 모듈에서 masking 처리 후 폐기.
  */
 
-import type { TyLifeContractDetail, TyLifeContractListItem } from '../types/sync';
+import type { TyLifeContractDetail } from '../types/sync';
 import type { CustomerInsert } from '../types/customer';
 import type { ContractInsert, ContractStatus, ProductType, WatchFitType, JoinMethodType } from '../types/contract';
 import type { OrganizationMemberInsert } from '../types/organization';
@@ -116,17 +116,25 @@ export function normalizeContract(
 // 조직원 정규화
 // ─────────────────────────────────────────────
 
+/** normalizeSalesMember가 실제로 필요로 하는 최소 필드 */
+export interface SalesMemberSource {
+  sales_member_name: string;
+  sales_member_external_id: string;
+  /** 직급 추론용 — org_name 또는 rank 문자열 */
+  org_rank?: string;
+}
+
 /**
- * 리스트 아이템에서 담당 사원 OrganizationMemberInsert 생성.
- * 직급은 org_name 또는 별도 필드에서 추론 — TODO: 실제 구조 확인 필요
+ * 담당 사원 정보로 OrganizationMemberInsert 생성.
+ * TyLifeContractDetail에서 추출한 값을 직접 전달.
  */
 export function normalizeSalesMember(
-  item: TyLifeContractListItem,
+  item: SalesMemberSource,
 ): OrganizationMemberInsert {
   return {
-    name: item['sales_member_name'] as string ?? '',
-    rank: inferRank(item['org_rank'] as string ?? ''),
-    external_id: item['sales_member_id'] as string ?? null,
+    name: item.sales_member_name,
+    rank: inferRank(item.org_rank ?? ''),
+    external_id: item.sales_member_external_id || null,
     is_active: true,
   };
 }
