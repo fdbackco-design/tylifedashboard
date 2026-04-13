@@ -81,6 +81,8 @@ export interface ParsedListItem {
   watch_fit_raw: string | null;
   /** goDetail(N) 에서 추출한 TY Life 내부 ID */
   external_id: string | null;
+  /** 원본 셀 매핑값 — source_snapshot_json 저장용 (키: list-tit, 값: list-cont) */
+  _snapshot: Record<string, string | null>;
 }
 
 /**

@@ -12,7 +12,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { runSync } from '@/lib/tylife/sync-service';
+import { runSync, syncContractPage } from '@/lib/tylife/sync-service';
 
 function isAuthorized(req: NextRequest): boolean {
   const authHeader = req.headers.get('Authorization');
@@ -49,6 +49,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     rowPerPage?: number;
     maxPage?: number;
     dryRun?: boolean;
+    /** 단일 페이지만 동기화 (테스트용) */
+    page?: number;
   } = {};
 
   try {
@@ -60,6 +62,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const triggeredBy = body.mode === 'auto' ? 'cron' : 'manual';
 
   try {
+    // page 지정 시 단일 페이지만 동기화
+    if (body.page != null) {
+      const result = await syncContractPage(
+        body.page,
+        { rowPerPage: body.rowPerPage, dryRun: body.dryRun },
+      );
+      return NextResponse.json({ success: true, result });
+    }
+
     const result = await runSync({
       triggeredBy,
       rowPerPage: body.rowPerPage,

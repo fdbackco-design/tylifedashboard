@@ -1,112 +1,103 @@
 /**
- * TY Life HTML 파서.
- * node-html-parser 기반. 서버 전용.
+ * TY Life HTML 파서 — cheerio 기반. 서버 전용.
  *
- * 1) parseContractListHtml  — POST /contract/list 응답의 data.listHtml 파싱
- * 2) parseContractDetailHtml — GET /contract/{id} 상세 HTML 파싱
+ * parseContractListHtml  : data.listHtml → ParsedListItem[]
+ * parseContractDetailHtml: GET /contract/{id} HTML → TyLifeContractDetail
+ * smokeTestListParser    : 예제 HTML로 파서 동작 검증
  */
 
-import { parse as parseHtml } from 'node-html-parser';
+import * as cheerio from 'cheerio';
 import type { ParsedListItem, TyLifeContractDetail } from '../types/sync';
 
 // ─────────────────────────────────────────────
 // 공통 유틸
 // ─────────────────────────────────────────────
 
-/** 빈 문자열과 "-" 를 null 로 정규화 */
+/** 공백 정리, "-" → null */
 function clean(value: string): string | null {
-  const trimmed = value.trim().replace(/\s+/g, ' ');
-  return trimmed === '' || trimmed === '-' ? null : trimmed;
+  const t = value.trim().replace(/\s+/g, ' ');
+  return t === '' || t === '-' ? null : t;
 }
 
 /**
- * 다양한 날짜 형식 → 'YYYY-MM-DD'.
- * - YYYY-MM-DD (그대로)
- * - YYYY.MM.DD / YYYY/MM/DD
- * - YYYYMMDD
+ * 날짜 문자열 → 'YYYY-MM-DD'.
+ * 지원 형식: YYYY-MM-DD / YYYY.MM.DD / YYYY/MM/DD / YYYYMMDD
  */
 export function normalizeDate(raw: string): string {
   if (!raw) return '';
   const s = raw.trim();
-
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-
-  const dotSlash = s.match(/^(\d{4})[./](\d{2})[./](\d{2})/);
-  if (dotSlash) return `${dotSlash[1]}-${dotSlash[2]}-${dotSlash[3]}`;
-
-  const compact = s.match(/^(\d{4})(\d{2})(\d{2})$/);
-  if (compact) return `${compact[1]}-${compact[2]}-${compact[3]}`;
-
+  const ds = s.match(/^(\d{4})[./](\d{2})[./](\d{2})/);
+  if (ds) return `${ds[1]}-${ds[2]}-${ds[3]}`;
+  const cs = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (cs) return `${cs[1]}-${cs[2]}-${cs[3]}`;
   return s;
 }
 
 // ─────────────────────────────────────────────
-// 1) 리스트 HTML 파서
+// 리스트 HTML 파서
 // ─────────────────────────────────────────────
 
 /**
- * data.listHtml 문자열을 받아 계약 행 배열 반환.
+ * data.listHtml 문자열 파싱 → ParsedListItem[].
  *
  * 예상 구조:
- * <div class="product-list-wrap">
- *   <div class="product-list" onclick="goDetail(132676)">
- *     <div class="list-cell">
- *       <div class="list-tit">순번</div>
- *       <div class="list-cont">1</div>
- *     </div>
- *     ...
- *   </div>
- * </div>
+ *   .product-list-wrap
+ *     .product-list[onclick="goDetail(N)"]
+ *       .list-cell
+ *         .list-tit  ← 키
+ *         .list-cont ← 값 (계약코드는 내부 <a> 텍스트)
  *
- * TODO: 실제 HTML 구조 확인 후 셀렉터 조정 필요
+ * TODO: 실제 응답 HTML 확인 후 셀렉터 보정 필요
  */
 export function parseContractListHtml(listHtml: string): ParsedListItem[] {
-  const root = parseHtml(listHtml);
-  const rows = root.querySelectorAll('.product-list');
-
+  const $ = cheerio.load(listHtml);
   const items: ParsedListItem[] = [];
 
-  for (const row of rows) {
+  $('.product-list').each((_idx, rowEl) => {
+    const row = $(rowEl);
+
     // goDetail(N) 에서 external_id 추출
-    const onclickAttr = row.getAttribute('onclick') ?? '';
-    const detailMatch = onclickAttr.match(/goDetail\((\d+)\)/);
+    const onclick = row.attr('onclick') ?? '';
+    const detailMatch = onclick.match(/goDetail\((\d+)\)/);
     const external_id = detailMatch ? detailMatch[1] : null;
 
-    // .list-cell 단위로 키/값 추출
+    // .list-cell 단위 키/값 맵 구성 + 원본 스냅샷
     const cellMap: Record<string, string> = {};
-    for (const cell of row.querySelectorAll('.list-cell')) {
-      const key = clean(cell.querySelector('.list-tit')?.text ?? '') ?? '';
-      const contEl = cell.querySelector('.list-cont');
+    const snapshot: Record<string, string | null> = {};
 
-      // 계약 코드처럼 <a> 태그에 들어있는 경우 우선
-      const aText = clean(contEl?.querySelector('a')?.text ?? '');
-      const rawText = clean(contEl?.text ?? '');
-      const value = aText ?? rawText ?? '';
+    row.find('.list-cell').each((_i, cellEl) => {
+      const cell = $(cellEl);
+      const key = cell.find('.list-tit').text().trim();
+      if (!key) return;
 
-      if (key) cellMap[key] = value;
-    }
+      const contEl = cell.find('.list-cont');
+      // 계약 코드처럼 <a> 안에 있는 경우 우선
+      const aText = contEl.find('a').first().text().trim();
+      const rawText = contEl.text().trim();
+      const value = aText || rawText;
 
-    // 셀 키 매핑 헬퍼 (키 이름 변형 대응)
+      cellMap[key] = value;
+      snapshot[key] = clean(value);
+    });
+
+    // 여러 키 이름 변형을 허용하는 getter
     const get = (...keys: string[]): string | null => {
       for (const k of keys) {
-        const v = cellMap[k];
-        if (v !== undefined && v !== '') return v;
+        const v = clean(cellMap[k] ?? '');
+        if (v !== null) return v;
       }
       return null;
     };
 
-    // 취소/반품 파싱
+    const contract_code = get('계약 코드', '계약코드');
+    if (!contract_code) return; // 헤더·빈 행 스킵
+
+    // 취소/반품: 값이 있고 'N' / '아니오' / '해당없음' 이 아니면 true
     const cancelRaw = get('취소/반품', '취소반품', '취소 반품');
     const is_cancelled =
       cancelRaw !== null &&
-      cancelRaw !== 'N' &&
-      cancelRaw !== '아니오' &&
-      cancelRaw !== '해당없음';
-
-    const contract_code = get('계약 코드', '계약코드') ?? '';
-
-    // 계약 코드 없는 행(헤더·빈 행 등) 스킵
-    if (!contract_code) continue;
+      !['n', '아니오', '해당없음', 'false'].includes(cancelRaw.toLowerCase());
 
     items.push({
       sequence_no_raw: get('순번'),
@@ -126,100 +117,93 @@ export function parseContractListHtml(listHtml: string): ParsedListItem[] {
       join_method_raw: get('가입 방법', '가입방법'),
       watch_fit_raw: get('워치/핏', '워치핏'),
       external_id,
+      // 원본 스냅샷을 ParsedListItem에 함께 전달
+      _snapshot: snapshot,
     });
-  }
+  });
 
   return items;
 }
 
 // ─────────────────────────────────────────────
-// 2) 상세 HTML 파서
+// 상세 HTML 파서
 // ─────────────────────────────────────────────
 
 /**
- * th/td 구조에서 label에 해당하는 값 추출.
- * TODO: 실제 HTML 구조 확인 후 셀렉터 보완 필요
+ * th/td·dt/dd 구조에서 label 매칭 값 추출.
+ * TODO: 실제 HTML 구조 확인 후 셀렉터 확정 필요
  */
 function extractByLabel(
-  root: ReturnType<typeof parseHtml>,
+  $: cheerio.CheerioAPI,
   ...labels: string[]
 ): string | null {
   for (const label of labels) {
-    // th → 같은 tr의 td
-    const ths = root.querySelectorAll('th');
-    for (const th of ths) {
-      if (th.text.trim().includes(label)) {
-        const td = th.closest('tr')?.querySelector('td');
-        if (td) return clean(td.text);
+    // th → 같은 tr 의 td
+    let found: string | null = null;
+    $('th').each((_i, el) => {
+      if (found) return false; // break
+      if ($(el).text().trim().includes(label)) {
+        const td = $(el).closest('tr').find('td').first();
+        found = clean(td.text());
       }
-    }
+    });
+    if (found) return found;
 
-    // dt → 다음 형제 dd
-    const dts = root.querySelectorAll('dt');
-    for (const dt of dts) {
-      if (dt.text.trim().includes(label)) {
-        const dd = dt.nextElementSibling;
-        if (dd?.tagName === 'DD') return clean(dd.text);
+    // dt → 다음 dd
+    $('dt').each((_i, el) => {
+      if (found) return false;
+      if ($(el).text().trim().includes(label)) {
+        const dd = $(el).next('dd');
+        found = clean(dd.text());
       }
-    }
-
-    // label 태그
-    const lbls = root.querySelectorAll('label');
-    for (const lbl of lbls) {
-      if (lbl.text.trim().includes(label)) {
-        const input = lbl.nextElementSibling;
-        if (input) return clean(input.getAttribute('value') ?? input.text);
-      }
-    }
+    });
+    if (found) return found;
   }
-
   return null;
 }
 
 /**
- * TY Life 계약 상세 HTML → TyLifeContractDetail.
- *
- * contractCode: 리스트에서 가져온 계약 코드 (상세 HTML에 없을 수도 있음)
- *
- * TODO: 실제 상세 페이지 HTML 구조 확인 후 각 라벨/셀렉터 확정 필요
- * TODO: SSN 노출 여부 확인 — 노출된다면 ssn_raw 파싱 후 즉시 masking 처리
+ * 상세 HTML → TyLifeContractDetail.
+ * 리스트에 없는 필드(물품명, 구좌수, 계약자 관계 등) 보강용.
+ * TODO: 실제 상세 페이지 HTML 구조 확인 후 라벨 확정 필요
  */
 export function parseContractDetailHtml(
   html: string,
   contractCode: string,
 ): TyLifeContractDetail {
-  const root = parseHtml(html);
+  const $ = cheerio.load(html);
 
-  const unitCountRaw = extractByLabel(root, '가입 구좌', '구좌');
-  const unitCount = unitCountRaw ? parseInt(unitCountRaw.replace(/[^\d]/g, ''), 10) : null;
+  const unitRaw = extractByLabel($, '가입 구좌', '구좌');
+  const unitCount = unitRaw ? parseInt(unitRaw.replace(/[^\d]/g, ''), 10) : null;
 
   return {
     contract_code: contractCode,
-    item_name: extractByLabel(root, '물품명', '품목명'),
-    unit_count: Number.isFinite(unitCount) && unitCount !== null && unitCount > 0
-      ? unitCount
-      : null,
-    relationship_to_contractor: extractByLabel(root, '계약자와의 관계', '관계'),
-    contractor_name: extractByLabel(root, '계약자'),
-    beneficiary_name: extractByLabel(root, '지정인', '수혜자'),
-    sales_member_external_id: extractByLabel(root, '사원 코드', '사원코드', '담당자 코드'),
-    parent_org_name: extractByLabel(root, '상위 소속', '상위소속', '레그'),
-    // TODO: 상세 페이지에 SSN 원문이 있으면 추출 후 즉시 masking 처리 필요
+    item_name: extractByLabel($, '물품명', '품목명'),
+    unit_count:
+      unitCount !== null && Number.isFinite(unitCount) && unitCount > 0
+        ? unitCount
+        : null,
+    relationship_to_contractor: extractByLabel($, '계약자와의 관계', '관계'),
+    contractor_name: extractByLabel($, '계약자'),
+    beneficiary_name: extractByLabel($, '지정인', '수혜자'),
+    sales_member_external_id: extractByLabel($, '사원 코드', '사원코드', '담당자 코드'),
+    parent_org_name: extractByLabel($, '상위 소속', '상위소속', '레그'),
+    // TODO: 상세 페이지에 SSN 원문이 노출되는 경우 추출 후 즉시 masking 처리
     ssn_raw: null,
   };
 }
 
 // ─────────────────────────────────────────────
-// 파서 smoke test (개발/디버깅용)
+// Smoke test (개발·디버깅용)
 // ─────────────────────────────────────────────
 
 /**
- * 예제 HTML로 파서 동작 검증.
- * 실제 API 응답을 받은 후 이 함수에 샘플을 넣어 매핑을 확인하세요.
+ * 예제 listHtml로 파서 동작 확인.
+ * 실제 API 응답을 받은 후 샘플을 이 함수에 넣어 매핑을 검증하세요.
  *
  * 사용 예:
  *   import { smokeTestListParser } from '@/lib/tylife/html-parser';
- *   console.log(smokeTestListParser());
+ *   console.log(JSON.stringify(smokeTestListParser(), null, 2));
  */
 export function smokeTestListParser(): ParsedListItem[] {
   const sampleHtml = `
@@ -242,8 +226,25 @@ export function smokeTestListParser(): ParsedListItem[] {
         <div class="list-cell"><div class="list-tit">가입 방법</div><div class="list-cont">해피콜</div></div>
         <div class="list-cell"><div class="list-tit">워치/핏</div><div class="list-cont">갤럭시워치</div></div>
       </div>
+      <div class="product-list" onclick="goDetail(132677)">
+        <div class="list-cell"><div class="list-tit">순번</div><div class="list-cont">2</div></div>
+        <div class="list-cell"><div class="list-tit">렌탈신청번호</div><div class="list-cont">특이사항 있음</div></div>
+        <div class="list-cell"><div class="list-tit">고객명</div><div class="list-cont">이영희</div></div>
+        <div class="list-cell"><div class="list-tit">주민번호</div><div class="list-cont">850512-2******</div></div>
+        <div class="list-cell"><div class="list-tit">계약 코드</div><div class="list-cont"><a>TY-2024-00002</a></div></div>
+        <div class="list-cell"><div class="list-tit">소속</div><div class="list-cont">-</div></div>
+        <div class="list-cell"><div class="list-tit">담당자</div><div class="list-cont">박민수</div></div>
+        <div class="list-cell"><div class="list-tit">상품명</div><div class="list-cont">일반</div></div>
+        <div class="list-cell"><div class="list-tit">연락처</div><div class="list-cont">01098765432</div></div>
+        <div class="list-cell"><div class="list-tit">가입 상태</div><div class="list-cont">가입</div></div>
+        <div class="list-cell"><div class="list-tit">가입일</div><div class="list-cont">2024.04.01</div></div>
+        <div class="list-cell"><div class="list-tit">취소/반품</div><div class="list-cont">Y</div></div>
+        <div class="list-cell"><div class="list-tit">해피콜 일시</div><div class="list-cont">-</div></div>
+        <div class="list-cell"><div class="list-tit">해피콜 결과</div><div class="list-cont">-</div></div>
+        <div class="list-cell"><div class="list-tit">가입 방법</div><div class="list-cont">간편가입</div></div>
+        <div class="list-cell"><div class="list-tit">워치/핏</div><div class="list-cont">해당없음</div></div>
+      </div>
     </div>
   `;
-
   return parseContractListHtml(sampleHtml);
 }

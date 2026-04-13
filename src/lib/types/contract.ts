@@ -47,6 +47,8 @@ export interface Contract {
   affiliation_name: string | null;
   /** 해피콜 결과 (list HTML에서 추출) */
   happycall_result: string | null;
+  /** 리스트 HTML 원본 셀 매핑값 (감사용) */
+  source_snapshot_json: Record<string, string | null> | null;
   created_at: string;
   updated_at: string;
 }
@@ -73,6 +75,8 @@ export interface ContractInsert {
   affiliation_name?: string | null;
   happycall_result?: string | null;
   raw_data?: Record<string, unknown>;
+  /** 리스트 HTML에서 파싱한 원본 셀 매핑값 (키: list-tit, 값: list-cont) */
+  source_snapshot_json?: Record<string, string | null> | null;
 }
 
 export interface ContractUpdate extends Partial<ContractInsert> {}
