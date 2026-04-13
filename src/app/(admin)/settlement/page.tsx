@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { formatKRW } from '@/lib/settlement/calculator';
 import type { RankType } from '@/lib/types';
+import RecalcButton from './RecalcButton';
 
 export const metadata: Metadata = { title: '정산 현황' };
 export const dynamic = 'force-dynamic';
@@ -89,10 +90,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
           </p>
         </div>
 
-        {/* 재계산 버튼 (TODO: 클라이언트 액션) */}
-        <div className="text-sm text-gray-400 border border-gray-200 rounded px-3 py-2 bg-white">
-          재계산: POST /api/settlement
-        </div>
+        <RecalcButton yearMonth={yearMonth} />
       </div>
 
       {/* 필터 */}
