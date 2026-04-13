@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-sidebar: #1e293b;
+  --color-sidebar-text: #94a3b8;
+  --color-sidebar-active: #f8fafc;
+}
+
+body {
+  @apply bg-gray-50 text-gray-900;
+}
