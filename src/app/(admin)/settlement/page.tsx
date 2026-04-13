@@ -168,7 +168,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
                 </tr>
               )}
               {(settlements ?? []).map((s) => {
-                const member = s.organization_members as { name: string } | null;
+                const member = s.organization_members as unknown as { name: string } | null;
                 return (
                   <tr key={s.id as string} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium">

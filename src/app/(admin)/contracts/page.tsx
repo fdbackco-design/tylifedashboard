@@ -147,8 +147,8 @@ export default async function ContractsPage({ searchParams }: PageProps) {
                 </tr>
               )}
               {(contracts ?? []).map((c) => {
-                const customer = c.customers as { name: string } | null;
-                const member = c.organization_members as { name: string } | null;
+                const customer = c.customers as unknown as { name: string } | null;
+                const member = c.organization_members as unknown as { name: string } | null;
                 const status = c.status as ContractStatus;
 
                 return (

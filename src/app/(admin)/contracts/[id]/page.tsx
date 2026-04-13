@@ -29,12 +29,12 @@ export default async function ContractDetailPage({ params }: PageProps) {
 
   if (error || !contract) notFound();
 
-  const customer = contract.customers as {
+  const customer = contract.customers as unknown as {
     id: string; name: string; birth_date: string;
     gender: string; ssn_masked: string; phone: string;
   } | null;
 
-  const member = contract.organization_members as {
+  const member = contract.organization_members as unknown as {
     id: string; name: string; rank: string; phone: string | null;
   } | null;
 
