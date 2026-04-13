@@ -1,7 +1,14 @@
 /**
- * POST /api/sync
- * 수동 동기화 실행 Route Handler.
+ * POST /api/sync — 수동 동기화 실행
+ * GET  /api/sync — 최근 sync_runs 조회
+ *
  * Authorization: Bearer {SYNC_API_SECRET} 헤더 필수.
+ *
+ * POST body:
+ *   mode?        : 'auto' | 'manual'
+ *   rowPerPage?  : number  (기본 50)
+ *   maxPage?     : number  (미설정 시 전체)
+ *   dryRun?      : boolean (기본 false)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -19,7 +26,6 @@ function isAuthorized(req: NextRequest): boolean {
     return false;
   }
 
-  // 타이밍 공격 방어를 위한 상수 시간 비교
   const encoder = new TextEncoder();
   const tokenBytes = encoder.encode(token);
   const secretBytes = encoder.encode(secret);
@@ -35,35 +41,39 @@ function isAuthorized(req: NextRequest): boolean {
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!isAuthorized(req)) {
-    return NextResponse.json(
-      { error: 'Unauthorized' },
-      { status: 401 },
-    );
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  let body: { mode?: string } = {};
+  let body: {
+    mode?: string;
+    rowPerPage?: number;
+    maxPage?: number;
+    dryRun?: boolean;
+  } = {};
+
   try {
     body = await req.json();
   } catch {
-    // body 없는 경우 무시
+    // body 없는 경우 기본값 사용
   }
 
   const triggeredBy = body.mode === 'auto' ? 'cron' : 'manual';
 
   try {
-    const result = await runSync({ triggeredBy });
+    const result = await runSync({
+      triggeredBy,
+      rowPerPage: body.rowPerPage,
+      maxPage: body.maxPage,
+      dryRun: body.dryRun,
+    });
     return NextResponse.json({ success: true, result });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     console.error('[api/sync] 동기화 실패:', message);
-    return NextResponse.json(
-      { success: false, error: message },
-      { status: 500 },
-    );
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
 
-/** GET: 최근 sync_runs 조회 */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!isAuthorized(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

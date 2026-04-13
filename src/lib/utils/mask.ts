@@ -1,6 +1,50 @@
 import type { ParsedSsn } from '../types/customer';
 
 /**
+ * 마스킹된 주민번호("YYMMDD-G******")에서 birth_date / gender 파생.
+ * 리스트 HTML에서 이미 마스킹된 형태로 노출될 때 사용.
+ * 원문이 없어도 앞 7자리(성별 자리 포함)에서 파생 가능.
+ *
+ * @param masked - "901201-1******" 형식
+ */
+export function parseMaskedSsn(masked: string): ParsedSsn {
+  // 하이픈·공백 제거
+  const cleaned = masked.replace(/[\s-]/g, '');
+
+  if (cleaned.length < 7) {
+    throw new Error(`parseMaskedSsn: 형식 오류 — "${masked}"`);
+  }
+
+  const yy = cleaned.slice(0, 2);
+  const mm = cleaned.slice(2, 4);
+  const dd = cleaned.slice(4, 6);
+  const genderDigit = cleaned[6];
+
+  const genderNum = parseInt(genderDigit, 10);
+  let gender: 'M' | 'F';
+  let century: string;
+
+  if (genderNum === 9 || genderNum === 0) {
+    century = '18';
+    gender = genderNum === 9 ? 'M' : 'F';
+  } else if (genderNum === 1 || genderNum === 2) {
+    century = '19';
+    gender = genderNum === 1 ? 'M' : 'F';
+  } else if (genderNum === 3 || genderNum === 4) {
+    century = '20';
+    gender = genderNum === 3 ? 'M' : 'F';
+  } else {
+    throw new Error(`parseMaskedSsn: 성별 자리 오류 — "${genderDigit}"`);
+  }
+
+  return {
+    birth_date: `${century}${yy}-${mm}-${dd}`,
+    gender,
+    ssn_masked: `${yy}${mm}${dd}-${genderDigit}******`,
+  };
+}
+
+/**
  * 주민등록번호 원문을 파싱하여 마스킹 처리.
  * 원문은 이 함수 내에서만 사용하고 절대 반환하지 않음.
  *

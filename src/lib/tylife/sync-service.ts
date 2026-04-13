@@ -4,18 +4,26 @@
  *
  * 흐름:
  * 1. sync_runs 레코드 생성 (running)
- * 2. 전체 계약 목록 페이지 순회
- * 3. 각 계약 상세 HTML 파싱
- * 4. 정규화 → Supabase upsert
- * 5. sync_runs 완료 처리
+ * 2. 리스트 페이지 순회 → parseContractListHtml → ParsedListItem[]
+ * 3. 각 항목:
+ *    a. 리스트 데이터로 customer / member / contract upsert (부분)
+ *    b. 상세 HTML fetch → parseContractDetailHtml
+ *    c. 상세 데이터로 contract 보강 upsert
+ * 4. sync_runs 완료 처리
  */
 
 import { createAdminSupabaseClient } from '../supabase/server';
-import { fetchAllContractPages, fetchContractDetailHtml } from './client';
-import { parseContractDetailHtml } from './html-parser';
-import { normalizeCustomer, normalizeContract, normalizeSalesMember } from './normalize';
-import type { SyncResult, SyncRun } from '../types/sync';
+import { fetchContractList, fetchContractDetailHtml } from './client';
+import { parseContractListHtml, parseContractDetailHtml } from './html-parser';
+import {
+  normalizeCustomerFromList,
+  normalizeContractFromList,
+  mergeDetailIntoContract,
+  normalizeSalesMember,
+} from './normalize';
+import type { SyncResult, SyncOptions, SyncRun, ParsedListItem } from '../types/sync';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { ContractInsert } from '../types/contract';
 
 // ─────────────────────────────────────────────
 // 로그 헬퍼
@@ -44,7 +52,26 @@ async function upsertSalesMember(
   db: SupabaseClient,
   memberData: ReturnType<typeof normalizeSalesMember>,
 ): Promise<string | null> {
-  if (!memberData.external_id) return null;
+  // external_id 없으면 이름으로 조회 후 없으면 insert
+  if (!memberData.external_id) {
+    const { data: existing } = await db
+      .from('organization_members')
+      .select('id')
+      .eq('name', memberData.name)
+      .limit(1)
+      .single();
+
+    if (existing) return (existing as { id: string }).id;
+
+    const { data, error } = await db
+      .from('organization_members')
+      .insert(memberData)
+      .select('id')
+      .single();
+
+    if (error) throw new Error(`organization_members insert 실패: ${error.message}`);
+    return (data as { id: string }).id;
+  }
 
   const { data, error } = await db
     .from('organization_members')
@@ -58,9 +85,10 @@ async function upsertSalesMember(
 
 async function upsertCustomer(
   db: SupabaseClient,
-  customerData: ReturnType<typeof normalizeCustomer>,
+  customerData: ReturnType<typeof normalizeCustomerFromList>,
 ): Promise<string> {
-  // ssn_masked를 upsert 기준으로 사용 (동일 고객 중복 방지)
+  if (!customerData) throw new Error('customerData가 null입니다');
+
   const { data, error } = await db
     .from('customers')
     .upsert(customerData, { onConflict: 'ssn_masked' })
@@ -73,15 +101,13 @@ async function upsertCustomer(
 
 async function upsertContract(
   db: SupabaseClient,
-  contractData: ReturnType<typeof normalizeContract>,
-  previousStatus?: string,
+  contractData: ContractInsert,
 ): Promise<{ id: string; isNew: boolean }> {
-  // 기존 계약 조회 (상태 변경 이력 기록용)
   const { data: existing } = await db
     .from('contracts')
     .select('id, status')
     .eq('contract_code', contractData.contract_code)
-    .single();
+    .maybeSingle();
 
   const { data, error } = await db
     .from('contracts')
@@ -93,9 +119,9 @@ async function upsertContract(
 
   const contractId = (data as { id: string }).id;
   const isNew = !existing;
+  const existingStatus = existing ? (existing as { status: string }).status : null;
 
   // 상태 변경 이력 기록
-  const existingStatus = existing ? (existing as { status: string }).status : null;
   if (existingStatus && existingStatus !== contractData.status) {
     await db.from('contract_status_histories').insert({
       contract_id: contractId,
@@ -115,38 +141,74 @@ async function upsertContract(
 async function processSingleContract(
   db: SupabaseClient,
   runId: string,
-  externalId: string,
-  contractCode: string,
+  item: ParsedListItem,
+  dryRun: boolean,
 ): Promise<'created' | 'updated' | 'error'> {
   try {
-    // 1. 상세 HTML 수집
-    const html = await fetchContractDetailHtml(externalId);
+    // ── Phase 1: 리스트 데이터로 기본 upsert ──
 
-    // 2. HTML 파싱 (SSN 원문은 여기서 파싱, detail.ssn_raw에 임시 보관)
-    const detail = parseContractDetailHtml(html, contractCode);
+    const customerData = normalizeCustomerFromList(item);
+    if (!customerData) {
+      throw new Error(`고객 SSN 마스킹 파싱 실패 (ssn_masked: "${item.ssn_masked}")`);
+    }
 
-    // 3. 조직원 upsert (먼저 처리 - FK 의존)
     const memberData = normalizeSalesMember({
-      sales_member_name: detail.sales_member_name,
-      sales_member_external_id: detail.sales_member_external_id,
-      org_rank: detail.org_name,
+      sales_member_name: item.sales_member_name ?? '',
+      sales_member_external_id: null, // Phase 2 에서 보강
+      org_rank: item.affiliation_name,
     });
-    const salesMemberId = await upsertSalesMember(db, memberData);
 
-    // 4. 고객 upsert (SSN 원문은 normalizeCustomer 내에서 masking 후 폐기)
-    const customerData = normalizeCustomer(detail);
+    if (dryRun) {
+      await log(db, runId, 'info', `[dry-run] 파싱 성공: ${item.contract_code}`, {
+        customer_name: item.customer_name,
+        external_id: item.external_id,
+      });
+      return 'updated';
+    }
+
     const customerId = await upsertCustomer(db, customerData);
+    const salesMemberId = item.sales_member_name
+      ? await upsertSalesMember(db, memberData)
+      : null;
 
-    // 5. 계약 upsert
-    const contractData = normalizeContract(detail, customerId, salesMemberId);
-    const { isNew } = await upsertContract(db, contractData);
+    const contractBase = normalizeContractFromList(item, customerId, salesMemberId);
 
-    await log(db, runId, 'info', `계약 ${isNew ? '생성' : '갱신'}: ${contractCode}`);
+    // ── Phase 2: 상세 HTML fetch → 보강 ──
+
+    let contractFinal: ContractInsert = contractBase;
+
+    if (item.external_id) {
+      try {
+        const html = await fetchContractDetailHtml(item.external_id);
+        const detail = parseContractDetailHtml(html, item.contract_code);
+
+        contractFinal = mergeDetailIntoContract(contractBase, detail);
+
+        // 사원 external_id 확보 → member upsert 재시도
+        if (detail.sales_member_external_id && salesMemberId) {
+          await db
+            .from('organization_members')
+            .update({ external_id: detail.sales_member_external_id })
+            .eq('id', salesMemberId);
+        }
+      } catch (detailErr) {
+        const msg = detailErr instanceof Error ? detailErr.message : String(detailErr);
+        await log(db, runId, 'warn', `상세 fetch 실패 (리스트 데이터로 저장): ${item.contract_code}`, {
+          external_id: item.external_id,
+          error: msg,
+        });
+        // 상세 실패 시 리스트 데이터로만 저장 (계속 진행)
+      }
+    }
+
+    const { isNew } = await upsertContract(db, contractFinal);
+
+    await log(db, runId, 'info', `계약 ${isNew ? '생성' : '갱신'}: ${item.contract_code}`);
     return isNew ? 'created' : 'updated';
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await log(db, runId, 'error', `계약 처리 실패: ${contractCode}`, {
-      external_id: externalId,
+    await log(db, runId, 'error', `계약 처리 실패: ${item.contract_code}`, {
+      external_id: item.external_id,
       error: message,
     });
     return 'error';
@@ -154,20 +216,53 @@ async function processSingleContract(
 }
 
 // ─────────────────────────────────────────────
+// 페이지 순회 헬퍼
+// ─────────────────────────────────────────────
+
+async function fetchAllPages(
+  rowPerPage: number,
+  maxPage: number | undefined,
+  onPage: (page: number, count: number) => void,
+): Promise<ParsedListItem[]> {
+  const all: ParsedListItem[] = [];
+  let page = 1;
+
+  while (true) {
+    if (maxPage && page > maxPage) break;
+
+    const res = await fetchContractList(page, rowPerPage);
+    const listHtml = res.data?.listHtml ?? '';
+    const items = parseContractListHtml(listHtml);
+
+    if (items.length === 0) break;
+
+    all.push(...items);
+    onPage(page, all.length);
+
+    // 마지막 페이지 판정: rowPerPage 보다 적으면 종료
+    if (items.length < rowPerPage) break;
+
+    page++;
+  }
+
+  return all;
+}
+
+// ─────────────────────────────────────────────
 // 메인 sync 실행
 // ─────────────────────────────────────────────
 
-export interface SyncOptions {
-  triggeredBy?: string;
-  rowPerPage?: number;
-}
-
 export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
-  const { triggeredBy = 'manual', rowPerPage = 50 } = options;
+  const {
+    triggeredBy = 'manual',
+    rowPerPage = 50,
+    maxPage,
+    dryRun = false,
+  } = options;
+
   const db = createAdminSupabaseClient();
   const startedAt = Date.now();
 
-  // sync_runs 레코드 생성
   const { data: runData, error: runError } = await db
     .from('sync_runs')
     .insert({ status: 'running', triggered_by: triggeredBy })
@@ -185,31 +280,26 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
   let totalErrors = 0;
 
   try {
-    await log(db, runId, 'info', '동기화 시작', { row_per_page: rowPerPage });
+    await log(db, runId, 'info', `동기화 시작${dryRun ? ' [dry-run]' : ''}`, {
+      row_per_page: rowPerPage,
+      max_page: maxPage ?? 'unlimited',
+    });
 
-    // 전체 계약 목록 수집
-    const allItems = await fetchAllContractPages(rowPerPage, (page, total) => {
-      console.log(`[sync] 페이지 ${page} / ${Math.ceil(total / rowPerPage)} 수집 중...`);
+    const allItems = await fetchAllPages(rowPerPage, maxPage, (page, count) => {
+      console.log(`[sync] 페이지 ${page} 수집 — 누적 ${count}건`);
     });
 
     totalFetched = allItems.length;
     await log(db, runId, 'info', `총 ${totalFetched}건 목록 수집 완료`);
 
-    // 개별 처리
     for (const item of allItems) {
-      const result = await processSingleContract(
-        db,
-        runId,
-        String(item.id),
-        item.contract_code,
-      );
+      const result = await processSingleContract(db, runId, item, dryRun);
 
       if (result === 'created') totalCreated++;
       else if (result === 'updated') totalUpdated++;
       else if (result === 'error') totalErrors++;
     }
 
-    // 완료 처리
     await db
       .from('sync_runs')
       .update({
@@ -227,6 +317,7 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
       total_created: totalCreated,
       total_updated: totalUpdated,
       total_errors: totalErrors,
+      dry_run: dryRun,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

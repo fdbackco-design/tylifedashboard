@@ -1,42 +1,32 @@
 /**
  * TY Life 원본 데이터 → 도메인 모델 변환.
- * SSN 원문은 이 모듈에서 masking 처리 후 폐기.
+ *
+ * - normalizeCustomerFromList  : 리스트 파싱 결과 → CustomerInsert
+ * - normalizeContractFromList  : 리스트 파싱 결과 → ContractInsert (부분)
+ * - mergeDetailIntoContract    : 상세 파싱으로 ContractInsert 보강
+ * - normalizeSalesMember       : 담당자 → OrganizationMemberInsert
+ *
+ * SSN 원문(ssn_raw)은 normalizeCustomerFromDetail 에서만 처리.
  */
 
-import type { TyLifeContractDetail } from '../types/sync';
+import type { ParsedListItem, TyLifeContractDetail } from '../types/sync';
 import type { CustomerInsert } from '../types/customer';
-import type { ContractInsert, ContractStatus, ProductType, WatchFitType, JoinMethodType } from '../types/contract';
-import type { OrganizationMemberInsert } from '../types/organization';
-import type { RankType } from '../types/organization';
-import { parseSsn, parseRentalOrMemo } from '../utils/mask';
+import type {
+  ContractInsert,
+  ContractStatus,
+  ProductType,
+  WatchFitType,
+  JoinMethodType,
+} from '../types/contract';
+import type { OrganizationMemberInsert, RankType } from '../types/organization';
+import { parseSsn, parseMaskedSsn, parseRentalOrMemo } from '../utils/mask';
+import { normalizeDate } from './html-parser';
 
 // ─────────────────────────────────────────────
-// 고객 정규화
+// 열거형 정규화 헬퍼
 // ─────────────────────────────────────────────
 
-/**
- * 상세 HTML 파싱 결과에서 CustomerInsert 생성.
- * SSN 원문(ssn_raw)은 이 함수에서 masking 후 즉시 사용 불가.
- */
-export function normalizeCustomer(detail: TyLifeContractDetail): CustomerInsert {
-  const parsed = parseSsn(detail.ssn_raw);
-  // ssn_raw는 여기서 소비됨 — 이후 참조 금지
-
-  return {
-    name: detail.customer_name,
-    birth_date: parsed.birth_date,
-    gender: parsed.gender,
-    ssn_masked: parsed.ssn_masked,
-    phone: detail.phone,
-  };
-}
-
-// ─────────────────────────────────────────────
-// 계약 정규화
-// ─────────────────────────────────────────────
-
-/** TY Life 상태 문자열 → ContractStatus */
-function normalizeStatus(raw: string): ContractStatus {
+export function normalizeStatus(raw: string): ContractStatus {
   const map: Record<string, ContractStatus> = {
     준비: '준비',
     대기: '대기',
@@ -56,59 +46,130 @@ function normalizeStatus(raw: string): ContractStatus {
   return map[raw.trim()] ?? '준비';
 }
 
-/** TY Life 상품명 → ProductType */
-function normalizeProductType(raw: string): ProductType {
+export function normalizeProductType(raw: string): ProductType {
   if (raw.includes('갤럭시케어') || raw.includes('TY')) return 'TY갤럭시케어';
   if (raw === '무') return '무';
   return '일반';
 }
 
-/** TY Life 워치/핏 → WatchFitType */
-function normalizeWatchFit(raw: string): WatchFitType {
+export function normalizeWatchFit(raw: string): WatchFitType {
   if (raw.includes('워치')) return '갤럭시워치';
   if (raw.includes('핏')) return '갤럭시핏';
   return '해당없음';
 }
 
-/** TY Life 가입방법 → JoinMethodType */
-function normalizeJoinMethod(raw: string): JoinMethodType {
+export function normalizeJoinMethod(raw: string): JoinMethodType {
   if (raw.includes('해피콜')) return '해피콜';
   if (raw.includes('간편')) return '간편가입';
   return '기타';
 }
 
+// ─────────────────────────────────────────────
+// 고객 정규화
+// ─────────────────────────────────────────────
+
 /**
- * 상세 HTML 파싱 결과에서 ContractInsert 생성.
- * customer_id는 DB upsert 후 할당 → 빈 문자열로 초기화 후 교체.
+ * 리스트 HTML 파싱 결과에서 CustomerInsert 생성.
+ * ssn_masked("YYMMDD-G******")에서 birth_date / gender 파생.
+ * 파싱 실패 시 null 반환 (호출자가 처리).
  */
-export function normalizeContract(
-  detail: TyLifeContractDetail,
+export function normalizeCustomerFromList(item: ParsedListItem): CustomerInsert | null {
+  if (!item.ssn_masked) return null;
+
+  try {
+    const parsed = parseMaskedSsn(item.ssn_masked);
+    return {
+      name: item.customer_name,
+      birth_date: parsed.birth_date,
+      gender: parsed.gender,
+      ssn_masked: parsed.ssn_masked,
+      phone: item.phone ?? '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 상세 HTML 파싱 결과로 고객 정보 보강.
+ * ssn_raw 가 있을 경우 masking 처리 후 즉시 폐기.
+ * TODO: 상세 페이지에 SSN이 노출되는 경우 이 함수 사용
+ */
+export function normalizeCustomerFromDetail(detail: TyLifeContractDetail): Partial<CustomerInsert> | null {
+  if (!detail.ssn_raw) return null;
+
+  try {
+    const parsed = parseSsn(detail.ssn_raw);
+    // ssn_raw 는 여기서 소비됨 — 반환 객체에 포함하지 않음
+    return {
+      birth_date: parsed.birth_date,
+      gender: parsed.gender,
+      ssn_masked: parsed.ssn_masked,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────
+// 계약 정규화
+// ─────────────────────────────────────────────
+
+/**
+ * 리스트 파싱 결과 → ContractInsert.
+ * unit_count 는 이 단계에서 확정 불가 → 1 (placeholder).
+ * 상세 fetch 후 mergeDetailIntoContract() 로 보강 필요.
+ */
+export function normalizeContractFromList(
+  item: ParsedListItem,
   customerId: string,
   salesMemberId: string | null,
 ): ContractInsert {
-  const { rental_request_no, memo } = parseRentalOrMemo(
-    detail.rental_request_no ?? detail.memo ?? null,
-  );
+  const { rental_request_no, memo } = parseRentalOrMemo(item.rental_or_memo);
 
   return {
-    contract_code: detail.contract_code,
+    contract_code: item.contract_code,
     rental_request_no,
     memo,
     customer_id: customerId,
     sales_member_id: salesMemberId,
-    join_date: detail.join_date,
-    product_type: normalizeProductType(detail.product_type),
-    item_name: detail.item_name,
-    watch_fit: normalizeWatchFit(detail.watch_fit),
-    unit_count: detail.unit_count,
-    join_method: normalizeJoinMethod(detail.join_method),
-    status: normalizeStatus(detail.status),
-    happy_call_at: detail.happy_call_at,
-    is_cancelled: detail.is_cancelled,
-    contractor_name: detail.contractor_name,
-    beneficiary_name: detail.beneficiary_name,
-    relationship_to_contractor: detail.relationship_to_contractor,
-    external_id: detail.contract_code, // contract_code를 external_id로 사용
+    join_date: normalizeDate(item.joined_at_raw ?? ''),
+    product_type: normalizeProductType(item.product_type_raw ?? ''),
+    // 상세에서 업데이트 — DB 제약 unit_count > 0 충족용 placeholder
+    item_name: '헬스365 고주파 발마사지기 [Health365]',
+    watch_fit: normalizeWatchFit(item.watch_fit_raw ?? ''),
+    unit_count: 1,
+    join_method: normalizeJoinMethod(item.join_method_raw ?? ''),
+    status: normalizeStatus(item.status_raw ?? ''),
+    happy_call_at: item.happycall_at_raw ?? null,
+    is_cancelled: item.is_cancelled,
+    external_id: item.external_id,
+    affiliation_name: item.affiliation_name,
+    happycall_result: item.happycall_result,
+    contractor_name: null,
+    beneficiary_name: null,
+    relationship_to_contractor: null,
+  };
+}
+
+/**
+ * 상세 파싱 결과로 ContractInsert 보강.
+ * unit_count, item_name, 계약자 관계 등 상세에서만 얻을 수 있는 값 병합.
+ */
+export function mergeDetailIntoContract(
+  base: ContractInsert,
+  detail: TyLifeContractDetail,
+): ContractInsert {
+  return {
+    ...base,
+    item_name: detail.item_name ?? base.item_name,
+    unit_count: (detail.unit_count != null && detail.unit_count > 0)
+      ? detail.unit_count
+      : base.unit_count,
+    contractor_name: detail.contractor_name ?? base.contractor_name,
+    beneficiary_name: detail.beneficiary_name ?? base.beneficiary_name,
+    relationship_to_contractor:
+      detail.relationship_to_contractor ?? base.relationship_to_contractor,
   };
 }
 
@@ -116,17 +177,15 @@ export function normalizeContract(
 // 조직원 정규화
 // ─────────────────────────────────────────────
 
-/** normalizeSalesMember가 실제로 필요로 하는 최소 필드 */
 export interface SalesMemberSource {
   sales_member_name: string;
-  sales_member_external_id: string;
-  /** 직급 추론용 — org_name 또는 rank 문자열 */
-  org_rank?: string;
+  sales_member_external_id: string | null;
+  org_rank?: string | null;
 }
 
 /**
- * 담당 사원 정보로 OrganizationMemberInsert 생성.
- * TyLifeContractDetail에서 추출한 값을 직접 전달.
+ * 담당 사원 정보 → OrganizationMemberInsert.
+ * external_id 가 있어야 upsert 중복 방지 가능.
  */
 export function normalizeSalesMember(
   item: SalesMemberSource,
@@ -139,7 +198,7 @@ export function normalizeSalesMember(
   };
 }
 
-/** 소속명/직책 문자열에서 직급 추론 */
+/** 소속명 / 직책 문자열에서 직급 추론 */
 export function inferRank(raw: string): RankType {
   if (!raw) return '영업사원';
   if (raw.includes('본사')) return '본사';

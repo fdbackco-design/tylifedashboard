@@ -38,9 +38,9 @@ export type {
   SyncLog,
   SyncStatus,
   LogLevel,
-  TyLifeListRequest,
-  TyLifeListResponse,
-  TyLifeContractListItem,
+  TyLifeListApiResponse,
+  ParsedListItem,
   TyLifeContractDetail,
   SyncResult,
+  SyncOptions,
 } from './sync';

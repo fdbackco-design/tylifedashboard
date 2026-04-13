@@ -26,64 +26,90 @@ export interface SyncLog {
 // TY Life 외부 API 응답 타입
 // ─────────────────────────────────────────────
 
-/** POST /contract/list 요청 */
-export interface TyLifeListRequest {
-  page: number;
-  row_per_page: number;
-}
-
 /**
- * POST /contract/list 응답 내 계약 아이템
- * TODO: 실제 API 응답 구조 확인 후 필드 확정 필요
+ * POST /contract/list 응답.
+ * 실제 계약 데이터는 data.listHtml (HTML 문자열) 안에 있음.
+ * TODO: 실제 API 응답 확인 후 totalCount 필드명 확정 필요
  */
-export interface TyLifeContractListItem {
-  id: string;
-  contract_code: string;
-  customer_name: string;
-  join_date: string;
-  status: string;
-  unit_count: number;
-  sales_member_name: string;
-  org_name: string;
-  product_type: string;
-  [key: string]: unknown; // 추가 필드 허용 (정규화 단계에서 처리)
-}
-
-/** POST /contract/list 응답 */
-export interface TyLifeListResponse {
-  data: TyLifeContractListItem[];
-  total: number;
-  page: number;
-  row_per_page: number;
+export interface TyLifeListApiResponse {
+  data: {
+    listHtml: string;
+    /** TODO: 실제 필드명 확인 필요 (totalCount / total_count / pageInfo.totalCount 등) */
+    totalCount?: number;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
 }
 
 /**
- * GET /contract/{id} HTML 파싱 결과
- * TODO: 실제 HTML 구조 확인 후 필드 확정 필요
+ * listHtml에서 파싱한 계약 한 행.
+ * .product-list-wrap > .product-list 단위.
+ * 값이 없거나 "-" 이면 null.
+ */
+export interface ParsedListItem {
+  /** 순번 (표시용 raw 문자열) */
+  sequence_no_raw: string | null;
+  /** 렌탈신청번호 or 메모 raw — 숫자 판별은 normalize 단계 */
+  rental_or_memo: string | null;
+  /** 고객명 */
+  customer_name: string;
+  /** 주민번호 마스킹값 (예: "901201-1******") */
+  ssn_masked: string;
+  /** 계약 코드 (<a> 태그에서 추출) */
+  contract_code: string;
+  /** 소속 */
+  affiliation_name: string | null;
+  /** 담당자명 */
+  sales_member_name: string | null;
+  /** 상품명 raw */
+  product_type_raw: string | null;
+  /** 연락처 */
+  phone: string | null;
+  /** 가입 상태 raw */
+  status_raw: string | null;
+  /** 가입일 raw */
+  joined_at_raw: string | null;
+  /** 취소/반품 여부 */
+  is_cancelled: boolean;
+  /** 해피콜 일시 raw */
+  happycall_at_raw: string | null;
+  /** 해피콜 결과 */
+  happycall_result: string | null;
+  /** 가입 방법 raw */
+  join_method_raw: string | null;
+  /** 워치/핏 raw */
+  watch_fit_raw: string | null;
+  /** goDetail(N) 에서 추출한 TY Life 내부 ID */
+  external_id: string | null;
+}
+
+/**
+ * GET /contract/{id} HTML 파싱 결과.
+ * 리스트에 없는 필드를 보강하는 용도.
+ * TODO: 실제 HTML 구조 확인 후 셀렉터/필드명 확정 필요
  */
 export interface TyLifeContractDetail {
   contract_code: string;
-  customer_name: string;
-  ssn_raw: string; // 파싱 즉시 masking 처리 후 원문 폐기
-  phone: string;
-  rental_request_no: string | null;
-  memo: string | null;
-  join_date: string;
-  product_type: string;
-  item_name: string;
-  watch_fit: string;
-  unit_count: number;
-  join_method: string;
-  status: string;
-  happy_call_at: string | null;
-  is_cancelled: boolean;
-  contractor_name: string | null;
-  beneficiary_name: string | null;
+  /** 물품명 (상세에서만 확인 가능) */
+  item_name: string | null;
+  /** 가입 구좌 수 (상세에서만 확인 가능) */
+  unit_count: number | null;
+  /** 계약자와의 관계 */
   relationship_to_contractor: string | null;
-  sales_member_name: string;
-  sales_member_external_id: string;
-  org_name: string;
+  /** 계약자명 */
+  contractor_name: string | null;
+  /** 지정인(수혜자)명 */
+  beneficiary_name: string | null;
+  /** 담당 사원 TY Life 내부 ID (조직원 dedup 기준) */
+  sales_member_external_id: string | null;
+  /** 상위 소속 라인(레그) */
   parent_org_name: string | null;
+  /**
+   * SSN 원문 — 파싱 직후 normalize() 에서 masking 처리 후 폐기.
+   * 로그 출력·DB 저장 절대 금지.
+   * TODO: 상세 페이지에서 SSN이 노출되는지 확인 필요
+   */
+  ssn_raw: string | null;
 }
 
 /** sync-service 처리 결과 */
@@ -95,4 +121,14 @@ export interface SyncResult {
   total_updated: number;
   total_errors: number;
   duration_ms: number;
+}
+
+/** runSync 옵션 */
+export interface SyncOptions {
+  triggeredBy?: string;
+  rowPerPage?: number;
+  /** 최대 수집 페이지 수 (미설정 시 전체) */
+  maxPage?: number;
+  /** true 이면 DB 저장 없이 파싱 결과만 반환 */
+  dryRun?: boolean;
 }

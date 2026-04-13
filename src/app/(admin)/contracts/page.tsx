@@ -61,8 +61,10 @@ export default async function ContractsPage({ searchParams }: PageProps) {
       product_type,
       watch_fit,
       unit_count,
+      join_method,
       status,
       is_cancelled,
+      affiliation_name,
       customers(name),
       organization_members(name)
       `,
@@ -126,6 +128,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
                   '상품명',
                   '워치/핏',
                   '구좌수',
+                  '가입방법',
                   '상태',
                   '취소반품',
                 ].map((h) => (
@@ -141,7 +144,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
             <tbody className="divide-y divide-gray-100">
               {(contracts ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-gray-400">
+                  <td colSpan={11} className="px-4 py-8 text-center text-gray-400">
                     계약 데이터가 없습니다.
                   </td>
                 </tr>
@@ -170,7 +173,9 @@ export default async function ContractsPage({ searchParams }: PageProps) {
                         {customer?.name ?? '-'}
                       </Link>
                     </td>
-                    <td className="px-4 py-3 text-gray-600">-</td>
+                    <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                      {(c.affiliation_name as string | null) ?? '-'}
+                    </td>
                     <td className="px-4 py-3 text-gray-700">
                       {member?.name ?? '-'}
                     </td>
@@ -182,6 +187,9 @@ export default async function ContractsPage({ searchParams }: PageProps) {
                     </td>
                     <td className="px-4 py-3 text-right font-semibold tabular-nums">
                       {(c.unit_count as number).toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                      {c.join_method as string}
                     </td>
                     <td className="px-4 py-3">
                       <span

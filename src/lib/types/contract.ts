@@ -43,6 +43,10 @@ export interface Contract {
   beneficiary_name: string | null;
   relationship_to_contractor: string | null;
   external_id: string | null;
+  /** 소속명 (list HTML에서 추출) */
+  affiliation_name: string | null;
+  /** 해피콜 결과 (list HTML에서 추출) */
+  happycall_result: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -66,6 +70,8 @@ export interface ContractInsert {
   beneficiary_name?: string | null;
   relationship_to_contractor?: string | null;
   external_id?: string | null;
+  affiliation_name?: string | null;
+  happycall_result?: string | null;
   raw_data?: Record<string, unknown>;
 }
 
