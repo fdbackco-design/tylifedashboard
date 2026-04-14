@@ -13,7 +13,7 @@ import type { TyLifeListApiResponse } from '../types/sync';
 
 const TYLIFE_BASE_URL = process.env.TYLIFE_BASE_URL;
 const TYLIFE_COOKIE = process.env.TYLIFE_COOKIE;
-const RATE_LIMIT_MS = parseInt(process.env.TYLIFE_RATE_LIMIT_MS ?? '500', 10);
+const RATE_LIMIT_MS = parseInt(process.env.TYLIFE_RATE_LIMIT_MS ?? '200', 10);
 const MAX_RETRIES = parseInt(process.env.TYLIFE_MAX_RETRIES ?? '3', 10);
 
 function assertEnv(): void {
