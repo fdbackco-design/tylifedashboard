@@ -2,7 +2,6 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
-import { maskPhone } from '@/lib/utils/mask';
 
 export const metadata: Metadata = { title: '계약 상세' };
 export const dynamic = 'force-dynamic';
@@ -68,7 +67,7 @@ export default async function ContractDetailPage({ params }: PageProps) {
             <DetailRow label="성별" value={customer?.gender === 'M' ? '남' : customer?.gender === 'F' ? '여' : '-'} />
             <DetailRow
               label="전화번호"
-              value={customer?.phone ? maskPhone(customer.phone) : '-'}
+              value={customer?.phone ?? '-'}
             />
             <DetailRow
               label="실 이용 지정인"
@@ -140,7 +139,7 @@ export default async function ContractDetailPage({ params }: PageProps) {
             <DetailRow label="직급" value={member?.rank ?? '-'} />
             <DetailRow
               label="연락처"
-              value={member?.phone ? maskPhone(member.phone) : '-'}
+              value={member?.phone ?? '-'}
             />
             <DetailRow
               label="수집 시점 상위 경로"
