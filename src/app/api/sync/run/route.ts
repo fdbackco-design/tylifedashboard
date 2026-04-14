@@ -127,10 +127,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
 
-    await db
-      .from('sync_runs')
-      .update({ status: 'failed', finished_at: new Date().toISOString() })
-      .eq('id', runId);
+    try {
+      await db
+        .from('sync_runs')
+        .update({ status: 'failed', finished_at: new Date().toISOString() })
+        .eq('id', runId);
+    } catch {
+      // DB 업데이트 실패해도 응답은 반드시 반환
+    }
 
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }

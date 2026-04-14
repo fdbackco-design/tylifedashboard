@@ -53,7 +53,8 @@ export default function SyncButton() {
         };
 
         if (!res.ok || !json.success) {
-          setError(json.error ?? '동기화 실패');
+          const errMsg = typeof json.error === 'string' ? json.error : '동기화 실패 (서버 오류)';
+          setError(errMsg);
           return;
         }
 
