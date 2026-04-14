@@ -319,7 +319,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
                       )}
                     </td>
                     <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                      c.affiliation_name ?? '-'
+                      {c.affiliation_name ?? '-'}
                     </td>
                     <td className="px-4 py-3 text-gray-700">
                       {(c as { sales_link_status?: string }).sales_link_status ===
@@ -336,7 +336,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
                       {c.item_name ?? '-'}
                     </td>
                     <td className="px-4 py-3 text-right font-semibold tabular-nums">
-                      c.unit_count.toLocaleString()
+                      {c.unit_count.toLocaleString()}
                     </td>
                     <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
                       {c.join_method}
