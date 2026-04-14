@@ -7,7 +7,6 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server';
 
 // Route Handler 캐시 (URL 단위) — 월별 정산 조회는 자주 변하지 않음
 export const revalidate = 30;
-export const dynamic = 'force-static';
 
 // ─────────────────────────────────────────────
 // GET: 정산 결과 조회
