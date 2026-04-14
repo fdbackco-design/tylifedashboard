@@ -70,7 +70,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
       `,
       { count: 'exact' },
     )
-    .order('join_date', { ascending: false, nullsFirst: false })
+    .order('sequence_no', { ascending: false, nullsFirst: false })
     .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
 
   if (statusFilter) query = query.eq('status', statusFilter);

@@ -55,6 +55,7 @@ export interface Contract {
 
 export interface ContractInsert {
   contract_code: string;
+  sequence_no?: number | null;
   rental_request_no?: string | null;
   memo?: string | null;
   customer_id: string;
