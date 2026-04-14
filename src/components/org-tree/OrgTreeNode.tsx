@@ -29,7 +29,7 @@ export function collectSubtreeIds(node: OrgTreeNodeType): string[] {
   return [node.id, ...node.children.flatMap(collectSubtreeIds)];
 }
 
-const COMPLETED = new Set(['해피콜완료', '배송준비', '배송완료', '정산완료']);
+const COMPLETED = new Set(['가입']);
 
 export function countCompleted(ids: string[], map: Record<string, ContractItem[]>): number {
   return ids.reduce((sum, id) => sum + (map[id] ?? []).filter((c) => COMPLETED.has(c.status)).length, 0);

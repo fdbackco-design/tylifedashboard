@@ -23,7 +23,7 @@ const STATUS_COLORS: Record<ContractStatus, string> = {
   준비: 'bg-gray-100 text-gray-700',
   대기: 'bg-yellow-100 text-yellow-700',
   상담중: 'bg-blue-100 text-blue-700',
-  가입: 'bg-indigo-100 text-indigo-700',
+  가입: 'bg-green-100 text-green-700',
   해피콜완료: 'bg-cyan-100 text-cyan-700',
   배송준비: 'bg-purple-100 text-purple-700',
   배송완료: 'bg-teal-100 text-teal-700',

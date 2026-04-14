@@ -35,7 +35,7 @@ const STATUS_COLOR: Record<string, string> = {
   배송완료: 'text-teal-600', 정산완료: 'text-green-600', 취소: 'text-red-400', 해약: 'text-red-600',
 };
 
-const COMPLETED = new Set(['해피콜완료', '배송준비', '배송완료', '정산완료']);
+const COMPLETED = new Set(['가입']);
 
 // ── 계약 패널 ─────────────────────────────────────────────
 function ContractPanel({
