@@ -47,6 +47,47 @@ const STATUS_COLOR: Record<string, string> = {
   배송완료: 'text-teal-600', 정산완료: 'text-green-700', 취소: 'text-red-400', 해약: 'text-red-600',
 };
 
+type AggregatedContract = {
+  key: string;
+  customer_name: string;
+  join_date: string | null;
+  product_type: string | null;
+  item_name: string | null;
+  status: string;
+  unit_count: number;
+  contract_codes: string[];
+};
+
+function aggregateContracts(contracts: ContractItem[]): AggregatedContract[] {
+  const map = new Map<string, AggregatedContract>();
+
+  for (const c of contracts) {
+    const join = c.join_date?.slice(0, 10) ?? '';
+    const key = `${c.customer_name}__${join}`;
+
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, {
+        key,
+        customer_name: c.customer_name,
+        join_date: c.join_date,
+        product_type: c.product_type ?? null,
+        item_name: c.item_name ?? null,
+        status: c.status,
+        unit_count: c.unit_count ?? 0,
+        contract_codes: [c.contract_code],
+      });
+      continue;
+    }
+
+    existing.unit_count += c.unit_count ?? 0;
+    if (!existing.item_name && c.item_name) existing.item_name = c.item_name;
+    existing.contract_codes.push(c.contract_code);
+  }
+
+  return [...map.values()].sort((a, b) => (b.join_date ?? '').localeCompare(a.join_date ?? ''));
+}
+
 // ── 계약 패널 ─────────────────────────────────────────────
 function ContractPanel({
   node,
@@ -57,6 +98,7 @@ function ContractPanel({
   contracts: ContractItem[];
   onClose: () => void;
 }) {
+  const aggregated = aggregateContracts(contracts);
   const completedCount = contracts.filter((c) => COMPLETED.has(c.status)).length;
 
   return (
@@ -66,7 +108,9 @@ function ContractPanel({
         <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
           {node.rank}
         </span>
-        <span className="text-xs text-gray-500 ml-1">산하 전체 {contracts.length}건</span>
+        <span className="text-xs text-gray-500 ml-1">
+          산하 전체 {contracts.length}건 · 묶음 {aggregated.length}건
+        </span>
         {completedCount > 0 && (
           <span className="text-xs font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
             가입 {completedCount}건
@@ -87,7 +131,7 @@ function ContractPanel({
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
-                {['고객명', '상품', '상태', '구좌', '가입일', '계약코드'].map((h) => (
+                {['고객명', '상품', '물품명', '상태', '구좌', '가입일', '계약코드'].map((h) => (
                   <th key={h} className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">
                     {h}
                   </th>
@@ -95,20 +139,43 @@ function ContractPanel({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {contracts.map((c) => (
-                <tr key={c.id} className="hover:bg-gray-50">
-                  <td className="px-3 py-2 font-medium text-gray-800 whitespace-nowrap">{c.customer_name}</td>
-                  <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{c.product_type ?? '-'}</td>
-                  <td className={`px-3 py-2 font-semibold whitespace-nowrap ${STATUS_COLOR[c.status] ?? 'text-gray-500'}`}>
-                    {c.status}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums">{c.unit_count ?? '-'}</td>
-                  <td className="px-3 py-2 text-gray-500 whitespace-nowrap tabular-nums">
-                    {c.join_date?.slice(0, 10) ?? '-'}
-                  </td>
-                  <td className="px-3 py-2 text-gray-400 font-mono whitespace-nowrap">{c.contract_code}</td>
-                </tr>
-              ))}
+              {aggregated.map((c) => {
+                const codes =
+                  c.contract_codes.length <= 1
+                    ? c.contract_codes[0]
+                    : `${c.contract_codes[0]} 외 ${c.contract_codes.length - 1}건`;
+
+                return (
+                  <tr key={c.key} className="hover:bg-gray-50">
+                    <td className="px-3 py-2 font-medium text-gray-800 whitespace-nowrap">
+                      {c.customer_name}
+                    </td>
+                    <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
+                      {c.product_type ?? '-'}
+                    </td>
+                    <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
+                      {c.item_name ?? '-'}
+                    </td>
+                    <td
+                      className={`px-3 py-2 font-semibold whitespace-nowrap ${STATUS_COLOR[c.status] ?? 'text-gray-500'}`}
+                    >
+                      {c.status}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {c.unit_count}
+                    </td>
+                    <td className="px-3 py-2 text-gray-500 whitespace-nowrap tabular-nums">
+                      {c.join_date?.slice(0, 10) ?? '-'}
+                    </td>
+                    <td
+                      title={c.contract_codes.join(', ')}
+                      className="px-3 py-2 text-gray-400 font-mono whitespace-nowrap"
+                    >
+                      {codes}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

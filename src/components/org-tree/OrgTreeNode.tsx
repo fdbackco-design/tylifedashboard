@@ -8,6 +8,7 @@ export interface ContractItem {
   contract_code: string;
   join_date: string | null;
   product_type: string | null;
+  item_name?: string | null;
   status: string;
   unit_count: number | null;
   customer_name: string;

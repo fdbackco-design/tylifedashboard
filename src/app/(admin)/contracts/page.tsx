@@ -39,6 +39,7 @@ interface PageProps {
     page?: string;
     status?: string;
     year_month?: string;
+    q?: string;
   }>;
 }
 
@@ -47,6 +48,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
   const page = Math.max(1, parseInt(params.page ?? '1', 10));
   const statusFilter = params.status as ContractStatus | undefined;
   const yearMonth = params.year_month;
+  const q = (params.q ?? '').trim();
 
   const db = createAdminSupabaseClient();
 
@@ -58,8 +60,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
       sequence_no,
       contract_code,
       join_date,
-      product_type,
-      watch_fit,
+      item_name,
       unit_count,
       join_method,
       status,
@@ -83,23 +84,161 @@ export default async function ContractsPage({ searchParams }: PageProps) {
         : `${yearMonth.slice(0, 4)}-${String(parseInt(yearMonth.slice(5)) + 1).padStart(2, '0')}`;
     query = query.gte('join_date', `${yearMonth}-01`).lt('join_date', `${nextMonth}-01`);
   }
+  if (q) {
+    // 고객명/담당자명(확정)/미확인 담당자명까지 통합 검색
+    const like = `%${q}%`;
+    query = query.or(
+      [
+        `customers.name.ilike.${like}`,
+        `organization_members.name.ilike.${like}`,
+        `raw_sales_member_name.ilike.${like}`,
+      ].join(','),
+    );
+  }
 
   const { data: contracts, count } = await query;
   const totalPages = Math.ceil((count ?? 0) / PAGE_SIZE);
+
+  type Row = NonNullable<typeof contracts>[number];
+  type AggregatedRow = {
+    key: string;
+    /** 대표 계약 id (상세 링크용) */
+    id: string;
+    sequence_no: number | null;
+    join_date: string;
+    affiliation_name: string | null;
+    item_name: string | null;
+    unit_count: number;
+    join_method: string;
+    status: ContractStatus;
+    is_cancelled: boolean;
+    sales_link_status?: string;
+    raw_sales_member_name?: string | null;
+    customers: unknown;
+    organization_members: unknown;
+    /** 묶인 계약 수 */
+    contract_count: number;
+  };
+
+  const aggregated: AggregatedRow[] = (() => {
+    const rows = (contracts ?? []) as Row[];
+    const map = new Map<string, AggregatedRow>();
+
+    // 상태 우선순위(같은 고객/가입일에 여러 상태가 섞이면 “가장 진행된” 상태 표시)
+    const statusRank: Record<ContractStatus, number> = {
+      준비: 1,
+      대기: 2,
+      상담중: 3,
+      가입: 4,
+      해피콜완료: 5,
+      배송준비: 6,
+      배송완료: 7,
+      정산완료: 8,
+      취소: 0,
+      해약: 0,
+    };
+
+    for (const c of rows) {
+      const customer = (c as { customers?: { name?: string } | null }).customers;
+      const customerName = customer?.name ?? '-';
+      const joinDate = (c as { join_date?: string }).join_date ?? '';
+      const key = `${customerName}__${joinDate}`;
+
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, {
+          key,
+          id: (c as { id: string }).id,
+          sequence_no: ((c as { sequence_no?: number | null }).sequence_no ?? null) as number | null,
+          join_date: joinDate,
+          affiliation_name: ((c as { affiliation_name?: string | null }).affiliation_name ?? null) as
+            | string
+            | null,
+          item_name: ((c as { item_name?: string | null }).item_name ?? null) as string | null,
+          unit_count: ((c as { unit_count?: number }).unit_count ?? 0) as number,
+          join_method: (c as { join_method: string }).join_method,
+          status: (c as { status: ContractStatus }).status,
+          is_cancelled: (c as { is_cancelled: boolean }).is_cancelled,
+          sales_link_status: (c as { sales_link_status?: string }).sales_link_status,
+          raw_sales_member_name: (c as { raw_sales_member_name?: string | null }).raw_sales_member_name,
+          customers: (c as { customers: unknown }).customers,
+          organization_members: (c as { organization_members: unknown }).organization_members,
+          contract_count: 1,
+        });
+        continue;
+      }
+
+      existing.contract_count += 1;
+      existing.unit_count += ((c as { unit_count?: number }).unit_count ?? 0) as number;
+      if (!existing.item_name) {
+        existing.item_name = ((c as { item_name?: string | null }).item_name ?? null) as string | null;
+      }
+
+      const s = (c as { status: ContractStatus }).status;
+      if ((statusRank[s] ?? 0) > (statusRank[existing.status] ?? 0)) {
+        existing.status = s;
+      }
+    }
+
+    return [...map.values()];
+  })();
+
+  const querySuffix = (overrides: Record<string, string | undefined>) => {
+    const sp = new URLSearchParams();
+    const next = {
+      page: overrides.page ?? String(page),
+      status: overrides.status ?? (statusFilter ? String(statusFilter) : undefined),
+      year_month: overrides.year_month ?? yearMonth ?? undefined,
+      q: overrides.q ?? (q || undefined),
+    } as const;
+    for (const [k, v] of Object.entries(next)) {
+      if (v) sp.set(k, v);
+    }
+    const s = sp.toString();
+    return s ? `?${s}` : '';
+  };
 
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-2xl font-bold text-gray-800">계약 관리</h2>
-          <p className="text-sm text-gray-500 mt-0.5">총 {(count ?? 0).toLocaleString()}건</p>
+          <p className="text-sm text-gray-500 mt-0.5">
+            총 {(count ?? 0).toLocaleString()}건 · 현재 페이지 표시 {aggregated.length.toLocaleString()}건
+          </p>
         </div>
       </div>
+
+      {/* 검색 */}
+      <form className="mb-4 flex gap-2 flex-wrap" action="/contracts" method="GET">
+        {statusFilter && <input type="hidden" name="status" value={statusFilter} />}
+        {yearMonth && <input type="hidden" name="year_month" value={yearMonth} />}
+        <input
+          name="q"
+          defaultValue={q}
+          placeholder="고객명 또는 담당사원 검색"
+          className="w-full sm:w-96 px-3 py-2 text-sm border border-gray-300 rounded-md bg-white"
+        />
+        <button
+          type="submit"
+          className="px-3 py-2 text-sm rounded-md border border-slate-800 bg-slate-800 text-white hover:bg-slate-700"
+        >
+          검색
+        </button>
+        {q && (
+          <Link
+            href={`/contracts${querySuffix({ q: undefined, page: '1' })}`}
+            className="px-3 py-2 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+          >
+            초기화
+          </Link>
+        )}
+      </form>
 
       {/* 필터 (TODO: 클라이언트 필터 컴포넌트로 분리) */}
       <div className="flex gap-2 mb-4 flex-wrap">
         <Link
-          href="/contracts"
+          href={`/contracts${querySuffix({ status: undefined, page: '1' })}`}
           className={`px-3 py-1.5 rounded text-sm border ${!statusFilter ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'}`}
         >
           전체
@@ -107,7 +246,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
         {(Object.keys(STATUS_LABELS) as ContractStatus[]).map((s) => (
           <Link
             key={s}
-            href={`/contracts?status=${s}`}
+            href={`/contracts${querySuffix({ status: s, page: '1' })}`}
             className={`px-3 py-1.5 rounded text-sm border ${statusFilter === s ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'}`}
           >
             {STATUS_LABELS[s]}
@@ -127,8 +266,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
                   '고객명',
                   '소속',
                   '담당사원',
-                  '상품명',
-                  '워치/핏',
+                  '물품명',
                   '구좌수',
                   '가입방법',
                   '상태',
@@ -144,28 +282,28 @@ export default async function ContractsPage({ searchParams }: PageProps) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {(contracts ?? []).length === 0 && (
+              {aggregated.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="px-4 py-8 text-center text-gray-400">
+                  <td colSpan={10} className="px-4 py-8 text-center text-gray-400">
                     계약 데이터가 없습니다.
                   </td>
                 </tr>
               )}
-              {(contracts ?? []).map((c) => {
-                const customer = c.customers as unknown as { name: string } | null;
-                const member = c.organization_members as unknown as { name: string } | null;
-                const status = c.status as ContractStatus;
+              {aggregated.map((c) => {
+                const customer = c.customers as { name: string } | null;
+                const member = c.organization_members as { name: string } | null;
+                const status = c.status;
 
                 return (
                   <tr
-                    key={c.id as string}
+                    key={c.key}
                     className="hover:bg-gray-50 transition-colors"
                   >
                     <td className="px-4 py-3 text-gray-500 tabular-nums">
-                      {c.sequence_no as number}
+                      {c.sequence_no ?? '-'}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
-                      {c.join_date as string}
+                      {c.join_date}
                     </td>
                     <td className="px-4 py-3 font-medium">
                       <Link
@@ -174,16 +312,20 @@ export default async function ContractsPage({ searchParams }: PageProps) {
                       >
                         {customer?.name ?? '-'}
                       </Link>
+                      {c.contract_count > 1 && (
+                        <span className="ml-2 text-xs text-gray-400">
+                          ({c.contract_count}건)
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                      {(c.affiliation_name as string | null) ?? '-'}
+                      c.affiliation_name ?? '-'
                     </td>
                     <td className="px-4 py-3 text-gray-700">
                       {(c as { sales_link_status?: string }).sales_link_status ===
                       'pending_mapping' ? (
                         <span className="text-amber-700">
-                          {(c as { raw_sales_member_name?: string | null }).raw_sales_member_name ??
-                            '-'}{' '}
+                          {c.raw_sales_member_name ?? '-'}{' '}
                           <span className="text-xs font-normal">(미확인)</span>
                         </span>
                       ) : (
@@ -191,16 +333,13 @@ export default async function ContractsPage({ searchParams }: PageProps) {
                       )}
                     </td>
                     <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
-                      {c.product_type as string}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                      {c.watch_fit as string}
+                      {c.item_name ?? '-'}
                     </td>
                     <td className="px-4 py-3 text-right font-semibold tabular-nums">
-                      {(c.unit_count as number).toLocaleString()}
+                      c.unit_count.toLocaleString()
                     </td>
                     <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                      {c.join_method as string}
+                      {c.join_method}
                     </td>
                     <td className="px-4 py-3">
                       <span
@@ -232,7 +371,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
             <div className="flex gap-2">
               {page > 1 && (
                 <Link
-                  href={`/contracts?page=${page - 1}${statusFilter ? `&status=${statusFilter}` : ''}`}
+                  href={`/contracts${querySuffix({ page: String(page - 1) })}`}
                   className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50"
                 >
                   이전
@@ -240,7 +379,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
               )}
               {page < totalPages && (
                 <Link
-                  href={`/contracts?page=${page + 1}${statusFilter ? `&status=${statusFilter}` : ''}`}
+                  href={`/contracts${querySuffix({ page: String(page + 1) })}`}
                   className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50"
                 >
                   다음
