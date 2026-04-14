@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { buildOrgTree } from '@/lib/settlement/calculator';
-import OrgTreeNode from '@/components/org-tree/OrgTreeNode';
+import OrgTree from '@/components/org-tree/OrgTree';
+import type { ContractItem } from '@/components/org-tree/OrgTreeNode';
 import type { OrgTreeRow, OrganizationMember } from '@/lib/types';
 import SyncButton from './SyncButton';
 
@@ -27,7 +28,7 @@ function formatDateTime(iso: string): string {
 export default async function OrganizationPage() {
   const db = createAdminSupabaseClient();
 
-  const [membersRes, edgesRes, contractCountRes, lastSyncRes] = await Promise.all([
+  const [membersRes, edgesRes, contractCountRes, lastSyncRes, contractsRes] = await Promise.all([
     db
       .from('organization_members')
       .select('id, name, rank')
@@ -41,6 +42,10 @@ export default async function OrganizationPage() {
       .order('started_at', { ascending: false })
       .limit(1)
       .maybeSingle(),
+    db
+      .from('contracts')
+      .select('id, contract_code, join_date, product_type, status, unit_count, sales_member_id, customers(name)')
+      .not('sales_member_id', 'is', null),
   ]);
 
   const members = (membersRes.data ?? []) as OrganizationMember[];
@@ -73,6 +78,32 @@ export default async function OrganizationPage() {
     parent_id: edgeMap.get(m.id) ?? null,
     depth: 0,
   }));
+
+  // 계약 데이터 → 멤버별 맵
+  const contractsByMember: Record<string, ContractItem[]> = {};
+  for (const _c of (contractsRes.data ?? [])) {
+    const c = _c as unknown as {
+      id: string;
+      contract_code: string;
+      join_date: string | null;
+      product_type: string | null;
+      status: string;
+      unit_count: number | null;
+      sales_member_id: string;
+      customers: { name: string } | null;
+    };
+    const key = c.sales_member_id;
+    if (!contractsByMember[key]) contractsByMember[key] = [];
+    contractsByMember[key].push({
+      id: c.id,
+      contract_code: c.contract_code,
+      join_date: c.join_date,
+      product_type: c.product_type,
+      status: c.status,
+      unit_count: c.unit_count,
+      customer_name: c.customers?.name ?? '',
+    });
+  }
 
   const tree = buildOrgTree(treeRows);
 
@@ -150,23 +181,13 @@ export default async function OrganizationPage() {
       </div>
 
       {/* 조직 트리 */}
-      <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
-        {tree.length === 0 ? (
-          <div className="py-12 text-center">
-            <p className="text-sm text-gray-500 mb-2">
-              {members.length > 0
-                ? `${members.length}명의 조직원이 있지만 조직 계층 연결(edges)이 없습니다.`
-                : '조직 데이터가 없습니다.'}
-            </p>
-            <p className="text-xs text-gray-400">
-              {members.length > 0
-                ? '조직도 설정에서 상하위 관계를 등록하면 트리 형태로 표시됩니다.'
-                : '위의 "TY Life 동기화" 버튼을 눌러 데이터를 가져오세요.'}
-            </p>
-          </div>
-        ) : (
-          tree.map((root) => <OrgTreeNode key={root.id} node={root} depth={0} />)
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+        {members.length > 0 && tree.length === 0 && (
+          <p className="text-xs text-amber-600 mb-4 text-center">
+            {members.length}명이 있지만 조직 계층 연결(edges)이 없습니다. 상하위 관계를 등록하면 트리로 표시됩니다.
+          </p>
         )}
+        <OrgTree roots={tree} contractsByMember={contractsByMember} />
       </div>
     </div>
   );
