@@ -10,6 +10,7 @@ export interface ContractItem {
   product_type: string | null;
   item_name?: string | null;
   rental_request_no?: string | null;
+  invoice_no?: string | null;
   memo?: string | null;
   status: string;
   unit_count: number | null;
@@ -30,13 +31,18 @@ export function collectSubtreeIds(node: OrgTreeNodeType): string[] {
   return [node.id, ...node.children.flatMap(collectSubtreeIds)];
 }
 
-const COMPLETED = new Set(['가입']);
+function isJoinCompleted(c: ContractItem): boolean {
+  if (c.status === '가입') return true;
+  const hasRental = (c.rental_request_no ?? '').trim().length > 0;
+  const hasInvoice = (c.invoice_no ?? '').trim().length > 0;
+  return c.status !== '해약' && hasRental && hasInvoice;
+}
 const CARD_STATUSES = ['준비', '대기', '해약', '가입'] as const;
 type CardStatus = (typeof CARD_STATUSES)[number];
 
 export function countCompleted(ids: string[], map: Record<string, ContractItem[]>): number {
   return ids.reduce(
-    (sum, id) => sum + (map[id] ?? []).filter((c) => COMPLETED.has(c.status)).length,
+    (sum, id) => sum + (map[id] ?? []).filter(isJoinCompleted).length,
     0,
   );
 }
@@ -48,8 +54,9 @@ export function countByStatus(
   const counts: Record<CardStatus, number> = { 준비: 0, 대기: 0, 해약: 0, 가입: 0 };
   for (const id of ids) {
     for (const c of map[id] ?? []) {
-      const s = c.status as CardStatus;
-      if (s in counts) counts[s] += 1;
+      const bucket: CardStatus =
+        isJoinCompleted(c) ? '가입' : ((c.status as CardStatus) in counts ? (c.status as CardStatus) : '준비');
+      counts[bucket] += 1;
     }
   }
   return counts;

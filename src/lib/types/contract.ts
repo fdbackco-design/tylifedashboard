@@ -34,6 +34,8 @@ export interface Contract {
   contract_code: string;
   /** 렌탈신청번호 (숫자 판별 시) */
   rental_request_no: string | null;
+  /** 송장/운송장 번호 */
+  invoice_no: string | null;
   /** 메모 (숫자 아닌 경우) */
   memo: string | null;
   customer_id: string;
@@ -72,6 +74,7 @@ export interface ContractInsert {
   contract_code: string;
   sequence_no?: number | null;
   rental_request_no?: string | null;
+  invoice_no?: string | null;
   memo?: string | null;
   customer_id: string;
   sales_member_id?: string | null;

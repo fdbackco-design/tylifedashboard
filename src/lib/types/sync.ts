@@ -51,6 +51,8 @@ export interface ParsedListItem {
   sequence_no_raw: string | null;
   /** 렌탈신청번호 or 메모 raw — 숫자 판별은 normalize 단계 */
   rental_or_memo: string | null;
+  /** 송장번호/운송장번호 (있으면) */
+  invoice_no: string | null;
   /** 고객명 */
   customer_name: string;
   /** 주민번호 마스킹값 (예: "901201-1******") */

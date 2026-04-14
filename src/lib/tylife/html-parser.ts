@@ -102,6 +102,7 @@ export function parseContractListHtml(listHtml: string): ParsedListItem[] {
     items.push({
       sequence_no_raw: get('순번'),
       rental_or_memo: get('렌탈신청번호'),
+      invoice_no: get('송장번호', '운송장번호', '운송장 번호'),
       customer_name: get('고객명') ?? '',
       ssn_masked: get('주민번호', '주민등록번호') ?? '',
       contract_code,

@@ -131,6 +131,7 @@ export function normalizeContractFromList(
     contract_code: item.contract_code,
     sequence_no: item.sequence_no_raw ? (parseInt(item.sequence_no_raw, 10) || null) : null,
     rental_request_no,
+    invoice_no: item.invoice_no ?? null,
     memo,
     customer_id: customerId,
     sales_member_id: salesMemberId,

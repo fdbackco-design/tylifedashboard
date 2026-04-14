@@ -11,7 +11,12 @@ import OrgTreeNode, {
 /** 직급 표시 순서 (위 → 아래) */
 const RANK_LEVELS: RankType[] = ['본사', '사업본부장', '센터장', '리더', '영업사원'];
 
-const COMPLETED = new Set(['가입']);
+function isJoinCompleted(c: ContractItem): boolean {
+  if (c.status === '가입') return true;
+  const hasRental = (c.rental_request_no ?? '').trim().length > 0;
+  const hasInvoice = (c.invoice_no ?? '').trim().length > 0;
+  return c.status !== '해약' && hasRental && hasInvoice;
+}
 
 // ── 유틸 ─────────────────────────────────────────────────
 
@@ -114,7 +119,7 @@ function ContractPanel({
   onClose: () => void;
 }) {
   const aggregated = aggregateContracts(contracts);
-  const completedCount = contracts.filter((c) => COMPLETED.has(c.status)).length;
+  const completedCount = contracts.filter(isJoinCompleted).length;
 
   return (
     <div className="mt-6 border-t-2 border-gray-200 pt-4">
