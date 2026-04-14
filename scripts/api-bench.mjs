@@ -152,6 +152,10 @@ async function main() {
           `/api/settlement?year_month=${encodeURIComponent(yearMonth)}&include_detail=true`,
         ),
       ),
+    fetchAndMeasure(
+      `GET /api/settlement/${yearMonth}`,
+      joinUrl(baseUrl, `/api/settlement/${encodeURIComponent(yearMonth)}`),
+    ),
       fetchAndMeasure(
         'GET /api/sync (auth)',
         joinUrl(baseUrl, `/api/sync`),
