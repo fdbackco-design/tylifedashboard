@@ -199,7 +199,10 @@ async function processItem(
     }
     const customerId = await upsertCustomer(db, customerData);
 
-    // ── 2. 담당자: 이름만으로 1명일 때만 자동 연결, 0명·동명이인은 매핑 대기 (실적·정산 제외)
+    // ── 2. 담당자:
+    // - 이름이 DB에 1명 → 자동 연결
+    // - 이름이 DB에 0명 → 자동 생성(직급은 소속/직책 문자열로 추론) 후 연결
+    // - 동명이인(2명 이상) → 매핑 대기 (실적·정산 제외)
     const rawSalesName = item.sales_member_name?.trim() ?? null;
     let finalSalesMemberId: string | null = null;
     let salesLinkStatus: 'linked' | 'pending_mapping' = 'linked';
@@ -209,6 +212,16 @@ async function processItem(
       if (nameRes.kind === 'single') {
         finalSalesMemberId = nameRes.memberId;
         salesLinkStatus = 'linked';
+      } else if (nameRes.kind === 'missing') {
+        // 조직도에 없는 이름이면 자동 생성 (동명이인 문제는 'ambiguous'에서만 처리)
+        const memberData = normalizeSalesMember({
+          sales_member_name: rawSalesName,
+          sales_member_external_id: null,
+          org_rank: item.affiliation_name,
+        });
+        const createdId = await upsertSalesMember(db, memberData);
+        finalSalesMemberId = createdId;
+        salesLinkStatus = createdId ? 'linked' : 'pending_mapping';
       } else {
         finalSalesMemberId = null;
         salesLinkStatus = 'pending_mapping';
