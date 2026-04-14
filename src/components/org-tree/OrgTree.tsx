@@ -1,15 +1,26 @@
 'use client';
 
 import { useState } from 'react';
-import type { OrgTreeNode as OrgTreeNodeType } from '@/lib/types';
+import type { OrgTreeNode as OrgTreeNodeType, RankType } from '@/lib/types';
 import OrgTreeNode, {
   type ContractItem,
   collectSubtreeIds,
-  countCompleted,
 } from './OrgTreeNode';
-import styles from './org-tree.module.css';
+
+// ── 상수 ─────────────────────────────────────────────────
+/** 직급 표시 순서 (위 → 아래) */
+const RANK_LEVELS: RankType[] = ['본사', '사업본부장', '센터장', '리더', '영업사원'];
+
+const COMPLETED = new Set(['가입']);
 
 // ── 유틸 ─────────────────────────────────────────────────
+
+/** 재귀 트리 → 평탄 배열 */
+function flattenTree(nodes: OrgTreeNodeType[]): OrgTreeNodeType[] {
+  return nodes.flatMap((n) => [n, ...flattenTree(n.children)]);
+}
+
+/** id로 노드 찾기 */
 function findNode(nodes: OrgTreeNodeType[], id: string): OrgTreeNodeType | null {
   for (const n of nodes) {
     if (n.id === id) return n;
@@ -19,6 +30,7 @@ function findNode(nodes: OrgTreeNodeType[], id: string): OrgTreeNodeType | null 
   return null;
 }
 
+/** 선택된 노드의 산하 계약 전체 수집 */
 function collectSubtreeContracts(
   node: OrgTreeNodeType,
   map: Record<string, ContractItem[]>,
@@ -31,11 +43,9 @@ function collectSubtreeContracts(
 // ── 상태 색상 ─────────────────────────────────────────────
 const STATUS_COLOR: Record<string, string> = {
   준비: 'text-gray-400', 대기: 'text-yellow-500', 상담중: 'text-blue-400',
-  가입: 'text-indigo-400', 해피콜완료: 'text-cyan-600', 배송준비: 'text-purple-500',
-  배송완료: 'text-teal-600', 정산완료: 'text-green-600', 취소: 'text-red-400', 해약: 'text-red-600',
+  가입: 'text-green-600', 해피콜완료: 'text-cyan-600', 배송준비: 'text-purple-500',
+  배송완료: 'text-teal-600', 정산완료: 'text-green-700', 취소: 'text-red-400', 해약: 'text-red-600',
 };
-
-const COMPLETED = new Set(['가입']);
 
 // ── 계약 패널 ─────────────────────────────────────────────
 function ContractPanel({
@@ -51,7 +61,6 @@ function ContractPanel({
 
   return (
     <div className="mt-6 border-t-2 border-gray-200 pt-4">
-      {/* 헤더 */}
       <div className="flex items-center gap-2 mb-3 px-1">
         <span className="font-bold text-gray-800 text-sm">{node.name}</span>
         <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
@@ -60,7 +69,7 @@ function ContractPanel({
         <span className="text-xs text-gray-500 ml-1">산하 전체 {contracts.length}건</span>
         {completedCount > 0 && (
           <span className="text-xs font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
-            완료 {completedCount}건
+            가입 {completedCount}건
           </span>
         )}
         <button
@@ -108,7 +117,7 @@ function ContractPanel({
   );
 }
 
-// ── 메인 ─────────────────────────────────────────────────
+// ── 메인 컴포넌트 ─────────────────────────────────────────
 interface Props {
   roots: OrgTreeNodeType[];
   contractsByMember: Record<string, ContractItem[]>;
@@ -116,6 +125,20 @@ interface Props {
 
 export default function OrgTree({ roots, contractsByMember }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // 트리를 평탄화해 전체 노드 목록 확보
+  const allNodes = flattenTree(roots);
+
+  // rank 기준으로 그룹화
+  const byRank = new Map<RankType, OrgTreeNodeType[]>();
+  for (const node of allNodes) {
+    const rank = node.rank as RankType;
+    if (!byRank.has(rank)) byRank.set(rank, []);
+    byRank.get(rank)!.push(node);
+  }
+
+  // 실제 데이터가 있는 직급 레벨만, RANK_LEVELS 순서대로
+  const activeLevels = RANK_LEVELS.filter((r) => byRank.has(r));
 
   const selectedNode = selectedId ? findNode(roots, selectedId) : null;
   const selectedContracts = selectedNode
@@ -126,7 +149,7 @@ export default function OrgTree({ roots, contractsByMember }: Props) {
     setSelectedId((prev) => (prev === id ? null : id));
   }
 
-  if (roots.length === 0) {
+  if (allNodes.length === 0) {
     return (
       <div className="py-16 text-center text-sm text-gray-400">
         조직 데이터가 없습니다.
@@ -138,21 +161,29 @@ export default function OrgTree({ roots, contractsByMember }: Props) {
 
   return (
     <div>
-      {/* 피라미드 트리 (가로 스크롤 허용) */}
-      <div className="overflow-x-auto pb-4">
-        <div className={styles.branch} style={{ minWidth: 'max-content', padding: '4px 24px 0' }}>
-          {roots.map((root) => (
-            <div key={root.id} className={styles.branchNode}>
-              <OrgTreeNode
-                node={root}
-                depth={0}
-                contractsByMember={contractsByMember}
-                selectedId={selectedId}
-                onSelect={handleSelect}
-              />
+      {/* 직급별 레벨 행 렌더링 */}
+      <div className="flex flex-col items-center">
+        {activeLevels.map((rank, levelIdx) => (
+          <div key={rank} className="w-full flex flex-col items-center">
+            {/* 레벨 간 수직 연결선 */}
+            {levelIdx > 0 && (
+              <div className="h-8 w-0.5 bg-gray-300" />
+            )}
+
+            {/* 해당 직급 멤버 카드 행 */}
+            <div className="flex flex-wrap justify-center gap-3 px-4 w-full">
+              {byRank.get(rank)!.map((node) => (
+                <OrgTreeNode
+                  key={node.id}
+                  node={node}
+                  contractsByMember={contractsByMember}
+                  selectedId={selectedId}
+                  onSelect={handleSelect}
+                />
+              ))}
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
       </div>
 
       {/* 선택된 멤버의 산하 계약 패널 */}
