@@ -3,45 +3,92 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-interface SyncResult {
-  run_id: string;
-  status: string;
-  total_fetched: number;
-  total_created: number;
-  total_updated: number;
-  total_errors: number;
-  duration_ms: number;
+interface Progress {
+  runId: string;
+  page: number;
+  totalFetched: number;
+  totalCreated: number;
+  totalUpdated: number;
+  totalErrors: number;
 }
 
 export default function SyncButton() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<SyncResult | null>(null);
+  const [progress, setProgress] = useState<Progress | null>(null);
+  const [done, setDone] = useState<Progress | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSync() {
     setLoading(true);
-    setResult(null);
+    setProgress(null);
+    setDone(null);
     setError(null);
 
+    let runId: string | null = null;
+    let page = 1;
+    let totalFetched = 0;
+    let totalCreated = 0;
+    let totalUpdated = 0;
+    let totalErrors = 0;
+
     try {
-      const res = await fetch('/api/sync/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
+      while (true) {
+        const body = runId ? { runId, page } : {};
 
-      const json = (await res.json()) as {
-        success?: boolean;
-        result?: SyncResult;
-        error?: string;
-      };
+        const res = await fetch('/api/sync/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
 
-      if (!res.ok || !json.success) {
-        setError(json.error ?? '동기화 실패');
-      } else {
-        setResult(json.result!);
-        router.refresh();
+        const json = (await res.json()) as {
+          success?: boolean;
+          runId?: string;
+          page?: number;
+          fetched?: number;
+          created?: number;
+          updated?: number;
+          errors?: number;
+          hasMore?: boolean;
+          error?: string;
+        };
+
+        if (!res.ok || !json.success) {
+          setError(json.error ?? '동기화 실패');
+          return;
+        }
+
+        runId = json.runId!;
+        totalFetched += json.fetched ?? 0;
+        totalCreated += json.created ?? 0;
+        totalUpdated += json.updated ?? 0;
+        totalErrors += json.errors ?? 0;
+
+        const current: Progress = {
+          runId,
+          page,
+          totalFetched,
+          totalCreated,
+          totalUpdated,
+          totalErrors,
+        };
+        setProgress(current);
+
+        if (!json.hasMore) {
+          // 완료 처리
+          await fetch('/api/sync/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ runId, finish: true }),
+          });
+          setDone(current);
+          setProgress(null);
+          router.refresh();
+          return;
+        }
+
+        page++;
       }
     } catch {
       setError('네트워크 오류');
@@ -60,29 +107,35 @@ export default function SyncButton() {
         {loading ? '동기화 중...' : 'TY Life 동기화'}
       </button>
 
-      {loading && (
-        <span className="text-xs text-gray-500">
-          전체 페이지를 가져오는 중입니다. 잠시 기다려 주세요...
-        </span>
+      {progress && (
+        <div className="text-xs text-right bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-gray-700">
+          <span className="text-blue-600 font-semibold">페이지 {progress.page} 처리 중</span>
+          <span className="mx-1">·</span>
+          누적 <strong>{progress.totalFetched}</strong>건
+          {progress.totalErrors > 0 && (
+            <>
+              <span className="mx-1">·</span>
+              <span className="text-red-500">오류 {progress.totalErrors}</span>
+            </>
+          )}
+        </div>
       )}
 
-      {result && (
+      {done && (
         <div className="text-xs text-right bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-gray-700">
           <span className="text-green-700 font-semibold">동기화 완료</span>
           <span className="mx-1">·</span>
-          조회 <strong>{result.total_fetched}</strong>건
+          조회 <strong>{done.totalFetched}</strong>건
           <span className="mx-1">·</span>
-          신규 <strong>{result.total_created}</strong>
+          신규 <strong>{done.totalCreated}</strong>
           <span className="mx-1">·</span>
-          갱신 <strong>{result.total_updated}</strong>
-          {result.total_errors > 0 && (
+          갱신 <strong>{done.totalUpdated}</strong>
+          {done.totalErrors > 0 && (
             <>
               <span className="mx-1">·</span>
-              <span className="text-red-500">오류 {result.total_errors}</span>
+              <span className="text-red-500">오류 {done.totalErrors}</span>
             </>
           )}
-          <span className="mx-1">·</span>
-          {(result.duration_ms / 1000).toFixed(1)}초
         </div>
       )}
 
