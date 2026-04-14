@@ -16,13 +16,11 @@ export default function SyncButton() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<Progress | null>(null);
-  const [done, setDone] = useState<Progress | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSync() {
     setLoading(true);
     setProgress(null);
-    setDone(null);
     setError(null);
 
     let runId: string | null = null;
@@ -82,7 +80,6 @@ export default function SyncButton() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ runId, finish: true }),
           });
-          setDone(current);
           setProgress(null);
           router.refresh();
           return;
@@ -116,24 +113,6 @@ export default function SyncButton() {
             <>
               <span className="mx-1">·</span>
               <span className="text-red-500">오류 {progress.totalErrors}</span>
-            </>
-          )}
-        </div>
-      )}
-
-      {done && (
-        <div className="text-xs text-right bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-gray-700">
-          <span className="text-green-700 font-semibold">동기화 완료</span>
-          <span className="mx-1">·</span>
-          조회 <strong>{done.totalFetched}</strong>건
-          <span className="mx-1">·</span>
-          신규 <strong>{done.totalCreated}</strong>
-          <span className="mx-1">·</span>
-          갱신 <strong>{done.totalUpdated}</strong>
-          {done.totalErrors > 0 && (
-            <>
-              <span className="mx-1">·</span>
-              <span className="text-red-500">오류 {done.totalErrors}</span>
             </>
           )}
         </div>
