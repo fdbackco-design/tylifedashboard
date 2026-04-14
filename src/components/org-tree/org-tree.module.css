@@ -1,0 +1,55 @@
+/* 자식 노드들을 가로로 나열하는 컨테이너 */
+.branch {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+/* 각 자식 노드 래퍼 — 연결선을 ::before / ::after 로 그린다 */
+.branchNode {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 24px;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+/* 형제간 수평 연결선 (자식 전체를 가로지르는 바) */
+.branchNode::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: #d1d5db;
+}
+
+/* 수평 바에서 자식 카드로 내려오는 수직선 */
+.branchNode::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 2px;
+  height: 24px;
+  background-color: #d1d5db;
+  transform: translateX(-50%);
+}
+
+/* 첫 번째 자식: 수평선이 중앙 오른쪽만 */
+.branchNode:first-child::before {
+  left: 50%;
+}
+
+/* 마지막 자식: 수평선이 중앙 왼쪽만 */
+.branchNode:last-child::before {
+  right: 50%;
+}
+
+/* 외동 자식: 수평선 없음 */
+.branchNode:only-child::before {
+  display: none;
+}

@@ -48,7 +48,10 @@ export default async function OrganizationPage() {
       .not('sales_member_id', 'is', null),
   ]);
 
-  const members = (membersRes.data ?? []) as OrganizationMember[];
+  // 안성준은 TY Life 시스템상 영업사원이지만 실제로는 본사(최상위)로 취급
+  const members = ((membersRes.data ?? []) as OrganizationMember[]).map((m) =>
+    m.name === '안성준' ? { ...m, rank: '본사' as const } : m,
+  );
   const edges = edgesRes.data ?? [];
   const contractCount = contractCountRes.count ?? 0;
   const lastSync = lastSyncRes.data as {
