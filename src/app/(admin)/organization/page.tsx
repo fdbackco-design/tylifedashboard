@@ -46,7 +46,7 @@ export default async function OrganizationPage() {
     db
       .from('contracts')
       .select(
-        'id, contract_code, join_date, product_type, item_name, status, unit_count, sales_member_id, customers(name)',
+        'id, contract_code, join_date, product_type, item_name, rental_request_no, memo, status, unit_count, sales_member_id, customers(name)',
       )
       .not('sales_member_id', 'is', null),
   ]);
@@ -94,6 +94,8 @@ export default async function OrganizationPage() {
       join_date: string | null;
       product_type: string | null;
       item_name?: string | null;
+      rental_request_no?: string | null;
+      memo?: string | null;
       status: string;
       unit_count: number | null;
       sales_member_id: string;
@@ -107,6 +109,8 @@ export default async function OrganizationPage() {
       join_date: c.join_date,
       product_type: c.product_type,
       item_name: c.item_name ?? null,
+      rental_request_no: c.rental_request_no ?? null,
+      memo: c.memo ?? null,
       status: c.status,
       unit_count: c.unit_count,
       customer_name: c.customers?.name ?? '',

@@ -9,6 +9,8 @@ export interface ContractItem {
   join_date: string | null;
   product_type: string | null;
   item_name?: string | null;
+  rental_request_no?: string | null;
+  memo?: string | null;
   status: string;
   unit_count: number | null;
   customer_name: string;

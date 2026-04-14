@@ -45,6 +45,7 @@ const STATUS_COLOR: Record<string, string> = {
   준비: 'text-gray-400', 대기: 'text-yellow-500', 상담중: 'text-blue-400',
   가입: 'text-green-600', 해피콜완료: 'text-cyan-600', 배송준비: 'text-purple-500',
   배송완료: 'text-teal-600', 정산완료: 'text-green-700', 취소: 'text-red-400', 해약: 'text-red-600',
+  '렌탈 미충족': 'text-orange-700',
 };
 
 type AggregatedContract = {
@@ -56,15 +57,26 @@ type AggregatedContract = {
   status: string;
   unit_count: number;
   contract_codes: string[];
+  show_rental_unmet: boolean;
 };
+
+function isRentalUnmet(c: ContractItem): boolean {
+  const v = (c.rental_request_no ?? c.memo ?? '').trim();
+  return (c.status === '준비' || c.status === '대기') && v === '렌탈기준 미충족';
+}
+
+function getDisplayStatus(c: ContractItem): string {
+  return isRentalUnmet(c) ? '렌탈 미충족' : c.status;
+}
 
 function aggregateContracts(contracts: ContractItem[]): AggregatedContract[] {
   const map = new Map<string, AggregatedContract>();
 
   for (const c of contracts) {
     const join = c.join_date?.slice(0, 10) ?? '';
+    const displayStatus = getDisplayStatus(c);
     // 고객명+가입일이 같더라도 상태가 다르면 다른 행으로 표시
-    const key = `${c.customer_name}__${join}__${c.status}`;
+    const key = `${c.customer_name}__${join}__${displayStatus}`;
 
     const existing = map.get(key);
     if (!existing) {
@@ -74,15 +86,17 @@ function aggregateContracts(contracts: ContractItem[]): AggregatedContract[] {
         join_date: c.join_date,
         product_type: c.product_type ?? null,
         item_name: c.item_name ?? null,
-        status: c.status,
+        status: displayStatus,
         unit_count: c.unit_count ?? 0,
         contract_codes: [c.contract_code],
+        show_rental_unmet: isRentalUnmet(c),
       });
       continue;
     }
 
     existing.unit_count += c.unit_count ?? 0;
     if (!existing.item_name && c.item_name) existing.item_name = c.item_name;
+    if (isRentalUnmet(c)) existing.show_rental_unmet = true;
     existing.contract_codes.push(c.contract_code);
   }
 
@@ -161,6 +175,9 @@ function ContractPanel({
                       className={`px-3 py-2 font-semibold whitespace-nowrap ${STATUS_COLOR[c.status] ?? 'text-gray-500'}`}
                     >
                       {c.status}
+                      {c.show_rental_unmet && c.status !== '렌탈 미충족' && (
+                        <span className="ml-1 text-orange-700">(렌탈 미충족)</span>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       {c.unit_count}
