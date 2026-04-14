@@ -107,7 +107,9 @@ export default async function DashboardPage() {
             <div className="flex justify-between">
               <span className="text-gray-500">시작</span>
               <span className="text-gray-700">
-                {new Date(stats.lastSync.started_at as string).toLocaleString('ko-KR')}
+                {new Date(stats.lastSync.started_at as string).toLocaleString('ko-KR', {
+                  timeZone: 'Asia/Seoul',
+                })}
               </span>
             </div>
             <div className="flex justify-between">
