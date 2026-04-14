@@ -63,7 +63,8 @@ function aggregateContracts(contracts: ContractItem[]): AggregatedContract[] {
 
   for (const c of contracts) {
     const join = c.join_date?.slice(0, 10) ?? '';
-    const key = `${c.customer_name}__${join}`;
+    // 고객명+가입일이 같더라도 상태가 다르면 다른 행으로 표시
+    const key = `${c.customer_name}__${join}__${c.status}`;
 
     const existing = map.get(key);
     if (!existing) {

@@ -32,6 +32,18 @@ const STATUS_COLORS: Record<ContractStatus, string> = {
   해약: 'bg-red-200 text-red-800',
 };
 
+function getDisplayStatus(c: {
+  status: ContractStatus;
+  rental_request_no?: string | null;
+  memo?: string | null;
+}): ContractStatus | '렌탈 미충족' {
+  const v = (c.rental_request_no ?? c.memo ?? '').trim();
+  if ((c.status === '준비' || c.status === '대기') && v === '렌탈기준 미충족') {
+    return '렌탈 미충족';
+  }
+  return c.status;
+}
+
 const PAGE_SIZE = 50;
 
 interface PageProps {
@@ -61,6 +73,8 @@ export default async function ContractsPage({ searchParams }: PageProps) {
       contract_code,
       join_date,
       item_name,
+      rental_request_no,
+      memo,
       unit_count,
       join_method,
       status,
@@ -111,6 +125,8 @@ export default async function ContractsPage({ searchParams }: PageProps) {
     unit_count: number;
     join_method: string;
     status: ContractStatus;
+    rental_request_no?: string | null;
+    memo?: string | null;
     is_cancelled: boolean;
     sales_link_status?: string;
     raw_sales_member_name?: string | null;
@@ -155,6 +171,10 @@ export default async function ContractsPage({ searchParams }: PageProps) {
             | string
             | null,
           item_name: ((c as { item_name?: string | null }).item_name ?? null) as string | null,
+          rental_request_no: ((c as { rental_request_no?: string | null }).rental_request_no ?? null) as
+            | string
+            | null,
+          memo: ((c as { memo?: string | null }).memo ?? null) as string | null,
           unit_count: ((c as { unit_count?: number }).unit_count ?? 0) as number,
           join_method: (c as { join_method: string }).join_method,
           status: (c as { status: ContractStatus }).status,
@@ -172,6 +192,14 @@ export default async function ContractsPage({ searchParams }: PageProps) {
       existing.unit_count += ((c as { unit_count?: number }).unit_count ?? 0) as number;
       if (!existing.item_name) {
         existing.item_name = ((c as { item_name?: string | null }).item_name ?? null) as string | null;
+      }
+      if (!existing.rental_request_no) {
+        existing.rental_request_no = ((c as { rental_request_no?: string | null }).rental_request_no ?? null) as
+          | string
+          | null;
+      }
+      if (!existing.memo) {
+        existing.memo = ((c as { memo?: string | null }).memo ?? null) as string | null;
       }
 
       const s = (c as { status: ContractStatus }).status;
@@ -292,7 +320,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
               {aggregated.map((c) => {
                 const customer = c.customers as { name: string } | null;
                 const member = c.organization_members as { name: string } | null;
-                const status = c.status;
+                const displayStatus = getDisplayStatus(c);
 
                 return (
                   <tr
@@ -343,9 +371,15 @@ export default async function ContractsPage({ searchParams }: PageProps) {
                     </td>
                     <td className="px-4 py-3">
                       <span
-                        className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[status] ?? ''}`}
+                        className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
+                          displayStatus === '렌탈 미충족'
+                            ? 'bg-orange-100 text-orange-800'
+                            : (STATUS_COLORS[displayStatus as ContractStatus] ?? '')
+                        }`}
                       >
-                        {STATUS_LABELS[status] ?? status}
+                        {displayStatus === '렌탈 미충족'
+                          ? '렌탈 미충족'
+                          : (STATUS_LABELS[displayStatus as ContractStatus] ?? displayStatus)}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-center">

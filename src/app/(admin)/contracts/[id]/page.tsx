@@ -44,6 +44,13 @@ export default async function ContractDetailPage({ params }: PageProps) {
     .eq('contract_id', id)
     .order('changed_at', { ascending: false });
 
+  const rentalMark = ((contract.rental_request_no as string | null) ?? (contract.memo as string | null) ?? '').trim();
+  const displayStatus =
+    ((contract.status as string) === '준비' || (contract.status as string) === '대기') &&
+    rentalMark === '렌탈기준 미충족'
+      ? '렌탈 미충족'
+      : (contract.status as string);
+
   return (
     <div className="p-6 max-w-4xl">
       <div className="mb-6 flex items-center gap-3">
@@ -106,7 +113,7 @@ export default async function ContractDetailPage({ params }: PageProps) {
         <section className="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
           <h3 className="text-sm font-semibold text-gray-700 mb-4">진행 상태</h3>
           <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
-            <DetailRow label="현재 상태" value={contract.status as string} highlight />
+            <DetailRow label="현재 상태" value={displayStatus} highlight />
             <DetailRow
               label="해피콜 일시"
               value={
