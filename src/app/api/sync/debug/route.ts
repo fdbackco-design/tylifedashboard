@@ -32,6 +32,10 @@ function isAuthorized(req: NextRequest): boolean {
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ error: 'Not Found' }, { status: 404 });
+  }
+
   if (!isAuthorized(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }

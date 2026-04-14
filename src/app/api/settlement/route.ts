@@ -8,6 +8,9 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { calculateMemberSettlement, buildOrgTree, findActiveRule } from '@/lib/settlement/calculator';
 import type { Contract, OrganizationMember, SettlementRule, OrgTreeRow } from '@/lib/types';
 
+// Route Handler 캐시 (URL 단위) — 월별 정산 조회는 자주 변하지 않음
+export const revalidate = 30;
+
 // ─────────────────────────────────────────────
 // GET: 정산 결과 조회
 // ─────────────────────────────────────────────
@@ -17,6 +20,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const yearMonth = searchParams.get('year_month');
   const memberId = searchParams.get('member_id');
   const rank = searchParams.get('rank');
+  const includeDetail = searchParams.get('include_detail') === 'true';
 
   if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
     return NextResponse.json(
@@ -31,7 +35,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     .from('monthly_settlements')
     .select(
       `
-      *,
+      id,
+      year_month,
+      member_id,
+      rank,
+      direct_contract_count,
+      direct_unit_count,
+      subordinate_unit_count,
+      total_unit_count,
+      base_commission,
+      rollup_commission,
+      incentive_amount,
+      total_amount,
+      is_finalized,
+      ${includeDetail ? 'calculation_detail,' : ''}
       organization_members(id, name, rank)
       `,
     )
@@ -161,6 +178,15 @@ async function calculateMonthlySettlement(
   }));
 
   const trees = buildOrgTree(treeRows);
+  const nodeById = new Map<string, ReturnType<typeof buildOrgTree>[number]>();
+
+  // 트리를 한 번만 순회해서 id→node 인덱스 생성 (member loop에서 O(1) 조회)
+  (function indexNodes(nodes: ReturnType<typeof buildOrgTree>) {
+    for (const n of nodes) {
+      nodeById.set(n.id, n);
+      indexNodes(n.children);
+    }
+  })(trees);
 
   // 6. 각 멤버 정산 계산 및 upsert
   let updatedCount = 0;
@@ -169,17 +195,7 @@ async function calculateMonthlySettlement(
     const rule = findActiveRule(rules as SettlementRule[], member.rank, refDate);
     if (!rule) continue;
 
-    // 해당 멤버의 트리 노드 찾기 (루트 또는 서브트리)
-    function findNode(nodes: ReturnType<typeof buildOrgTree>, id: string): ReturnType<typeof buildOrgTree>[number] | null {
-      for (const n of nodes) {
-        if (n.id === id) return n;
-        const found = findNode(n.children, id);
-        if (found) return found;
-      }
-      return null;
-    }
-
-    const orgNode = findNode(trees, member.id);
+    const orgNode = nodeById.get(member.id) ?? null;
     if (!orgNode) continue;
 
     const settlement = calculateMemberSettlement(

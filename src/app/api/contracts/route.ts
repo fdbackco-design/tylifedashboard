@@ -9,6 +9,9 @@ import type { ContractStatus } from '@/lib/types';
 
 const PAGE_SIZE = 50;
 
+// 계약 목록은 빈번히 조회되므로 짧은 캐시로 중복 요청 완화
+export const revalidate = 10;
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const { searchParams } = req.nextUrl;
 
@@ -17,6 +20,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const memberId = searchParams.get('member_id');
   const yearMonth = searchParams.get('year_month'); // 'YYYY-MM'
   const isCancelled = searchParams.get('is_cancelled');
+  const includeCount = searchParams.get('include_count') === 'true';
 
   const db = createAdminSupabaseClient();
 
@@ -39,7 +43,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       customers!inner(name),
       organization_members(name, rank)
       `,
-      { count: 'exact' },
     )
     .order('sequence_no', { ascending: false })
     .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
@@ -60,21 +63,50 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     query = query.eq('is_cancelled', isCancelled === 'true');
   }
 
-  const { data, error, count } = await query;
+  const { data, error } = await query;
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({
-    data,
-    pagination: {
-      page,
-      page_size: PAGE_SIZE,
-      total: count ?? 0,
-      total_pages: Math.ceil((count ?? 0) / PAGE_SIZE),
+  let total: number | null = null;
+  let totalPages: number | null = null;
+
+  // exact count는 비용이 큼 → 필요할 때만 opt-in
+  if (includeCount) {
+    let countQuery = db
+      .from('contracts')
+      .select('id', { count: 'exact', head: true });
+
+    if (status) countQuery = countQuery.eq('status', status);
+    if (memberId) countQuery = countQuery.eq('sales_member_id', memberId);
+    if (yearMonth) {
+      countQuery = countQuery
+        .gte('join_date', `${yearMonth}-01`)
+        .lt('join_date', incrementMonth(yearMonth));
+    }
+    if (isCancelled !== null) {
+      countQuery = countQuery.eq('is_cancelled', isCancelled === 'true');
+    }
+
+    const { count: c, error: countErr } = await countQuery;
+    if (countErr) {
+      return NextResponse.json({ error: countErr.message }, { status: 500 });
+    }
+    total = c ?? 0;
+    totalPages = Math.ceil((total ?? 0) / PAGE_SIZE);
+  }
+
+  return NextResponse.json(
+    {
+      data,
+      pagination: {
+        page,
+        page_size: PAGE_SIZE,
+        ...(includeCount ? { total, total_pages: totalPages } : {}),
+      },
     },
-  });
+  );
 }
 
 function incrementMonth(yearMonth: string): string {
