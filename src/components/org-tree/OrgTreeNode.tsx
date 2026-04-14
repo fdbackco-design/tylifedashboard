@@ -28,12 +28,28 @@ export function collectSubtreeIds(node: OrgTreeNodeType): string[] {
 }
 
 const COMPLETED = new Set(['가입']);
+const CARD_STATUSES = ['준비', '대기', '해약', '가입'] as const;
+type CardStatus = (typeof CARD_STATUSES)[number];
 
 export function countCompleted(ids: string[], map: Record<string, ContractItem[]>): number {
   return ids.reduce(
     (sum, id) => sum + (map[id] ?? []).filter((c) => COMPLETED.has(c.status)).length,
     0,
   );
+}
+
+export function countByStatus(
+  ids: string[],
+  map: Record<string, ContractItem[]>,
+): Record<CardStatus, number> {
+  const counts: Record<CardStatus, number> = { 준비: 0, 대기: 0, 해약: 0, 가입: 0 };
+  for (const id of ids) {
+    for (const c of map[id] ?? []) {
+      const s = c.status as CardStatus;
+      if (s in counts) counts[s] += 1;
+    }
+  }
+  return counts;
 }
 
 // ── 카드 컴포넌트 ─────────────────────────────────────────
@@ -49,7 +65,7 @@ export default function OrgTreeNode({ node, contractsByMember, selectedId, onSel
   const style = RANK_STYLE[node.rank] ?? RANK_STYLE['영업사원'];
 
   const subtreeIds = collectSubtreeIds(node);
-  const subtreeCompleted = countCompleted(subtreeIds, contractsByMember);
+  const counts = countByStatus(subtreeIds, contractsByMember);
 
   return (
     <div
@@ -75,15 +91,24 @@ export default function OrgTreeNode({ node, contractsByMember, selectedId, onSel
         </span>
 
         {/* 가입 건수 */}
-        <span
-          className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-            subtreeCompleted > 0
-              ? 'bg-green-100 text-green-700'
-              : 'bg-gray-100 text-gray-400'
-          }`}
-        >
-          가입 {subtreeCompleted}건
-        </span>
+        <div className="flex flex-wrap justify-center gap-1">
+          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">
+            준비 {counts.준비}건
+          </span>
+          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700">
+            대기 {counts.대기}건
+          </span>
+          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+            해약 {counts.해약}건
+          </span>
+          <span
+            className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+              counts.가입 > 0 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'
+            }`}
+          >
+            가입 {counts.가입}건
+          </span>
+        </div>
       </div>
     </div>
   );
