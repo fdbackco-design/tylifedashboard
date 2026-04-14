@@ -7,40 +7,62 @@ import type { ParsedSsn } from '../types/customer';
  *
  * @param masked - "901201-1******" 형식
  */
+/**
+ * 마스킹된 주민번호에서 birth_date / gender / ssn_masked 파생.
+ *
+ * 지원 형식:
+ *   - "820605 - xxxxxxx"  (TY Life 리스트 — 성별 자리 마스킹)
+ *   - "820605-1******"    (내부 정규화 형식 — 성별 자리 노출)
+ *   - "8206051******"     (하이픈 없는 형식)
+ *
+ * 성별 자리가 마스킹("x")된 경우:
+ *   - 출생 연도(YY)로 세기 추정 (00~26 → 20xx, 27~99 → 19xx)
+ *   - gender 는 'M' 으로 placeholder (상세 페이지에서 보강 필요)
+ */
 export function parseMaskedSsn(masked: string): ParsedSsn {
-  // 하이픈·공백 제거
-  const cleaned = masked.replace(/[\s-]/g, '');
+  // 공백 제거 후 앞 6자리(YYMMDD) 추출
+  const noSpace = masked.replace(/\s/g, '');
+  const digitsMatch = noSpace.match(/^(\d{2})(\d{2})(\d{2})/);
 
-  if (cleaned.length < 7) {
-    throw new Error(`parseMaskedSsn: 형식 오류 — "${masked}"`);
+  if (!digitsMatch) {
+    throw new Error(`parseMaskedSsn: YYMMDD 추출 실패 — "${masked}"`);
   }
 
-  const yy = cleaned.slice(0, 2);
-  const mm = cleaned.slice(2, 4);
-  const dd = cleaned.slice(4, 6);
-  const genderDigit = cleaned[6];
+  const [, yy, mm, dd] = digitsMatch;
 
-  const genderNum = parseInt(genderDigit, 10);
+  // 하이픈 또는 공백 다음 첫 문자 = 성별 자리
+  const afterDash = noSpace.slice(6).replace(/^-/, '');
+  const genderChar = afterDash[0] ?? 'x';
+  const genderNum = parseInt(genderChar, 10);
+
   let gender: 'M' | 'F';
   let century: string;
 
-  if (genderNum === 9 || genderNum === 0) {
-    century = '18';
-    gender = genderNum === 9 ? 'M' : 'F';
-  } else if (genderNum === 1 || genderNum === 2) {
-    century = '19';
-    gender = genderNum === 1 ? 'M' : 'F';
-  } else if (genderNum === 3 || genderNum === 4) {
-    century = '20';
-    gender = genderNum === 3 ? 'M' : 'F';
+  if (!Number.isNaN(genderNum)) {
+    // 성별 자리가 숫자로 노출된 경우
+    if (genderNum === 9 || genderNum === 0) {
+      century = '18'; gender = genderNum === 9 ? 'M' : 'F';
+    } else if (genderNum === 1 || genderNum === 2) {
+      century = '19'; gender = genderNum === 1 ? 'M' : 'F';
+    } else if (genderNum === 3 || genderNum === 4) {
+      century = '20'; gender = genderNum === 3 ? 'M' : 'F';
+    } else {
+      throw new Error(`parseMaskedSsn: 성별 자리 오류 — "${genderChar}"`);
+    }
   } else {
-    throw new Error(`parseMaskedSsn: 성별 자리 오류 — "${genderDigit}"`);
+    // 성별 자리가 'x' 등으로 마스킹된 경우 — 출생연도로 세기 추정
+    const yyNum = parseInt(yy, 10);
+    century = yyNum <= 26 ? '20' : '19';
+    gender = 'M'; // placeholder — 상세 페이지에서 보강 필요
   }
+
+  // ssn_masked: 공백 제거 후 정규화 (원본 형식 유지)
+  const ssn_masked = noSpace.replace(/^(\d{6})[-]?/, '$1-').slice(0, 14);
 
   return {
     birth_date: `${century}${yy}-${mm}-${dd}`,
     gender,
-    ssn_masked: `${yy}${mm}${dd}-${genderDigit}******`,
+    ssn_masked,
   };
 }
 
