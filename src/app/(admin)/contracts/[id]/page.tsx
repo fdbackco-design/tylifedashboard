@@ -123,15 +123,30 @@ export default async function ContractDetailPage({ params }: PageProps) {
           </dl>
         </section>
 
-        {/* 담당 조직 */}
+        {/* 담당 조직 · 실적 경로(수집 시점 스탬핑) */}
         <section className="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
-          <h3 className="text-sm font-semibold text-gray-700 mb-4">담당 조직</h3>
+          <h3 className="text-sm font-semibold text-gray-700 mb-4">담당 조직 · 실적 레그</h3>
+          {(contract as { sales_link_status?: string }).sales_link_status === 'pending_mapping' && (
+            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-3">
+              담당자 미확인 — 실적·정산에 반영되지 않습니다. 원본명:{' '}
+              <strong>{(contract as { raw_sales_member_name?: string | null }).raw_sales_member_name ?? '-'}</strong>
+              <Link href="/pending-sales" className="ml-2 text-blue-600 underline">
+                미확인 큐에서 연결
+              </Link>
+            </p>
+          )}
           <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
             <DetailRow label="담당 사원" value={member?.name ?? '-'} />
             <DetailRow label="직급" value={member?.rank ?? '-'} />
             <DetailRow
               label="연락처"
               value={member?.phone ? maskPhone(member.phone) : '-'}
+            />
+            <DetailRow
+              label="수집 시점 상위 경로"
+              value={formatPerformancePath(
+                (contract as { performance_path_json?: unknown }).performance_path_json,
+              )}
             />
           </dl>
         </section>
@@ -169,6 +184,12 @@ export default async function ContractDetailPage({ params }: PageProps) {
       </div>
     </div>
   );
+}
+
+function formatPerformancePath(raw: unknown): string {
+  if (!raw || !Array.isArray(raw)) return '-';
+  const parts = raw.map((seg: { name?: string }) => seg?.name).filter(Boolean);
+  return parts.length > 0 ? parts.join(' → ') : '-';
 }
 
 function DetailRow({

@@ -16,6 +16,16 @@ export type WatchFitType = '갤럭시워치' | '갤럭시핏' | '해당없음';
 
 export type JoinMethodType = '해피콜' | '간편가입' | '기타';
 
+/** 담당자 연결: linked만 정산·실적 집계, pending_mapping은 관리자 매핑 대기 */
+export type SalesLinkStatus = 'linked' | 'pending_mapping';
+
+/** 수집 시점 상위 조직 경로 스냅샷 (루트 → 담당자) */
+export interface PerformancePathSegment {
+  id: string;
+  name: string;
+  rank: string;
+}
+
 export interface Contract {
   id: string;
   /** 리스트 표시용 순번 */
@@ -49,6 +59,11 @@ export interface Contract {
   happycall_result: string | null;
   /** 리스트 HTML 원본 셀 매핑값 (감사용) */
   source_snapshot_json: Record<string, string | null> | null;
+  sales_link_status?: SalesLinkStatus;
+  /** 매핑 대기 시 TY Life에서 온 담당자명 */
+  raw_sales_member_name?: string | null;
+  /** 수집 시점 조직 상위 경로 (퇴사·이동 후에도 당시 실적 레그 보존) */
+  performance_path_json?: PerformancePathSegment[] | null;
   created_at: string;
   updated_at: string;
 }
@@ -78,6 +93,9 @@ export interface ContractInsert {
   raw_data?: Record<string, unknown>;
   /** 리스트 HTML에서 파싱한 원본 셀 매핑값 (키: list-tit, 값: list-cont) */
   source_snapshot_json?: Record<string, string | null> | null;
+  sales_link_status?: SalesLinkStatus;
+  raw_sales_member_name?: string | null;
+  performance_path_json?: PerformancePathSegment[] | null;
 }
 
 export interface ContractUpdate extends Partial<ContractInsert> {}

@@ -65,6 +65,8 @@ export default async function ContractsPage({ searchParams }: PageProps) {
       status,
       is_cancelled,
       affiliation_name,
+      sales_link_status,
+      raw_sales_member_name,
       customers(name),
       organization_members(name)
       `,
@@ -177,7 +179,16 @@ export default async function ContractsPage({ searchParams }: PageProps) {
                       {(c.affiliation_name as string | null) ?? '-'}
                     </td>
                     <td className="px-4 py-3 text-gray-700">
-                      {member?.name ?? '-'}
+                      {(c as { sales_link_status?: string }).sales_link_status ===
+                      'pending_mapping' ? (
+                        <span className="text-amber-700">
+                          {(c as { raw_sales_member_name?: string | null }).raw_sales_member_name ??
+                            '-'}{' '}
+                          <span className="text-xs font-normal">(미확인)</span>
+                        </span>
+                      ) : (
+                        (member?.name ?? '-')
+                      )}
                     </td>
                     <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
                       {c.product_type as string}

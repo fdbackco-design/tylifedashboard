@@ -34,6 +34,8 @@ import type {
 } from '../types/sync';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ContractInsert } from '../types/contract';
+import { buildPerformancePath } from '../organization/performance-path';
+import { resolveSalesMemberByNameOnly } from './sales-resolution';
 
 /** 병렬 처리 최대 동시 요청 수 (환경변수로 조정 가능) */
 const CONCURRENCY = parseInt(process.env.TYLIFE_CONCURRENCY ?? '5', 10);
@@ -190,57 +192,65 @@ async function processItem(
       return 'updated';
     }
 
-    // ── 1+2. 고객 · 조직원 upsert 병렬 처리 ──
+    // ── 1. 고객 저장 ──
     const customerData = normalizeCustomerFromList(item);
     if (!customerData) {
       throw new Error(`SSN 파싱 실패 (ssn_masked: "${item.ssn_masked}")`);
     }
-    const memberData = normalizeSalesMember({
-      sales_member_name: item.sales_member_name ?? '',
-      sales_member_external_id: null,
-      org_rank: item.affiliation_name,
-    });
+    const customerId = await upsertCustomer(db, customerData);
 
-    const [customerId, salesMemberId] = await Promise.all([
-      upsertCustomer(db, customerData),
-      item.sales_member_name ? upsertSalesMember(db, memberData) : Promise.resolve(null),
-    ]);
+    // ── 2. 담당자: 이름만으로 1명일 때만 자동 연결, 0명·동명이인은 매핑 대기 (실적·정산 제외)
+    const rawSalesName = item.sales_member_name?.trim() ?? null;
+    let finalSalesMemberId: string | null = null;
+    let salesLinkStatus: 'linked' | 'pending_mapping' = 'linked';
 
-    // ── 3. 기존 계약 조회 (상세 fetch 스킵 여부 판단용) ──
+    if (rawSalesName) {
+      const nameRes = await resolveSalesMemberByNameOnly(db, rawSalesName);
+      if (nameRes.kind === 'single') {
+        finalSalesMemberId = nameRes.memberId;
+        salesLinkStatus = 'linked';
+      } else {
+        finalSalesMemberId = null;
+        salesLinkStatus = 'pending_mapping';
+      }
+    }
+
+    // ── 3. 기존 계약 조회 (상세 fetch 스킵 여부 + 실적 경로 1회 스탬핑 유지) ──
     const { data: existingContract } = await db
       .from('contracts')
-      .select('id, status, unit_count')
+      .select('id, status, unit_count, performance_path_json')
       .eq('contract_code', item.contract_code)
       .maybeSingle();
 
-    const ec = existingContract as { status: string; unit_count: number | null } | null;
+    const ec = existingContract as {
+      status: string;
+      unit_count: number | null;
+      performance_path_json: unknown;
+    } | null;
+    const existingPathStamped = ec != null && ec.performance_path_json != null;
     const alreadyHasDetail =
       ec != null &&
       ec.status === normalizeStatus(item.status_raw ?? '') &&
       ec.unit_count != null;
 
-    const contractBase = normalizeContractFromList(item, customerId, salesMemberId);
-    let contractFinal: ContractInsert = {
-      ...contractBase,
-      source_snapshot_json: item._snapshot,
-    };
-
-    // ── 4. 상세 HTML fetch (상태 변경 또는 아직 상세 없는 경우만) ──
+    // ── 4. 상세 HTML → TY Life external_id 로 담당자 확정 (동명이인/미매칭 해소)
+    let detail: ReturnType<typeof parseContractDetailHtml> | null = null;
     if (item.external_id && !alreadyHasDetail) {
       try {
         const html = await fetchContractDetailHtml(item.external_id);
-        const detail = parseContractDetailHtml(html, item.contract_code);
+        detail = parseContractDetailHtml(html, item.contract_code);
 
-        contractFinal = {
-          ...mergeDetailIntoContract(contractBase, detail),
-          source_snapshot_json: item._snapshot,
-        };
-
-        if (detail.sales_member_external_id && salesMemberId) {
-          await db
-            .from('organization_members')
-            .update({ external_id: detail.sales_member_external_id })
-            .eq('id', salesMemberId);
+        if (detail.sales_member_external_id) {
+          const memberData = normalizeSalesMember({
+            sales_member_name: item.sales_member_name?.trim() || '담당',
+            sales_member_external_id: detail.sales_member_external_id,
+            org_rank: item.affiliation_name,
+          });
+          const extSalesId = await upsertSalesMember(db, memberData);
+          if (extSalesId) {
+            finalSalesMemberId = extSalesId;
+            salesLinkStatus = 'linked';
+          }
         }
       } catch (detailErr) {
         const msg = detailErr instanceof Error ? detailErr.message : String(detailErr);
@@ -249,6 +259,57 @@ async function processItem(
           error: msg,
         });
       }
+    }
+
+    if (salesLinkStatus === 'pending_mapping') {
+      finalSalesMemberId = null;
+    }
+
+    const contractBase = normalizeContractFromList(item, customerId, finalSalesMemberId);
+    let contractFinal: ContractInsert = {
+      ...contractBase,
+      source_snapshot_json: item._snapshot,
+      sales_link_status: salesLinkStatus,
+      raw_sales_member_name: salesLinkStatus === 'pending_mapping' ? rawSalesName : null,
+      performance_path_json: null,
+    };
+
+    if (detail) {
+      contractFinal = {
+        ...mergeDetailIntoContract(contractBase, detail),
+        source_snapshot_json: item._snapshot,
+        sales_member_id: finalSalesMemberId,
+        sales_link_status: salesLinkStatus,
+        raw_sales_member_name: salesLinkStatus === 'pending_mapping' ? rawSalesName : null,
+        performance_path_json: null,
+      };
+    }
+
+    // ── 5. 실적 스탬핑: 최초 1회만 경로 박제 (이후 조직 개편·퇴사에도 당시 레그 유지)
+    if (salesLinkStatus === 'linked' && finalSalesMemberId && !existingPathStamped) {
+      const path = await buildPerformancePath(db, finalSalesMemberId);
+      contractFinal = {
+        ...contractFinal,
+        sales_member_id: finalSalesMemberId,
+        performance_path_json: path,
+        sales_link_status: 'linked',
+        raw_sales_member_name: null,
+      };
+    } else if (salesLinkStatus === 'linked' && finalSalesMemberId && existingPathStamped) {
+      contractFinal = {
+        ...contractFinal,
+        sales_member_id: finalSalesMemberId,
+        sales_link_status: 'linked',
+        raw_sales_member_name: null,
+      };
+    }
+
+    // upsert 시 누락 필드가 NULL로 덮이지 않도록, 이미 박제된 실적 경로는 유지
+    if (existingPathStamped && ec?.performance_path_json != null) {
+      contractFinal = {
+        ...contractFinal,
+        performance_path_json: ec.performance_path_json as ContractInsert['performance_path_json'],
+      };
     }
 
     const { isNew } = await upsertContract(db, contractFinal);
