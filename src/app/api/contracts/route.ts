@@ -11,6 +11,7 @@ const PAGE_SIZE = 50;
 
 // 계약 목록은 빈번히 조회되므로 짧은 캐시로 중복 요청 완화
 export const revalidate = 10;
+export const dynamic = 'force-static';
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const { searchParams } = req.nextUrl;

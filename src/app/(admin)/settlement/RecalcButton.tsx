@@ -17,7 +17,7 @@ export default function RecalcButton({ yearMonth }: Props) {
     setMessage(null);
 
     try {
-      const res = await fetch('/api/settlement', {
+      const res = await fetch('/api/settlement/calculate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ year_month: yearMonth }),

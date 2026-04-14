@@ -11,6 +11,7 @@ import type { OrgTreeRow } from '@/lib/types';
 
 // Route Handler 캐시 (URL 단위) — 조직도는 변경 빈도가 낮음
 export const revalidate = 60;
+export const dynamic = 'force-static';
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const rootId = req.nextUrl.searchParams.get('root_id');
