@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { buildOrgTree } from '@/lib/settlement/calculator';
+import { BASE_AMOUNT_PER_UNIT } from '@/lib/settlement/constants';
+import { getSettlementWindowSeoul } from '@/lib/settlement/settlement-window';
 import OrgTree from '@/components/org-tree/OrgTree';
 import type { ContractItem } from '@/components/org-tree/OrgTreeNode';
 import type { OrgTreeRow, OrganizationMember } from '@/lib/types';
@@ -26,10 +28,16 @@ function formatDateTime(iso: string): string {
   });
 }
 
+function formatWon(value: number): string {
+  return `${Math.round(value).toLocaleString('ko-KR')}원`;
+}
+
 export default async function OrganizationPage() {
   const db = createAdminSupabaseClient();
 
-  const [membersRes, edgesRes, contractCountRes, lastSyncRes, contractsRes] = await Promise.all([
+  const { start_date, end_date, label_year_month } = getSettlementWindowSeoul();
+
+  const [membersRes, edgesRes, contractCountRes, lastSyncRes, contractsRes, kpiRes] = await Promise.all([
     db
       .from('organization_members')
       .select('id, name, rank')
@@ -49,6 +57,7 @@ export default async function OrganizationPage() {
         'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, customers(name)',
       )
       .not('sales_member_id', 'is', null),
+    db.rpc('get_organization_kpis', { p_start_date: start_date, p_end_date: end_date }),
   ]);
 
   // 안성준은 TY Life 시스템상 영업사원이지만 실제로는 본사(최상위)로 취급
@@ -121,6 +130,14 @@ export default async function OrganizationPage() {
 
   const tree = buildOrgTree(treeRows);
 
+  const kpiRow = ((kpiRes.data ?? [])[0] ?? null) as
+    | { total_join_units: number; period_join_units: number }
+    | null;
+  const totalJoinUnits = kpiRow?.total_join_units ?? 0;
+  const periodJoinUnits = kpiRow?.period_join_units ?? 0;
+  const totalSales = totalJoinUnits * BASE_AMOUNT_PER_UNIT;
+  const periodSales = periodJoinUnits * BASE_AMOUNT_PER_UNIT;
+
   // 직급별 카운트
   const rankCounts = members.reduce<Record<string, number>>((acc, m) => {
     acc[m.rank] = (acc[m.rank] ?? 0) + 1;
@@ -182,16 +199,48 @@ export default async function OrganizationPage() {
       )}
 
       {/* 직급별 현황 */}
-      <div className="flex gap-3 mb-6 flex-wrap">
-        {Object.entries(rankCounts).map(([rank, count]) => (
-          <div
-            key={rank}
-            className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm"
-          >
-            <span className="text-gray-500">{rank}</span>
-            <span className="ml-2 font-bold text-gray-800">{count}명</span>
+      <div className="mb-6 flex flex-col lg:flex-row lg:items-stretch gap-3">
+        <div className="flex gap-3 flex-wrap">
+          {Object.entries(rankCounts).map(([rank, count]) => (
+            <div
+              key={rank}
+              className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm"
+            >
+              <span className="text-gray-500">{rank}</span>
+              <span className="ml-2 font-bold text-gray-800">{count}명</span>
+            </div>
+          ))}
+        </div>
+
+        {/* KPI (오른쪽) */}
+        <div className="grid grid-cols-2 gap-3 w-full lg:w-auto lg:ml-auto">
+          <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
+            <span className="text-gray-500">누적 가입 구좌 수</span>
+            <span className="ml-2 font-bold text-gray-800">
+              {totalJoinUnits.toLocaleString('ko-KR')}구좌
+            </span>
           </div>
-        ))}
+          <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
+            <span className="text-gray-500">총 매출</span>
+            <span className="ml-2 font-bold text-gray-800">{formatWon(totalSales)}</span>
+          </div>
+          <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
+            <span className="text-gray-500">이번달 가입 구좌 수</span>
+            <span className="ml-2 font-bold text-gray-800">
+              {periodJoinUnits.toLocaleString('ko-KR')}구좌
+            </span>
+            <div className="text-[11px] text-gray-400 mt-0.5">
+              기준 {label_year_month} · {start_date}~{end_date}
+            </div>
+          </div>
+          <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
+            <span className="text-gray-500">이번달 매출</span>
+            <span className="ml-2 font-bold text-gray-800">{formatWon(periodSales)}</span>
+            <div className="text-[11px] text-gray-400 mt-0.5">
+              기준 {label_year_month}
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* 조직 트리 */}
