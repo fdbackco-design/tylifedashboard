@@ -217,6 +217,14 @@ export default function OrgTree({ roots, contractsByMember }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const dragRef = useRef<{ active: boolean; startX: number; startY: number; baseX: number; baseY: number }>({
+    active: false,
+    startX: 0,
+    startY: 0,
+    baseX: 0,
+    baseY: 0,
+  });
 
   // 트리를 평탄화해 전체 노드 목록 확보
   const allNodes = useMemo(() => flattenTree(roots), [roots]);
@@ -278,11 +286,35 @@ export default function OrgTree({ roots, contractsByMember }: Props) {
       <div
         ref={viewportRef}
         className="w-full overflow-hidden rounded-lg"
-        title="휠로 확대/축소"
+        title="휠: 확대/축소 · 드래그: 이동"
+        onMouseDown={(e) => {
+          // 왼쪽 드래그로 패닝
+          dragRef.current = {
+            active: true,
+            startX: e.clientX,
+            startY: e.clientY,
+            baseX: pan.x,
+            baseY: pan.y,
+          };
+        }}
+        onMouseMove={(e) => {
+          if (!dragRef.current.active) return;
+          const dx = e.clientX - dragRef.current.startX;
+          const dy = e.clientY - dragRef.current.startY;
+          setPan({ x: dragRef.current.baseX + dx, y: dragRef.current.baseY + dy });
+        }}
+        onMouseUp={() => {
+          dragRef.current.active = false;
+        }}
+        onMouseLeave={() => {
+          dragRef.current.active = false;
+        }}
       >
         <div
           style={{
-            transform: `scale(${scale})`,
+            // zoom은 레이아웃에도 반영되어 축소 시 한 줄에 더 많이 배치됨
+            ...( { zoom: scale } as unknown as React.CSSProperties ),
+            transform: `translate(${pan.x}px, ${pan.y}px)`,
             transformOrigin: 'top center',
           }}
         >
