@@ -39,6 +39,31 @@ import { buildPerformancePath } from '../organization/performance-path';
 import { resolveSalesMemberByNameOnly } from './sales-resolution';
 import { resolveContractorByNameOnly } from './contractor-resolution';
 
+function shouldExcludeRecruitmentName(name: string, relationship: string): boolean {
+  const n = name.trim();
+  if (!n) return true;
+  // 계약자와의 관계 값이 계약자명으로 잘못 들어오는 케이스 방지
+  const rel = relationship.trim();
+  const banned = new Set([
+    '자녀',
+    '가족',
+    '모',
+    '부',
+    '아내',
+    '자',
+    // 흔한 변형(안전측)
+    '남편',
+    '배우자',
+    '본인',
+    '처',
+    '아버지',
+    '어머니',
+  ]);
+  if (banned.has(n)) return true;
+  if (rel && n === rel) return true;
+  return false;
+}
+
 /** 병렬 처리 최대 동시 요청 수 (환경변수로 조정 가능) */
 const CONCURRENCY = parseInt(process.env.TYLIFE_CONCURRENCY ?? '5', 10);
 
@@ -380,8 +405,13 @@ async function processItem(
     // - contractor_name이 organization_members에 유일하게 매칭되거나(0명은 신규 생성), 동명이인은 pending으로 분리
     if (detail && salesLinkStatus === 'linked' && finalSalesMemberId) {
       const contractorName = detail.contractor_name?.trim() ?? '';
+      const rel = detail.relationship_to_contractor?.trim() ?? '';
       const customerName = item.customer_name?.trim() ?? '';
-      if (contractorName && contractorName !== customerName) {
+      if (
+        contractorName &&
+        contractorName !== customerName &&
+        !shouldExcludeRecruitmentName(contractorName, rel)
+      ) {
         const res = await resolveContractorByNameOnly(db, contractorName);
 
         if (res.kind === 'single') {
@@ -423,6 +453,16 @@ async function processItem(
             })
             .eq('id', contractId);
         }
+      } else if (contractorName) {
+        // 관계값/무효값으로 판단되면 편입 로직 제외(큐에도 올리지 않음)
+        await db
+          .from('contracts')
+          .update({
+            contractor_member_id: null,
+            contractor_link_status: 'not_internal',
+            contractor_candidates_json: null,
+          })
+          .eq('id', contractId);
       }
     }
     return isNew ? 'created' : 'updated';
