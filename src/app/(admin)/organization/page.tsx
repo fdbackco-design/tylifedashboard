@@ -3,6 +3,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { buildOrgTree } from '@/lib/settlement/calculator';
 import { BASE_AMOUNT_PER_UNIT } from '@/lib/settlement/constants';
 import { getSettlementWindowSeoul } from '@/lib/settlement/settlement-window';
+import { calculateOrgNodeMetrics } from '@/lib/settlement/org-node-metrics';
 import OrgTree from '@/components/org-tree/OrgTree';
 import type { ContractItem } from '@/components/org-tree/OrgTreeNode';
 import type { OrgTreeRow, OrganizationMember } from '@/lib/types';
@@ -37,7 +38,8 @@ export default async function OrganizationPage() {
 
   const { start_date, end_date, label_year_month } = getSettlementWindowSeoul();
 
-  const [membersRes, edgesRes, contractCountRes, lastSyncRes, contractsRes, kpiRes] = await Promise.all([
+  const [membersRes, edgesRes, contractCountRes, lastSyncRes, contractsRes, kpiRes, rulesRes, settlementContractsRes] =
+    await Promise.all([
     db
       .from('organization_members')
       .select('id, name, rank')
@@ -58,6 +60,12 @@ export default async function OrganizationPage() {
       )
       .not('sales_member_id', 'is', null),
     db.rpc('get_organization_kpis', { p_start_date: start_date, p_end_date: end_date }),
+    db.from('settlement_rules').select('*'),
+    db
+      .from('v_contract_settlement_base')
+      .select('contract_id, join_date, unit_count, status, sales_member_id')
+      .order('join_date', { ascending: false })
+      .limit(20000),
   ]);
 
   // 안성준은 TY Life 시스템상 영업사원이지만 실제로는 본사(최상위)로 취급
@@ -129,6 +137,15 @@ export default async function OrganizationPage() {
   }
 
   const tree = buildOrgTree(treeRows);
+
+  const orgMetricsById = calculateOrgNodeMetrics({
+    roots: tree,
+    members,
+    edges: (edgesRes.data ?? []) as { parent_id: string | null; child_id: string }[],
+    contracts: (settlementContractsRes.data ?? []) as any[],
+    rules: (rulesRes.data ?? []) as any[],
+    settlementWindow: { start_date, end_date, label_year_month },
+  });
 
   const kpiRow = ((kpiRes.data ?? [])[0] ?? null) as
     | { total_join_units: number; period_join_units: number }
@@ -250,7 +267,7 @@ export default async function OrganizationPage() {
             {members.length}명이 있지만 조직 계층 연결(edges)이 없습니다. 상하위 관계를 등록하면 트리로 표시됩니다.
           </p>
         )}
-        <OrgTree roots={tree} contractsByMember={contractsByMember} />
+        <OrgTree roots={tree} contractsByMember={contractsByMember} metricsById={orgMetricsById} />
       </div>
     </div>
   );

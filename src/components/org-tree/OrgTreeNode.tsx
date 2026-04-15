@@ -66,11 +66,25 @@ export function countByStatus(
 interface Props {
   node: OrgTreeNodeType;
   contractsByMember: Record<string, ContractItem[]>;
+  nodeMetrics: null | {
+    cumulativeUnitCount: number;
+    monthlyUnitCount: number;
+    recognizedCommissionWon: number;
+    paidCommissionWon: number;
+  };
   selectedId: string | null;
   onSelect: (id: string) => void;
 }
 
-export default function OrgTreeNode({ node, contractsByMember, selectedId, onSelect }: Props) {
+export type OrgTreeNodeProps = Props;
+
+function formatManwon(won: number): string {
+  // 표시 단위: 만원 (예: 900,000원 -> 90)
+  const v = Math.round(won / 10_000);
+  return v.toLocaleString('ko-KR');
+}
+
+export default function OrgTreeNode({ node, contractsByMember, nodeMetrics, selectedId, onSelect }: Props) {
   const isSelected = selectedId === node.id;
   const style = RANK_STYLE[node.rank] ?? RANK_STYLE['영업사원'];
 
@@ -119,6 +133,35 @@ export default function OrgTreeNode({ node, contractsByMember, selectedId, onSel
             가입 {counts.가입}건
           </span>
         </div>
+
+        {nodeMetrics && (
+          <div className="mt-1.5 w-full text-[11px] text-gray-600 space-y-0.5">
+            <div className="flex justify-between">
+              <span className="text-gray-500">누적 구좌</span>
+              <span className="font-semibold text-gray-800 tabular-nums">
+                {nodeMetrics.cumulativeUnitCount.toLocaleString('ko-KR')}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">월 구좌</span>
+              <span className="font-semibold text-gray-800 tabular-nums">
+                {nodeMetrics.monthlyUnitCount.toLocaleString('ko-KR')}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">인정수당</span>
+              <span className="font-semibold text-gray-800 tabular-nums">
+                {formatManwon(nodeMetrics.recognizedCommissionWon)}만원
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">실지급액</span>
+              <span className="font-semibold text-gray-800 tabular-nums">
+                {formatManwon(nodeMetrics.paidCommissionWon)}만원
+              </span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

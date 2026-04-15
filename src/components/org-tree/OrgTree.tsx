@@ -216,9 +216,18 @@ function ContractPanel({
 interface Props {
   roots: OrgTreeNodeType[];
   contractsByMember: Record<string, ContractItem[]>;
+  metricsById?: Record<
+    string,
+    {
+      cumulativeUnitCount: number;
+      monthlyUnitCount: number;
+      recognizedCommissionWon: number;
+      paidCommissionWon: number;
+    }
+  >;
 }
 
-export default function OrgTree({ roots, contractsByMember }: Props) {
+export default function OrgTree({ roots, contractsByMember, metricsById }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -337,6 +346,7 @@ export default function OrgTree({ roots, contractsByMember }: Props) {
                       key={node.id}
                       node={node}
                       contractsByMember={contractsByMember}
+                      nodeMetrics={metricsById?.[node.id] ?? null}
                       selectedId={selectedId}
                       onSelect={handleSelect}
                     />
