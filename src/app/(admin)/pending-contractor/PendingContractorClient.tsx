@@ -11,7 +11,7 @@ type PendingRow = {
   unit_count: number;
   contractor_name: string | null;
   customers: { name: string } | null;
-  organization_members: { name: string; rank: string } | null; // 판매자 A (join)
+  recommender: { name: string; rank: string } | null; // 판매자 A (join)
   name_candidates_same_name: { id: string; name: string; rank: string }[];
   all_members_fallback: { id: string; name: string; rank: string }[];
 };
@@ -105,7 +105,7 @@ export default function PendingContractorClient() {
         const raw = row.contractor_name ?? '';
         const candidates = row.name_candidates_same_name;
         const busy = linkingId === row.id;
-        const recommender = row.organization_members ? `${row.organization_members.name} (${row.organization_members.rank})` : '-';
+        const recommender = row.recommender ? `${row.recommender.name} (${row.recommender.rank})` : '-';
 
         return (
           <div key={row.id} className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">

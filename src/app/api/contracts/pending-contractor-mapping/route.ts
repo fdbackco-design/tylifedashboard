@@ -20,7 +20,7 @@ export async function GET(): Promise<NextResponse> {
       unit_count,
       contractor_name,
       sales_member_id,
-      organization_members(name, rank),
+      recommender:organization_members!contracts_sales_member_id_fkey(name, rank),
       customers(name)
       `,
     )
