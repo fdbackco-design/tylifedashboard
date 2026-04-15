@@ -71,7 +71,12 @@ function isRentalUnmet(c: ContractItem): boolean {
 }
 
 function getDisplayStatus(c: ContractItem): string {
-  return isRentalUnmet(c) ? '렌탈 미충족' : c.status;
+  // 표시 기준:
+  // - 렌탈 미충족이면 최우선 표기
+  // - 그 외 “가입 인정 조건”이면 가입으로 표기
+  if (isRentalUnmet(c)) return '렌탈 미충족';
+  if (isJoinCompleted(c)) return '가입';
+  return c.status;
 }
 
 function aggregateContracts(contracts: ContractItem[]): AggregatedContract[] {
