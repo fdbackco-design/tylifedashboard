@@ -430,24 +430,16 @@ async function processItem(
             .eq('id', contractId);
           await ensureOrgEdgeWithSource(db, finalSalesMemberId, res.memberId, contractId);
         } else if (res.kind === 'missing') {
-          // 내부 멤버가 없으면 자동 생성 (기본: 영업사원)
-          const { data: created, error: cErr } = await db
-            .from('organization_members')
-            .insert({ name: contractorName, rank: '영업사원', is_active: true })
-            .select('id')
-            .single();
-          if (cErr) throw new Error(`계약자 멤버 생성 실패: ${cErr.message}`);
-          const memberId = (created as { id: string }).id;
-
+          // 중요: 영업사원(organization_members) 신규 생성은 "담당자명"에서만 허용.
+          // 계약자/관계 필드에서 나온 이름으로는 절대 자동 생성하지 않는다.
           await db
             .from('contracts')
             .update({
-              contractor_member_id: memberId,
-              contractor_link_status: 'linked',
-              contractor_candidates_json: null,
+              contractor_member_id: null,
+              contractor_link_status: 'pending_mapping',
+              contractor_candidates_json: { name: contractorName, candidate_ids: [] },
             })
             .eq('id', contractId);
-          await ensureOrgEdgeWithSource(db, finalSalesMemberId, memberId, contractId);
         } else {
           await db
             .from('contracts')
