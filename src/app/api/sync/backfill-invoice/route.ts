@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchContractDetailHtml } from '@/lib/tylife/client';
 import { parseContractDetailHtml, normalizeDate } from '@/lib/tylife/html-parser';
-import { normalizeJoinMethod, normalizeWatchFit } from '@/lib/tylife/normalize';
+import {
+  DEFAULT_ITEM_NAME_PLACEHOLDER,
+  normalizeJoinMethod,
+  normalizeWatchFit,
+} from '@/lib/tylife/normalize';
 
 export const dynamic = 'force-dynamic';
 
@@ -84,13 +88,19 @@ function isAuthorized(req: NextRequest): boolean {
  * - limit?: number        (default 50, max 200)
  * - cursor?: string|null  (다음 페이지 시작점 — 마지막으로 처리한 contracts.id)
  * - concurrency?: number  (default 3, max 8)
+ * - scope?: 'needs_detail' | 'all' | 'missing_invoice' | 'placeholder_item_name'
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!isAuthorized(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  let body: { limit?: number; cursor?: string | null; concurrency?: number } = {};
+  let body: {
+    limit?: number;
+    cursor?: string | null;
+    concurrency?: number;
+    scope?: 'needs_detail' | 'all' | 'missing_invoice' | 'placeholder_item_name';
+  } = {};
   try {
     body = await req.json();
   } catch {
@@ -100,6 +110,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const limit = Math.min(Math.max(body.limit ?? 50, 1), 200);
   const cursor = body.cursor ?? null;
   const concurrency = Math.min(Math.max(body.concurrency ?? 3, 1), 8);
+  const scope = body.scope ?? 'needs_detail';
 
   const { createAdminSupabaseClient } = await import('@/lib/supabase/server');
   const db = createAdminSupabaseClient();
@@ -107,10 +118,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let q = db
     .from('contracts')
     .select('id, contract_code, external_id')
-    .is('invoice_no', null)
     .not('external_id', 'is', null)
     .order('id', { ascending: true })
     .limit(limit);
+
+  if (scope === 'needs_detail') {
+    q = q.or(`invoice_no.is.null,item_name.eq.${JSON.stringify(DEFAULT_ITEM_NAME_PLACEHOLDER)}`);
+  } else if (scope === 'missing_invoice') {
+    q = q.is('invoice_no', null);
+  } else if (scope === 'placeholder_item_name') {
+    q = q.eq('item_name', DEFAULT_ITEM_NAME_PLACEHOLDER);
+  } else if (scope === 'all') {
+    // no extra filter
+  }
 
   if (cursor) {
     q = q.gt('id', cursor);
@@ -193,6 +213,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     cursor,
     next_cursor,
     concurrency,
+    scope,
     processed,
     updated_invoice_no: updated,
     mismatches,

@@ -22,6 +22,8 @@ import type { OrganizationMemberInsert, RankType } from '../types/organization';
 import { parseSsn, parseMaskedSsn, parseRentalOrMemo } from '../utils/mask';
 import { normalizeDate } from './html-parser';
 
+export const DEFAULT_ITEM_NAME_PLACEHOLDER = '헬스365 고주파 발마사지기 [Health365]';
+
 // ─────────────────────────────────────────────
 // 열거형 정규화 헬퍼
 // ─────────────────────────────────────────────
@@ -137,8 +139,9 @@ export function normalizeContractFromList(
     sales_member_id: salesMemberId,
     join_date: normalizeDate(item.joined_at_raw ?? ''),
     product_type: normalizeProductType(item.product_type_raw ?? ''),
-    // 상세에서 업데이트 — DB 제약 unit_count > 0 충족용 placeholder
-    item_name: '헬스365 고주파 발마사지기 [Health365]',
+    // 상세에서 업데이트 — DB 스키마 item_name NOT NULL 기본값과 동일한 placeholder
+    // (상세에서만 실제 물품명이 오므로, 정상 케이스에서는 상세 fetch 후 overwrite 되어야 함)
+    item_name: DEFAULT_ITEM_NAME_PLACEHOLDER,
     watch_fit: normalizeWatchFit(item.watch_fit_raw ?? ''),
     unit_count: 1,
     join_method: normalizeJoinMethod(item.join_method_raw ?? ''),
