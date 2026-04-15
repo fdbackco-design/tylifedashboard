@@ -25,6 +25,13 @@ function getCurrentYearMonth(): string {
 
 const ELIGIBLE_STATUSES = ['해피콜완료', '배송준비', '배송완료', '정산완료'];
 
+function nextMonthStart(yearMonth: string): string {
+  const [y, m] = yearMonth.split('-').map(Number);
+  const ny = m === 12 ? y + 1 : y;
+  const nm = m === 12 ? 1 : m + 1;
+  return `${ny}-${String(nm).padStart(2, '0')}-01`;
+}
+
 export default async function SettlementPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const yearMonth = params.year_month ?? getCurrentYearMonth();
@@ -33,16 +40,26 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const db = createAdminSupabaseClient();
 
   // 해당 월 계약 현황 (정산 대상 여부 파악용)
-  const contractStatsRes = await db
-    .from('contracts')
-    .select('status')
-    .gte('contract_date', `${yearMonth}-01`)
-    .lte('contract_date', `${yearMonth}-31`);
+  // 목록 전체를 내려받지 말고 count만 조회 (빠름)
+  const monthStart = `${yearMonth}-01`;
+  const monthEndExclusive = nextMonthStart(yearMonth);
 
-  const allContracts = contractStatsRes.data ?? [];
-  const eligibleContracts = allContracts.filter((c) =>
-    ELIGIBLE_STATUSES.includes((c as { status: string }).status),
-  );
+  const [allCountRes, eligibleCountRes] = await Promise.all([
+    db
+      .from('contracts')
+      .select('id', { head: true, count: 'estimated' })
+      .gte('join_date', monthStart)
+      .lt('join_date', monthEndExclusive),
+    db
+      .from('contracts')
+      .select('id', { head: true, count: 'estimated' })
+      .gte('join_date', monthStart)
+      .lt('join_date', monthEndExclusive)
+      .in('status', ELIGIBLE_STATUSES),
+  ]);
+
+  const allContractsCount = allCountRes.count ?? 0;
+  const eligibleContractsCount = eligibleCountRes.count ?? 0;
 
   let query = db
     .from('monthly_settlements')
@@ -102,13 +119,19 @@ export default async function SettlementPage({ searchParams }: PageProps) {
           <p className="text-sm text-gray-500 mt-0.5">
             {yearMonth} · 합계 {formatKRW(totalAmount)}
           </p>
-          {allContracts.length > 0 && (
+          {allContractsCount > 0 && (
             <p className="text-xs text-gray-400 mt-0.5">
-              {yearMonth} 계약 {allContracts.length}건 중{' '}
-              <span className={eligibleContracts.length > 0 ? 'text-green-600 font-medium' : 'text-amber-600 font-medium'}>
-                정산 대상 {eligibleContracts.length}건
+              {yearMonth} 계약 {allContractsCount}건 중{' '}
+              <span
+                className={
+                  eligibleContractsCount > 0
+                    ? 'text-green-600 font-medium'
+                    : 'text-amber-600 font-medium'
+                }
+              >
+                정산 대상 {eligibleContractsCount}건
               </span>
-              {eligibleContracts.length === 0 && (
+              {eligibleContractsCount === 0 && (
                 <> (해피콜완료 이상의 상태 필요)</>
               )}
             </p>
@@ -185,14 +208,14 @@ export default async function SettlementPage({ searchParams }: PageProps) {
                 <tr>
                   <td colSpan={10} className="px-6 py-10 text-center">
                     <p className="text-gray-500 font-medium mb-2">{yearMonth} 정산 데이터가 없습니다.</p>
-                    {allContracts.length === 0 ? (
+                    {allContractsCount === 0 ? (
                       <p className="text-xs text-gray-400">
                         이 달에 저장된 계약이 없습니다.{' '}
                         <span className="font-medium">조직도 페이지</span>에서 TY Life 동기화를 먼저 실행하세요.
                       </p>
-                    ) : eligibleContracts.length === 0 ? (
+                    ) : eligibleContractsCount === 0 ? (
                       <p className="text-xs text-amber-600">
-                        {allContracts.length}건의 계약이 있지만 모두 &apos;준비&apos; 상태입니다.
+                        {allContractsCount}건의 계약이 있지만 모두 &apos;준비&apos; 상태입니다.
                         <br />
                         정산 계산은 <strong>해피콜완료 · 배송준비 · 배송완료 · 정산완료</strong> 상태의 계약만 포함됩니다.
                       </p>
