@@ -90,7 +90,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
       sales_link_status,
       raw_sales_member_name,
       customers(name),
-      organization_members(name)
+      sales_member:organization_members!contracts_sales_member_id_fkey(name)
       `,
       // exact count는 느릴 수 있어, 목록 UX용으로 estimated 사용
       { count: 'estimated' },
@@ -112,7 +112,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
     query = query.or(
       [
         `customers.name.ilike.${like}`,
-        `organization_members.name.ilike.${like}`,
+        `sales_member.name.ilike.${like}`,
         `raw_sales_member_name.ilike.${like}`,
       ].join(','),
     );
@@ -140,7 +140,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
     sales_link_status?: string;
     raw_sales_member_name?: string | null;
     customers: unknown;
-    organization_members: unknown;
+    sales_member: unknown;
     /** 묶인 계약 수 */
     contract_count: number;
   };
@@ -199,7 +199,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
           sales_link_status: (c as { sales_link_status?: string }).sales_link_status,
           raw_sales_member_name: (c as { raw_sales_member_name?: string | null }).raw_sales_member_name,
           customers: (c as { customers: unknown }).customers,
-          organization_members: (c as { organization_members: unknown }).organization_members,
+          sales_member: (c as { sales_member: unknown }).sales_member,
           contract_count: 1,
         });
         continue;
@@ -346,7 +346,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
               )}
               {aggregated.map((c) => {
                 const customer = c.customers as { name: string } | null;
-                const member = c.organization_members as { name: string } | null;
+                const member = c.sales_member as { name: string } | null;
                 const displayStatus = getDisplayStatus(c);
 
                 return (
