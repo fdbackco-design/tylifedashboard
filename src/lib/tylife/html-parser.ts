@@ -180,10 +180,15 @@ export function parseContractDetailHtml(
   return {
     contract_code: contractCode,
     item_name: extractByLabel($, '물품명', '품목명'),
+    invoice_no: extractByLabel($, '송장 번호', '송장번호', '운송장 번호', '운송장번호'),
+    rental_request_no: extractByLabel($, '렌탈신청번호', '렌탈 신청 번호'),
     unit_count:
       unitCount !== null && Number.isFinite(unitCount) && unitCount > 0
         ? unitCount
         : null,
+    join_method: extractByLabel($, '가입 방법', '가입방법'),
+    watch_fit: extractByLabel($, '워치/핏', '워치핏'),
+    happy_call_at: extractByLabel($, '해피콜 일시', '해피콜일시'),
     relationship_to_contractor: extractByLabel($, '계약자와의 관계', '관계'),
     contractor_name: extractByLabel($, '계약자'),
     beneficiary_name: extractByLabel($, '지정인', '수혜자'),

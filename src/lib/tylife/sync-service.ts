@@ -231,20 +231,22 @@ async function processItem(
     // ── 3. 기존 계약 조회 (상세 fetch 스킵 여부 + 실적 경로 1회 스탬핑 유지) ──
     const { data: existingContract } = await db
       .from('contracts')
-      .select('id, status, unit_count, performance_path_json')
+      .select('id, status, unit_count, invoice_no, performance_path_json')
       .eq('contract_code', item.contract_code)
       .maybeSingle();
 
     const ec = existingContract as {
       status: string;
       unit_count: number | null;
+      invoice_no: string | null;
       performance_path_json: unknown;
     } | null;
     const existingPathStamped = ec != null && ec.performance_path_json != null;
     const alreadyHasDetail =
       ec != null &&
       ec.status === normalizeStatus(item.status_raw ?? '') &&
-      ec.unit_count != null;
+      ec.unit_count != null &&
+      ec.invoice_no != null;
 
     // ── 4. 상세 HTML → TY Life external_id 로 담당자 확정 (동명이인/미매칭 해소)
     let detail: ReturnType<typeof parseContractDetailHtml> | null = null;

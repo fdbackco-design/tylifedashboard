@@ -164,10 +164,15 @@ export function mergeDetailIntoContract(
 ): ContractInsert {
   return {
     ...base,
+    invoice_no: detail.invoice_no ?? base.invoice_no,
+    rental_request_no: detail.rental_request_no ?? base.rental_request_no,
     item_name: detail.item_name ?? base.item_name,
     unit_count: (detail.unit_count != null && detail.unit_count > 0)
       ? detail.unit_count
       : base.unit_count,
+    join_method: detail.join_method ? normalizeJoinMethod(detail.join_method) : base.join_method,
+    watch_fit: detail.watch_fit ? normalizeWatchFit(detail.watch_fit) : base.watch_fit,
+    happy_call_at: detail.happy_call_at ? normalizeDate(detail.happy_call_at) : base.happy_call_at,
     contractor_name: detail.contractor_name ?? base.contractor_name,
     beneficiary_name: detail.beneficiary_name ?? base.beneficiary_name,
     relationship_to_contractor:

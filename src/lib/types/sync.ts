@@ -96,8 +96,18 @@ export interface TyLifeContractDetail {
   contract_code: string;
   /** 물품명 (상세에서만 확인 가능) */
   item_name: string | null;
+  /** 송장/운송장 번호 (상세에서만 확인 가능) */
+  invoice_no: string | null;
+  /** 렌탈신청번호 (상세에서만 확인 가능할 수 있음) */
+  rental_request_no: string | null;
   /** 가입 구좌 수 (상세에서만 확인 가능) */
   unit_count: number | null;
+  /** 가입 방법 (상세에서만 확인 가능할 수 있음) */
+  join_method: string | null;
+  /** 워치/핏 (상세에서만 확인 가능할 수 있음) */
+  watch_fit: string | null;
+  /** 해피콜 일시 (상세에서만 확인 가능할 수 있음) */
+  happy_call_at: string | null;
   /** 계약자와의 관계 */
   relationship_to_contractor: string | null;
   /** 계약자명 */
