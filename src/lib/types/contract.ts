@@ -19,6 +19,9 @@ export type JoinMethodType = '해피콜' | '간편가입' | '기타';
 /** 담당자 연결: linked만 정산·실적 집계, pending_mapping은 관리자 매핑 대기 */
 export type SalesLinkStatus = 'linked' | 'pending_mapping';
 
+/** 계약자(편입 대상) 연결 상태 */
+export type ContractorLinkStatus = 'not_internal' | 'linked' | 'pending_mapping';
+
 /** 수집 시점 상위 조직 경로 스냅샷 (루트 → 담당자) */
 export interface PerformancePathSegment {
   id: string;
@@ -52,6 +55,10 @@ export interface Contract {
   /** true이면 당월 정산 제외 */
   is_cancelled: boolean;
   contractor_name: string | null;
+  /** 편입 확정된 계약자(내부 멤버) */
+  contractor_member_id?: string | null;
+  contractor_link_status?: ContractorLinkStatus;
+  contractor_candidates_json?: unknown | null;
   beneficiary_name: string | null;
   relationship_to_contractor: string | null;
   external_id: string | null;
@@ -88,6 +95,9 @@ export interface ContractInsert {
   happy_call_at?: string | null;
   is_cancelled?: boolean;
   contractor_name?: string | null;
+  contractor_member_id?: string | null;
+  contractor_link_status?: ContractorLinkStatus;
+  contractor_candidates_json?: unknown | null;
   beneficiary_name?: string | null;
   relationship_to_contractor?: string | null;
   external_id?: string | null;

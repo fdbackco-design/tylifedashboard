@@ -1,0 +1,190 @@
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+
+type PendingRow = {
+  id: string;
+  contract_code: string;
+  join_date: string;
+  status: string;
+  unit_count: number;
+  contractor_name: string | null;
+  customers: { name: string } | null;
+  organization_members: { name: string; rank: string } | null; // 판매자 A (join)
+  name_candidates_same_name: { id: string; name: string; rank: string }[];
+  all_members_fallback: { id: string; name: string; rank: string }[];
+};
+
+export default function PendingContractorClient() {
+  const [rows, setRows] = useState<PendingRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [linkingId, setLinkingId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setErr(null);
+    try {
+      const res = await fetch('/api/contracts/pending-contractor-mapping');
+      const json = (await res.json()) as { data?: PendingRow[]; error?: string };
+      if (!res.ok) throw new Error(json.error ?? '조회 실패');
+      setRows(json.data ?? []);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function linkContract(contractId: string, memberId: string) {
+    setLinkingId(contractId);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/contracts/${contractId}/link-contractor`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contractor_member_id: memberId, action: 'link' }),
+      });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error ?? '연결 실패');
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLinkingId(null);
+    }
+  }
+
+  async function markNotInternal(contractId: string) {
+    setLinkingId(contractId);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/contracts/${contractId}/link-contractor`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'not_internal' }),
+      });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error ?? '처리 실패');
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLinkingId(null);
+    }
+  }
+
+  if (loading) {
+    return <p className="text-sm text-gray-500">불러오는 중…</p>;
+  }
+
+  if (err) {
+    return (
+      <p className="text-sm text-red-600">
+        {err}{' '}
+        <button type="button" onClick={() => void load()} className="underline">
+          다시 시도
+        </button>
+      </p>
+    );
+  }
+
+  if (rows.length === 0) {
+    return <p className="text-sm text-gray-500">편입 매핑 대기 계약이 없습니다.</p>;
+  }
+
+  return (
+    <div className="space-y-6">
+      {rows.map((row) => {
+        const customerName = row.customers?.name ?? '-';
+        const raw = row.contractor_name ?? '';
+        const candidates = row.name_candidates_same_name;
+        const busy = linkingId === row.id;
+        const recommender = row.organization_members ? `${row.organization_members.name} (${row.organization_members.rank})` : '-';
+
+        return (
+          <div key={row.id} className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+            <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+              <div>
+                <Link
+                  href={`/contracts/${row.id}`}
+                  className="font-mono text-sm font-semibold text-blue-600 hover:underline"
+                >
+                  {row.contract_code}
+                </Link>
+                <span className="text-gray-400 mx-2">·</span>
+                <span className="text-sm text-gray-600">고객 {customerName}</span>
+              </div>
+              <span className="text-xs text-gray-400">
+                가입 {row.join_date} · {row.status} · {row.unit_count}구좌
+              </span>
+            </div>
+
+            <div className="text-sm text-gray-700 mb-3 space-y-1">
+              <p>
+                계약자(편입 후보): <strong className="text-gray-900">{raw || '(없음)'}</strong>
+              </p>
+              <p className="text-xs text-gray-500">
+                추천자 A(판매자): {recommender}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <p className="text-xs font-medium text-gray-500">
+                동명이인이면 한 번만 선택하세요. 내부직원이 아니라면 제외 처리하세요.
+              </p>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void markNotInternal(row.id)}
+                className="px-3 py-1.5 text-xs rounded border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+              >
+                내부직원 아님(편입 제외)
+              </button>
+            </div>
+
+            {candidates.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {candidates.map((m, idx) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void linkContract(row.id, m.id)}
+                    className="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {idx + 1}번 {m.name} ({m.rank})
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <select
+                disabled={busy}
+                className="w-full max-w-md text-sm border border-gray-300 rounded px-2 py-2"
+                defaultValue=""
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v) void linkContract(row.id, v);
+                  e.target.value = '';
+                }}
+              >
+                <option value="">편입 대상(B) 선택…</option>
+                {row.all_members_fallback.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} · {m.rank}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+

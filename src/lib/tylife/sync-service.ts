@@ -37,6 +37,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ContractInsert } from '../types/contract';
 import { buildPerformancePath } from '../organization/performance-path';
 import { resolveSalesMemberByNameOnly } from './sales-resolution';
+import { resolveContractorByNameOnly } from './contractor-resolution';
 
 /** 병렬 처리 최대 동시 요청 수 (환경변수로 조정 가능) */
 const CONCURRENCY = parseInt(process.env.TYLIFE_CONCURRENCY ?? '5', 10);
@@ -171,6 +172,45 @@ async function upsertContract(
   }
 
   return { id: contractId, isNew: !existing };
+}
+
+async function ensureOrgEdgeWithSource(
+  db: SupabaseClient,
+  parentId: string,
+  childId: string,
+  sourceContractId: string,
+): Promise<void> {
+  // child_id UNIQUE 제약: 이미 parent가 있으면 건드리지 않는다.
+  const { data: existing, error: exErr } = await db
+    .from('organization_edges')
+    .select('id, parent_id')
+    .eq('child_id', childId)
+    .maybeSingle();
+  if (exErr) throw new Error(`organization_edges 조회 실패: ${exErr.message}`);
+
+  if (existing) {
+    const ex = existing as { id: string; parent_id: string | null };
+    if (ex.parent_id && ex.parent_id !== parentId) return;
+    // parent가 null이거나 동일하면 그대로 사용
+    const edgeId = ex.id;
+    await db.from('organization_edge_sources').upsert(
+      { edge_id: edgeId, source_contract_id: sourceContractId, created_by: 'sync-service' },
+      { onConflict: 'edge_id,source_contract_id' },
+    );
+    return;
+  }
+
+  const { data: ins, error: insErr } = await db
+    .from('organization_edges')
+    .insert({ parent_id: parentId, child_id: childId })
+    .select('id')
+    .single();
+  if (insErr) throw new Error(`organization_edges 생성 실패: ${insErr.message}`);
+  const edgeId = (ins as { id: string }).id;
+  await db.from('organization_edge_sources').upsert(
+    { edge_id: edgeId, source_contract_id: sourceContractId, created_by: 'sync-service' },
+    { onConflict: 'edge_id,source_contract_id' },
+  );
 }
 
 // ─────────────────────────────────────────────
@@ -331,7 +371,60 @@ async function processItem(
       };
     }
 
-    const { isNew } = await upsertContract(db, contractFinal);
+    const { id: contractId, isNew } = await upsertContract(db, contractFinal);
+
+    // ── 6. 신규 영업사원 편입(추천 트리): A(판매자) 아래에 B(계약자=내부 영업사원) 붙이기
+    // 조건:
+    // - 상세에서 contractor_name이 있고
+    // - parent A(=finalSalesMemberId)가 확정(linked)이며
+    // - contractor_name이 organization_members에 유일하게 매칭되거나(0명은 신규 생성), 동명이인은 pending으로 분리
+    if (detail && salesLinkStatus === 'linked' && finalSalesMemberId) {
+      const contractorName = detail.contractor_name?.trim() ?? '';
+      const customerName = item.customer_name?.trim() ?? '';
+      if (contractorName && contractorName !== customerName) {
+        const res = await resolveContractorByNameOnly(db, contractorName);
+
+        if (res.kind === 'single') {
+          await db
+            .from('contracts')
+            .update({
+              contractor_member_id: res.memberId,
+              contractor_link_status: 'linked',
+              contractor_candidates_json: null,
+            })
+            .eq('id', contractId);
+          await ensureOrgEdgeWithSource(db, finalSalesMemberId, res.memberId, contractId);
+        } else if (res.kind === 'missing') {
+          // 내부 멤버가 없으면 자동 생성 (기본: 영업사원)
+          const { data: created, error: cErr } = await db
+            .from('organization_members')
+            .insert({ name: contractorName, rank: '영업사원', is_active: true })
+            .select('id')
+            .single();
+          if (cErr) throw new Error(`계약자 멤버 생성 실패: ${cErr.message}`);
+          const memberId = (created as { id: string }).id;
+
+          await db
+            .from('contracts')
+            .update({
+              contractor_member_id: memberId,
+              contractor_link_status: 'linked',
+              contractor_candidates_json: null,
+            })
+            .eq('id', contractId);
+          await ensureOrgEdgeWithSource(db, finalSalesMemberId, memberId, contractId);
+        } else {
+          await db
+            .from('contracts')
+            .update({
+              contractor_member_id: null,
+              contractor_link_status: 'pending_mapping',
+              contractor_candidates_json: { name: contractorName, candidate_ids: res.ids },
+            })
+            .eq('id', contractId);
+        }
+      }
+    }
     return isNew ? 'created' : 'updated';
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
