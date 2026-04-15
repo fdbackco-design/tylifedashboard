@@ -85,7 +85,8 @@ export default async function ContractsPage({ searchParams }: PageProps) {
       customers(name),
       organization_members(name)
       `,
-      { count: 'exact' },
+      // exact count는 느릴 수 있어, 목록 UX용으로 estimated 사용
+      { count: 'estimated' },
     )
     .order('sequence_no', { ascending: false, nullsFirst: false })
     .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);

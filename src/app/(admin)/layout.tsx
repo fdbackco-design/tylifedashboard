@@ -31,6 +31,7 @@ export default function AdminLayout({
             <Link
               key={item.href}
               href={item.href}
+              prefetch={true}
               className="block px-3 py-2 rounded-md text-sm text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
             >
               {item.label}
