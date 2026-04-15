@@ -155,7 +155,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (!row.external_id) return { processed: 0, updatedInvoice: 0 };
 
     try {
-      const html = await withRetry(
+      let html = await withRetry(
         () => fetchContractDetailHtml(row.external_id as string),
         { tries: 3, baseDelayMs: 400, label: `detail(${row.external_id})` },
       );
@@ -164,6 +164,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const m = html.match(/contractNo\s*[:=]\s*['"]?(\d+)/i);
       if (m?.[1] && m[1] !== row.external_id) {
         mismatches.push({ contract_id: row.id, external_id: row.external_id, contractNo: m[1] });
+        // 실제 상세 화면이 내부적으로 다른 contractNo를 기준으로 렌더링하는 케이스가 있어,
+        // contractNo를 따라 한 번 더 조회해 정확한 HTML로 백필한다.
+        html = await withRetry(
+          () => fetchContractDetailHtml(m[1]),
+          { tries: 3, baseDelayMs: 400, label: `detail(contractNo:${m[1]})` },
+        );
       }
 
       const detail = parseContractDetailHtml(html, row.contract_code);
