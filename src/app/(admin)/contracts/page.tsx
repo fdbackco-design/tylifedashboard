@@ -35,11 +35,17 @@ const STATUS_COLORS: Record<ContractStatus, string> = {
 function getDisplayStatus(c: {
   status: ContractStatus;
   rental_request_no?: string | null;
+  invoice_no?: string | null;
   memo?: string | null;
 }): ContractStatus | '렌탈 미충족' {
   const v = (c.rental_request_no ?? c.memo ?? '').trim();
   if ((c.status === '준비' || c.status === '대기') && v === '렌탈기준 미충족') {
     return '렌탈 미충족';
+  }
+  const hasRental = (c.rental_request_no ?? '').trim().length > 0;
+  const hasInvoice = (c.invoice_no ?? '').trim().length > 0;
+  if (c.status === '가입' || (c.status !== '해약' && hasRental && hasInvoice)) {
+    return '가입';
   }
   return c.status;
 }
@@ -74,6 +80,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
       join_date,
       item_name,
       rental_request_no,
+      invoice_no,
       memo,
       unit_count,
       join_method,
@@ -127,6 +134,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
     join_method: string;
     status: ContractStatus;
     rental_request_no?: string | null;
+    invoice_no?: string | null;
     memo?: string | null;
     is_cancelled: boolean;
     sales_link_status?: string;
@@ -175,10 +183,18 @@ export default async function ContractsPage({ searchParams }: PageProps) {
           rental_request_no: ((c as { rental_request_no?: string | null }).rental_request_no ?? null) as
             | string
             | null,
+          invoice_no: ((c as { invoice_no?: string | null }).invoice_no ?? null) as string | null,
           memo: ((c as { memo?: string | null }).memo ?? null) as string | null,
           unit_count: ((c as { unit_count?: number }).unit_count ?? 0) as number,
           join_method: (c as { join_method: string }).join_method,
-          status: (c as { status: ContractStatus }).status,
+          status: getDisplayStatus({
+            status: (c as { status: ContractStatus }).status,
+            rental_request_no: ((c as { rental_request_no?: string | null }).rental_request_no ?? null) as
+              | string
+              | null,
+            invoice_no: ((c as { invoice_no?: string | null }).invoice_no ?? null) as string | null,
+            memo: ((c as { memo?: string | null }).memo ?? null) as string | null,
+          }) as ContractStatus,
           is_cancelled: (c as { is_cancelled: boolean }).is_cancelled,
           sales_link_status: (c as { sales_link_status?: string }).sales_link_status,
           raw_sales_member_name: (c as { raw_sales_member_name?: string | null }).raw_sales_member_name,
@@ -199,11 +215,21 @@ export default async function ContractsPage({ searchParams }: PageProps) {
           | string
           | null;
       }
+      if (!existing.invoice_no) {
+        existing.invoice_no = ((c as { invoice_no?: string | null }).invoice_no ?? null) as string | null;
+      }
       if (!existing.memo) {
         existing.memo = ((c as { memo?: string | null }).memo ?? null) as string | null;
       }
 
-      const s = (c as { status: ContractStatus }).status;
+      const s = getDisplayStatus({
+        status: (c as { status: ContractStatus }).status,
+        rental_request_no: ((c as { rental_request_no?: string | null }).rental_request_no ?? null) as
+          | string
+          | null,
+        invoice_no: ((c as { invoice_no?: string | null }).invoice_no ?? null) as string | null,
+        memo: ((c as { memo?: string | null }).memo ?? null) as string | null,
+      }) as ContractStatus;
       if ((statusRank[s] ?? 0) > (statusRank[existing.status] ?? 0)) {
         existing.status = s;
       }

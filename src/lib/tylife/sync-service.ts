@@ -321,7 +321,12 @@ async function processItem(
     let detail: ReturnType<typeof parseContractDetailHtml> | null = null;
     if (item.external_id && !alreadyHasDetail) {
       try {
-        const html = await fetchContractDetailHtml(item.external_id);
+        let html = await fetchContractDetailHtml(item.external_id);
+        // 상세 URL id vs HTML 내부 contractNo 불일치 케이스 보정 (backfill과 동일 정책)
+        const m = html.match(/contractNo\s*[:=]\s*['"]?(\d+)/i);
+        if (m?.[1] && m[1] !== item.external_id) {
+          html = await fetchContractDetailHtml(m[1]);
+        }
         detail = parseContractDetailHtml(html, item.contract_code);
 
         if (detail.sales_member_external_id) {

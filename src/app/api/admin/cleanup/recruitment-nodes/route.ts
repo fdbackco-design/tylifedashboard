@@ -38,6 +38,8 @@ const DEFAULT_BANNED = [
 type CleanupRequest = {
   names?: string[];
   delete_members?: boolean;
+  /** true면 참조 중인 계약들의 contractor 편입을 해제한 뒤 삭제를 시도 */
+  unlink_contractor_contracts?: boolean;
 };
 
 async function getTargets(db: ReturnType<(typeof import('@/lib/supabase/server'))['createAdminSupabaseClient']>, names: string[]) {
@@ -131,6 +133,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const names = (body.names?.length ? body.names : [...DEFAULT_BANNED]).map((s) => s.trim()).filter(Boolean);
   const deleteMembers = body.delete_members === true;
+  const unlinkContractorContracts = body.unlink_contractor_contracts === true;
 
   const { createAdminSupabaseClient } = await import('@/lib/supabase/server');
   const db = createAdminSupabaseClient();
@@ -150,6 +153,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // 2) members 삭제(옵션, 안전 조건)
     const deleted_members: string[] = [];
     const skipped_members: Array<{ id: string; name: string; reason: string }> = [];
+    const unlinked_contractor_contracts: Array<{ member_id: string; updated: number }> = [];
 
     if (deleteMembers && members.length > 0) {
       for (const m of members) {
@@ -170,11 +174,46 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
         const salesCnt = salesRef.count ?? 0;
         const contractorCnt = contractorRef.count ?? 0;
-        if (salesCnt > 0 || contractorCnt > 0) {
+        if (salesCnt > 0) {
           skipped_members.push({
             id: m.id,
             name: m.name,
-            reason: `referenced by contracts (sales=${salesCnt}, contractor=${contractorCnt})`,
+            reason: `referenced by contracts as sales_member_id (sales=${salesCnt})`,
+          });
+          continue;
+        }
+
+        if (contractorCnt > 0 && unlinkContractorContracts) {
+          const { error: uErr } = await db
+            .from('contracts')
+            .update({
+              contractor_member_id: null,
+              contractor_link_status: 'not_internal',
+              contractor_candidates_json: null,
+            })
+            .eq('contractor_member_id', m.id);
+          if (uErr) {
+            skipped_members.push({ id: m.id, name: m.name, reason: `unlink failed: ${uErr.message}` });
+            continue;
+          }
+          // update 응답에서 count를 못 받는 환경이 있어, 사전 refcount(contractorCnt)를 업데이트 수로 기록
+          unlinked_contractor_contracts.push({ member_id: m.id, updated: contractorCnt });
+        }
+
+        // unlink 이후 다시 참조 카운트 체크
+        const { count: contractorCnt2, error: contractorRef2Err } = await db
+          .from('contracts')
+          .select('id', { count: 'exact', head: true })
+          .eq('contractor_member_id', m.id);
+        if (contractorRef2Err) {
+          skipped_members.push({ id: m.id, name: m.name, reason: 'refcount query failed(after unlink)' });
+          continue;
+        }
+        if ((contractorCnt2 ?? 0) > 0) {
+          skipped_members.push({
+            id: m.id,
+            name: m.name,
+            reason: `still referenced by contracts as contractor_member_id (contractor=${contractorCnt2 ?? 0})`,
           });
           continue;
         }
@@ -194,9 +233,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       names,
       deleted_edges,
       delete_members: deleteMembers,
+      unlink_contractor_contracts: unlinkContractorContracts,
       deleted_members_count: deleted_members.length,
       skipped_members_count: skipped_members.length,
       skipped_members,
+      unlinked_contractor_contracts,
     });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
