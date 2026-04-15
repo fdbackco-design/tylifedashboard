@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { OrgTreeNode as OrgTreeNodeType, RankType } from '@/lib/types';
 import OrgTreeNode, {
   type ContractItem,
@@ -215,20 +215,25 @@ interface Props {
 
 export default function OrgTree({ roots, contractsByMember }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [scale, setScale] = useState(1);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
 
   // 트리를 평탄화해 전체 노드 목록 확보
-  const allNodes = flattenTree(roots);
+  const allNodes = useMemo(() => flattenTree(roots), [roots]);
 
   // rank 기준으로 그룹화
-  const byRank = new Map<RankType, OrgTreeNodeType[]>();
-  for (const node of allNodes) {
-    const rank = node.rank as RankType;
-    if (!byRank.has(rank)) byRank.set(rank, []);
-    byRank.get(rank)!.push(node);
-  }
+  const byRank = useMemo(() => {
+    const m = new Map<RankType, OrgTreeNodeType[]>();
+    for (const node of allNodes) {
+      const rank = node.rank as RankType;
+      if (!m.has(rank)) m.set(rank, []);
+      m.get(rank)!.push(node);
+    }
+    return m;
+  }, [allNodes]);
 
   // 실제 데이터가 있는 직급 레벨만, RANK_LEVELS 순서대로
-  const activeLevels = RANK_LEVELS.filter((r) => byRank.has(r));
+  const activeLevels = useMemo(() => RANK_LEVELS.filter((r) => byRank.has(r)), [byRank]);
 
   const selectedNode = selectedId ? findNode(roots, selectedId) : null;
   const selectedContracts = selectedNode
@@ -249,31 +254,61 @@ export default function OrgTree({ roots, contractsByMember }: Props) {
     );
   }
 
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+
+    const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+    const handler = (e: WheelEvent) => {
+      // 이 영역에서는 스크롤 대신 줌
+      e.preventDefault();
+
+      const delta = e.deltaY;
+      const factor = Math.exp(-delta * 0.001);
+      setScale((prev) => clamp(prev * factor, 0.4, 2.5));
+    };
+
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler as EventListener);
+  }, []);
+
   return (
     <div>
-      {/* 직급별 레벨 행 렌더링 */}
-      <div className="flex flex-col items-center">
-        {activeLevels.map((rank, levelIdx) => (
-          <div key={rank} className="w-full flex flex-col items-center">
-            {/* 레벨 간 수직 연결선 */}
-            {levelIdx > 0 && (
-              <div className="h-8 w-0.5 bg-gray-300" />
-            )}
+      {/* 줌 가능한 뷰포트 */}
+      <div
+        ref={viewportRef}
+        className="w-full overflow-hidden rounded-lg"
+        title="휠로 확대/축소"
+      >
+        <div
+          style={{
+            transform: `scale(${scale})`,
+            transformOrigin: 'top center',
+          }}
+        >
+          {/* 직급별 레벨 행 렌더링 */}
+          <div className="flex flex-col items-center">
+            {activeLevels.map((rank, levelIdx) => (
+              <div key={rank} className="w-full flex flex-col items-center">
+                {/* 레벨 간 수직 연결선 */}
+                {levelIdx > 0 && <div className="h-8 w-0.5 bg-gray-300" />}
 
-            {/* 해당 직급 멤버 카드 행 */}
-            <div className="flex flex-wrap justify-center gap-3 px-4 w-full">
-              {byRank.get(rank)!.map((node) => (
-                <OrgTreeNode
-                  key={node.id}
-                  node={node}
-                  contractsByMember={contractsByMember}
-                  selectedId={selectedId}
-                  onSelect={handleSelect}
-                />
-              ))}
-            </div>
+                {/* 해당 직급 멤버 카드 행 */}
+                <div className="flex flex-wrap justify-center gap-3 px-4 w-full">
+                  {byRank.get(rank)!.map((node) => (
+                    <OrgTreeNode
+                      key={node.id}
+                      node={node}
+                      contractsByMember={contractsByMember}
+                      selectedId={selectedId}
+                      onSelect={handleSelect}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
+        </div>
       </div>
 
       {/* 선택된 멤버의 산하 계약 패널 */}
