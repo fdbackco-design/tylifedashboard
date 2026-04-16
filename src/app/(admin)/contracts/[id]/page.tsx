@@ -104,6 +104,10 @@ export default async function ContractDetailPage({ params }: PageProps) {
               value={(contract.rental_request_no as string | null) ?? '-'}
             />
             <DetailRow
+              label="송장번호"
+              value={(contract.invoice_no as string | null) ?? '-'}
+            />
+            <DetailRow
               label="메모"
               value={(contract.memo as string | null) ?? '-'}
             />
