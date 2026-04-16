@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { formatKRW } from '@/lib/settlement/calculator';
 import { getSettlementWindowForYearMonth } from '@/lib/settlement/settlement-window';
+import { BASE_AMOUNT_PER_UNIT } from '@/lib/settlement/constants';
 import type { RankType } from '@/lib/types';
 import RecalcButton from './RecalcButton';
 
@@ -43,7 +44,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const { start_date, end_date } = getSettlementWindowForYearMonth(yearMonth);
   const endExclusive = nextDay(end_date);
 
-  const [allCountRes, eligibleCountRes] = await Promise.all([
+  const [allCountRes, eligibleCountRes, kpiRes] = await Promise.all([
     db
       .from('contracts')
       .select('id', { head: true, count: 'estimated' })
@@ -55,6 +56,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       .from('v_contract_settlement_base')
       .select('contract_id', { head: true, count: 'estimated' })
       .eq('year_month', yearMonth),
+    db.rpc('get_organization_kpis', { p_start_date: start_date, p_end_date: end_date }),
   ]);
 
   const allContractsCount = allCountRes.count ?? 0;
@@ -107,6 +109,15 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     0,
   );
 
+  const kpiRow = ((kpiRes.data ?? [])[0] ?? null) as
+    | { total_join_units: number; period_join_units: number }
+    | null;
+  const totalJoinUnits = kpiRow?.total_join_units ?? 0;
+  const periodJoinUnits = kpiRow?.period_join_units ?? 0;
+  const totalSales = totalJoinUnits * BASE_AMOUNT_PER_UNIT;
+  const periodSales = periodJoinUnits * BASE_AMOUNT_PER_UNIT;
+  const profit = periodSales - totalAmount;
+
   // 월 목록 (최근 12개월)
   const months: string[] = [];
   const now = new Date();
@@ -144,7 +155,33 @@ export default async function SettlementPage({ searchParams }: PageProps) {
           )}
         </div>
 
-        <RecalcButton yearMonth={yearMonth} />
+        <div className="flex items-start gap-3">
+          {/* KPI (오른쪽) */}
+          <div className="hidden md:grid grid-cols-3 gap-2">
+            <div className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm shadow-sm">
+              <div className="text-[11px] text-gray-500">총 매출</div>
+              <div className="font-bold text-gray-800 tabular-nums">{formatKRW(totalSales)}</div>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm shadow-sm">
+              <div className="text-[11px] text-gray-500">이번달 매출</div>
+              <div className="font-bold text-gray-800 tabular-nums">{formatKRW(periodSales)}</div>
+              <div className="text-[10px] text-gray-400 mt-0.5">
+                기준 {start_date}~{end_date}
+              </div>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm shadow-sm">
+              <div className="text-[11px] text-gray-500">수익</div>
+              <div className={`font-bold tabular-nums ${profit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                {formatKRW(profit)}
+              </div>
+              <div className="text-[10px] text-gray-400 mt-0.5">
+                이번달 매출 - 정산금 합계
+              </div>
+            </div>
+          </div>
+
+          <RecalcButton yearMonth={yearMonth} />
+        </div>
       </div>
 
       {/* 필터 */}
