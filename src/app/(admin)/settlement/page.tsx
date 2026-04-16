@@ -1,10 +1,11 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
-import { formatKRW } from '@/lib/settlement/calculator';
+import { buildOrgTree, formatKRW } from '@/lib/settlement/calculator';
 import { getSettlementWindowForYearMonth } from '@/lib/settlement/settlement-window';
 import { BASE_AMOUNT_PER_UNIT } from '@/lib/settlement/constants';
 import type { RankType } from '@/lib/types';
+import { calculateOrgNodeMetrics } from '@/lib/settlement/org-node-metrics';
 import RecalcButton from './RecalcButton';
 
 export const metadata: Metadata = { title: '정산 현황' };
@@ -62,6 +63,62 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const allContractsCount = allCountRes.count ?? 0;
   const eligibleContractsCount = eligibleCountRes.count ?? 0;
 
+  // 조직도 결과(실지급액) → 정산현황 기본수당에 반영
+  const [membersRes, edgesRes, eligibleContractsRes, rulesRes] = await Promise.all([
+    db
+      .from('organization_members')
+      .select('id, name, rank, external_id, phone, source_customer_id')
+      .eq('is_active', true),
+    db.from('organization_edges').select('parent_id, child_id'),
+    db
+      .from('v_contract_settlement_base')
+      .select('contract_id, contract_code, join_date, unit_count, status, is_cancelled, sales_member_id')
+      .eq('year_month', yearMonth),
+    db.from('settlement_rules').select('*'),
+  ]);
+
+  const membersRaw = (((membersRes.data ?? []) as unknown as any[]) ?? []).map((m) =>
+    m.name === '안성준' ? { ...m, rank: '본사' as const } : m,
+  );
+  const edgesRaw = (edgesRes.data ?? []) as Array<{ parent_id: string | null; child_id: string }>;
+
+  const hqIdsRaw = new Set(
+    membersRaw.filter((m) => m.name === '안성준' || m.rank === '본사').map((m) => m.id as string),
+  );
+  const hqIdForTree =
+    membersRaw.find((m) => m.name === '안성준')?.id ?? (hqIdsRaw.values().next().value ?? null);
+
+  const memberIdSet = new Set(membersRaw.map((m) => m.id as string));
+  const edgeMap = new Map<string, string | null>();
+  for (const e of edgesRaw) {
+    const parent_id = e.parent_id && memberIdSet.has(e.parent_id) ? e.parent_id : null;
+    if (!memberIdSet.has(e.child_id)) continue;
+    edgeMap.set(e.child_id, parent_id);
+  }
+
+  const treeRows = membersRaw.map((m) => ({
+    id: m.id as string,
+    name: m.name as string,
+    rank: m.rank as RankType,
+    parent_id:
+      m.rank === '본사'
+        ? null
+        : hqIdForTree && (m.source_customer_id ?? null) != null
+          ? hqIdForTree
+          : (edgeMap.get(m.id as string) ?? null),
+    depth: 0,
+  }));
+
+  const roots = buildOrgTree(treeRows as any[]);
+  const orgMetricsById = calculateOrgNodeMetrics({
+    roots,
+    members: membersRaw.map((m) => ({ id: m.id as string, rank: m.rank as RankType })),
+    edges: edgesRaw,
+    contracts: (eligibleContractsRes.data ?? []) as any[],
+    rules: (rulesRes.data ?? []) as any[],
+    settlementWindow: { start_date, end_date, label_year_month: yearMonth },
+  });
+
   let query = db
     .from('monthly_settlements')
     .select(
@@ -104,10 +161,10 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     return (member?.name ?? '') === ZERO_OUT_MEMBER_NAME;
   };
 
-  const totalAmount = (settlements ?? []).reduce(
-    (sum, s) => sum + (isZeroOutMember(s) ? 0 : (s.total_amount as number)),
-    0,
-  );
+  const totalAmount = (settlements ?? []).reduce((sum, s) => {
+    if (isZeroOutMember(s)) return sum;
+    return sum + (orgMetricsById[(s.member_id as string)]?.paidCommissionWon ?? 0);
+  }, 0);
 
   const kpiRow = ((kpiRes.data ?? [])[0] ?? null) as
     | { total_join_units: number; period_join_units: number }
@@ -272,7 +329,10 @@ export default async function SettlementPage({ searchParams }: PageProps) {
               )}
               {(settlements ?? []).map((s) => {
                 const member = s.organization_members as unknown as { name: string } | null;
-                const zeroOut = (member?.name ?? '') === ZERO_OUT_MEMBER_NAME;
+                const rawName = member?.name ?? '';
+                const displayName = rawName.replace(/^\[고객\]\s*/, '');
+                const zeroOut = rawName === ZERO_OUT_MEMBER_NAME;
+                const base = orgMetricsById[(s.member_id as string)]?.paidCommissionWon ?? 0;
                 return (
                   <tr key={s.id as string} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium">
@@ -280,7 +340,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
                         href={`/settlement?year_month=${yearMonth}&member_id=${s.member_id}`}
                         className="text-blue-600 hover:underline"
                       >
-                        {member?.name ?? '-'}
+                        {displayName || '-'}
                       </Link>
                     </td>
                     <td className="px-4 py-3 text-gray-600">{s.rank as string}</td>
@@ -294,16 +354,16 @@ export default async function SettlementPage({ searchParams }: PageProps) {
                       {(s.subordinate_unit_count as number).toLocaleString()}
                     </td>
                     <td className="px-4 py-3 tabular-nums text-right text-gray-700">
-                      {formatKRW(zeroOut ? 0 : (s.base_commission as number))}
+                      {formatKRW(zeroOut ? 0 : base)}
                     </td>
                     <td className="px-4 py-3 tabular-nums text-right text-gray-700">
-                      {formatKRW(zeroOut ? 0 : (s.rollup_commission as number))}
+                      {formatKRW(0)}
                     </td>
                     <td className="px-4 py-3 tabular-nums text-right text-indigo-700">
-                      {formatKRW(zeroOut ? 0 : (s.incentive_amount as number))}
+                      {formatKRW(0)}
                     </td>
                     <td className="px-4 py-3 tabular-nums text-right font-bold text-gray-900">
-                      {formatKRW(zeroOut ? 0 : (s.total_amount as number))}
+                      {formatKRW(zeroOut ? 0 : base)}
                     </td>
                     <td className="px-4 py-3 text-center">
                       {s.is_finalized ? (
@@ -323,13 +383,16 @@ export default async function SettlementPage({ searchParams }: PageProps) {
                     합계
                   </td>
                   <td className="px-4 py-3 tabular-nums text-right font-semibold">
-                    {formatKRW((settlements ?? []).reduce((s, r) => s + (isZeroOutMember(r) ? 0 : (r.base_commission as number)), 0))}
+                    {formatKRW((settlements ?? []).reduce((sum, r) => {
+                      if (isZeroOutMember(r)) return sum;
+                      return sum + (orgMetricsById[(r.member_id as string)]?.paidCommissionWon ?? 0);
+                    }, 0))}
                   </td>
                   <td className="px-4 py-3 tabular-nums text-right font-semibold">
-                    {formatKRW((settlements ?? []).reduce((s, r) => s + (isZeroOutMember(r) ? 0 : (r.rollup_commission as number)), 0))}
+                    {formatKRW(0)}
                   </td>
                   <td className="px-4 py-3 tabular-nums text-right font-semibold text-indigo-700">
-                    {formatKRW((settlements ?? []).reduce((s, r) => s + (isZeroOutMember(r) ? 0 : (r.incentive_amount as number)), 0))}
+                    {formatKRW(0)}
                   </td>
                   <td className="px-4 py-3 tabular-nums text-right font-bold text-gray-900">
                     {formatKRW(totalAmount)}
