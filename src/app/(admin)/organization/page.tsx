@@ -35,7 +35,13 @@ function formatWon(value: number): string {
   return `${Math.round(value).toLocaleString('ko-KR')}원`;
 }
 
-export default async function OrganizationPage() {
+export default async function OrganizationPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ debug?: string }>;
+}) {
+  const sp = (await searchParams) ?? {};
+  const debugEnabled = sp.debug === '1';
   const db = createAdminSupabaseClient();
 
   const { start_date, end_date, label_year_month } = getSettlementWindowSeoul();
@@ -123,6 +129,10 @@ export default async function OrganizationPage() {
   // "안성준(본사) 담당 + 가입 인정 기준" 계약은 동기화 단계에서
   // customer:{customer_id} 노드가 생성/연결되므로, 여기서는 그 노드로 origin을 치환한다.
   const hqId = members.find((m) => m.name === '안성준')?.id ?? null;
+  let dbg_hqEligibleTotal = 0;
+  let dbg_hqEligibleMapped = 0;
+  let dbg_hqEligibleMissing = 0;
+  const dbg_sampleMissing: Array<{ contract_code: string; customer_id: string; customer_name: string; customer_phone: string | null }> = [];
   const customerNodeByCustomerId = new Map<string, string>(); // external_id = customer:{customer_id}
   const nodeIdByPhoneDigits = new Map<string, string>(); // phone digits -> member id
 
@@ -159,6 +169,8 @@ export default async function OrganizationPage() {
     invoice_no?: string | null;
     memo?: string | null;
     customer_phone: string | null;
+    contract_code?: string | null;
+    customer_name?: string | null;
   }): string => {
     // 동기화 타이밍/원본 상태 문자열 때문에 status가 '가입'으로 안 찍히는 경우가 있어도,
     // “가입 인정 기준(해약 아님 + 송장/렌탈 존재)”이면 가입으로 간주해서 예외를 항상 적용한다.
@@ -170,8 +182,21 @@ export default async function OrganizationPage() {
     });
 
     if (hqId && c.sales_member_id === hqId && joinEligible) {
+      dbg_hqEligibleTotal += 1;
       const customerNodeId = findCustomerNodeId({ customer_id: c.customer_id, customer_phone: c.customer_phone });
-      if (customerNodeId) return customerNodeId;
+      if (customerNodeId) {
+        dbg_hqEligibleMapped += 1;
+        return customerNodeId;
+      }
+      dbg_hqEligibleMissing += 1;
+      if (dbg_sampleMissing.length < 5) {
+        dbg_sampleMissing.push({
+          contract_code: c.contract_code ?? '(unknown)',
+          customer_id: c.customer_id,
+          customer_name: c.customer_name ?? '',
+          customer_phone: c.customer_phone,
+        });
+      }
     }
     return c.sales_member_id;
   };
@@ -185,6 +210,8 @@ export default async function OrganizationPage() {
       invoice_no: c.invoice_no ?? null,
       memo: c.memo ?? null,
       customer_phone: c.customers?.phone ?? null,
+      contract_code: c.contract_code,
+      customer_name: c.customers?.name ?? '',
     });
     if (!contractsByMember[key]) contractsByMember[key] = [];
     contractsByMember[key].push({
@@ -220,6 +247,8 @@ export default async function OrganizationPage() {
         invoice_no: c.invoice_no ?? null,
         memo: c.memo ?? null,
         customer_phone: c.customers?.phone ?? null,
+        contract_code: c.contract_code,
+        customer_name: c.customers?.name ?? '',
       }),
     }));
 
@@ -354,7 +383,23 @@ export default async function OrganizationPage() {
             {members.length}명이 있지만 조직 계층 연결(edges)이 없습니다. 상하위 관계를 등록하면 트리로 표시됩니다.
           </p>
         )}
-        <OrgTree roots={tree} contractsByMember={contractsByMember} metricsById={orgMetricsById} />
+        <OrgTree
+          roots={tree}
+          contractsByMember={contractsByMember}
+          metricsById={orgMetricsById}
+          debug={
+            debugEnabled
+              ? {
+                  enabled: true,
+                  hqId,
+                  hqEligibleTotal: dbg_hqEligibleTotal,
+                  hqEligibleMappedToCustomerNode: dbg_hqEligibleMapped,
+                  hqEligibleMissingCustomerNode: dbg_hqEligibleMissing,
+                  sampleMissing: dbg_sampleMissing,
+                }
+              : { enabled: false, hqId, hqEligibleTotal: 0, hqEligibleMappedToCustomerNode: 0, hqEligibleMissingCustomerNode: 0 }
+          }
+        />
       </div>
     </div>
   );

@@ -209,6 +209,14 @@ function ContractPanel({
 interface Props {
   roots: OrgTreeNodeType[];
   contractsByMember: Record<string, ContractItem[]>;
+  debug?: {
+    enabled: boolean;
+    hqId: string | null;
+    hqEligibleTotal: number;
+    hqEligibleMappedToCustomerNode: number;
+    hqEligibleMissingCustomerNode: number;
+    sampleMissing?: Array<{ contract_code: string; customer_id: string; customer_name: string; customer_phone: string | null }>;
+  };
   metricsById?: Record<
     string,
     {
@@ -220,7 +228,7 @@ interface Props {
   >;
 }
 
-export default function OrgTree({ roots, contractsByMember, metricsById }: Props) {
+export default function OrgTree({ roots, contractsByMember, metricsById, debug }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -283,10 +291,24 @@ export default function OrgTree({ roots, contractsByMember, metricsById }: Props
     setSelectedId((prev) => (prev === id ? null : id));
   }
 
+  useEffect(() => {
+    if (!debug?.enabled) return;
+    // eslint-disable-next-line no-console
+    console.log('[org-debug] summary', debug);
+  }, [debug]);
+
   const selectedNode = selectedId ? findNode(displayRoots, selectedId) : null;
   const selectedContracts = selectedNode
     ? collectSubtreeContracts(selectedNode, contractsByMember)
     : [];
+
+  useEffect(() => {
+    if (!debug?.enabled) return;
+    if (!selectedId) return;
+    const list = contractsByMember[selectedId] ?? [];
+    // eslint-disable-next-line no-console
+    console.log('[org-debug] select', { selectedId, directContracts: list.length, sample: list.slice(0, 3) });
+  }, [debug?.enabled, selectedId, contractsByMember]);
 
   function TreeSubtree({ node }: { node: OrgTreeNodeType }) {
     const children = node.children ?? [];
