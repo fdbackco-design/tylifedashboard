@@ -1,6 +1,5 @@
 import type { RankType, OrganizationMember, OrganizationEdge } from '@/lib/types';
 import type { SettlementRule } from '@/lib/types/settlement';
-import { SETTLEMENT_ELIGIBLE_STATUSES } from '@/lib/settlement/constants';
 import { findActiveRule } from '@/lib/settlement/calculator';
 
 export type OrgNodeMetrics = {
@@ -10,6 +9,7 @@ export type OrgNodeMetrics = {
   paidCommissionWon: number;
 };
 
+/** get_organization_kpis 와 동일 조건으로 선필터된 계약 (페이지에서 걸러서 전달) */
 type EligibleContract = {
   contract_id: string;
   join_date: string; // 'YYYY-MM-DD'
@@ -55,7 +55,6 @@ function computeDirectUnits(
 
   for (const c of contracts) {
     if (!c.sales_member_id) continue;
-    if (!(SETTLEMENT_ELIGIBLE_STATUSES as readonly string[]).includes(c.status)) continue;
     const units = c.unit_count ?? 0;
     if (units <= 0) continue;
 
@@ -109,7 +108,7 @@ export function calculateOrgNodeMetrics(params: {
   roots: any[]; // OrgTreeNode[]
   members: Pick<OrganizationMember, 'id' | 'rank'>[];
   edges: Pick<OrganizationEdge, 'parent_id' | 'child_id'>[];
-  contracts: EligibleContract[]; // v_contract_settlement_base 기반
+  contracts: EligibleContract[]; // KPI 가입 인정 계약(선필터)
   rules: SettlementRule[];
   settlementWindow: { start_date: string; end_date: string; label_year_month: string };
 }): Record<string, OrgNodeMetrics> {

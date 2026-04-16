@@ -4,6 +4,7 @@ import { buildOrgTree } from '@/lib/settlement/calculator';
 import { BASE_AMOUNT_PER_UNIT } from '@/lib/settlement/constants';
 import { getSettlementWindowSeoul } from '@/lib/settlement/settlement-window';
 import { calculateOrgNodeMetrics } from '@/lib/settlement/org-node-metrics';
+import { isOrganizationKpiEligibleContract } from '@/lib/settlement/org-kpi-eligibility';
 import OrgTree from '@/components/org-tree/OrgTree';
 import type { ContractItem } from '@/components/org-tree/OrgTreeNode';
 import type { OrgTreeRow, OrganizationMember } from '@/lib/types';
@@ -38,7 +39,7 @@ export default async function OrganizationPage() {
 
   const { start_date, end_date, label_year_month } = getSettlementWindowSeoul();
 
-  const [membersRes, edgesRes, contractCountRes, lastSyncRes, contractsRes, kpiRes, rulesRes, settlementContractsRes] =
+  const [membersRes, edgesRes, contractCountRes, lastSyncRes, contractsRes, kpiRes, rulesRes] =
     await Promise.all([
     db
       .from('organization_members')
@@ -56,16 +57,11 @@ export default async function OrganizationPage() {
     db
       .from('contracts')
       .select(
-        'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, customers(name)',
+        'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, is_cancelled, sales_link_status, customers(name)',
       )
       .not('sales_member_id', 'is', null),
     db.rpc('get_organization_kpis', { p_start_date: start_date, p_end_date: end_date }),
     db.from('settlement_rules').select('*'),
-    db
-      .from('v_contract_settlement_base')
-      .select('contract_id, join_date, unit_count, status, sales_member_id')
-      .order('join_date', { ascending: false })
-      .limit(20000),
   ]);
 
   // 안성준은 TY Life 시스템상 영업사원이지만 실제로는 본사(최상위)로 취급
@@ -102,23 +98,26 @@ export default async function OrganizationPage() {
     depth: 0,
   }));
 
-  // 계약 데이터 → 멤버별 맵
+  // 계약 데이터 → 멤버별 맵 (표시용: 담당자 있는 전체 계약)
   const contractsByMember: Record<string, ContractItem[]> = {};
-  for (const _c of (contractsRes.data ?? [])) {
-    const c = _c as unknown as {
-      id: string;
-      contract_code: string;
-      join_date: string | null;
-      product_type: string | null;
-      item_name?: string | null;
-      rental_request_no?: string | null;
-      invoice_no?: string | null;
-      memo?: string | null;
-      status: string;
-      unit_count: number | null;
-      sales_member_id: string;
-      customers: { name: string } | null;
-    };
+  const rawContractRows = (contractsRes.data ?? []) as unknown as Array<{
+    id: string;
+    contract_code: string;
+    join_date: string | null;
+    product_type: string | null;
+    item_name?: string | null;
+    rental_request_no?: string | null;
+    invoice_no?: string | null;
+    memo?: string | null;
+    status: string;
+    unit_count: number | null;
+    sales_member_id: string;
+    is_cancelled?: boolean | null;
+    sales_link_status?: string | null;
+    customers: { name: string } | null;
+  }>;
+
+  for (const c of rawContractRows) {
     const key = c.sales_member_id;
     if (!contractsByMember[key]) contractsByMember[key] = [];
     contractsByMember[key].push({
@@ -138,11 +137,22 @@ export default async function OrganizationPage() {
 
   const tree = buildOrgTree(treeRows);
 
+  /** 조직 노드 구좌·수당: get_organization_kpis 와 동일한 가입 인정 기준 */
+  const kpiEligibleForMetrics = rawContractRows
+    .filter(isOrganizationKpiEligibleContract)
+    .map((c) => ({
+      contract_id: c.id,
+      join_date: c.join_date ?? '',
+      unit_count: c.unit_count ?? 0,
+      status: c.status,
+      sales_member_id: c.sales_member_id,
+    }));
+
   const orgMetricsById = calculateOrgNodeMetrics({
     roots: tree,
     members,
     edges: (edgesRes.data ?? []) as { parent_id: string | null; child_id: string }[],
-    contracts: (settlementContractsRes.data ?? []) as any[],
+    contracts: kpiEligibleForMetrics,
     rules: (rulesRes.data ?? []) as any[],
     settlementWindow: { start_date, end_date, label_year_month },
   });
