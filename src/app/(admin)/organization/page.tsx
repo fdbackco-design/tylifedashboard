@@ -128,7 +128,12 @@ export default async function OrganizationPage({
   // 예외 규칙(최종):
   // "안성준(본사) 담당 + 가입 인정 기준" 계약은 동기화 단계에서
   // customer:{customer_id} 노드가 생성/연결되므로, 여기서는 그 노드로 origin을 치환한다.
-  const hqId = members.find((m) => m.name === '안성준')?.id ?? null;
+  const hqIds = new Set(
+    members
+      .filter((m) => m.name === '안성준' || m.rank === '본사')
+      .map((m) => m.id),
+  );
+  const hqId = members.find((m) => m.name === '안성준')?.id ?? (hqIds.values().next().value ?? null);
   let dbg_hqEligibleTotal = 0;
   let dbg_hqEligibleMapped = 0;
   let dbg_hqEligibleMissing = 0;
@@ -181,7 +186,7 @@ export default async function OrganizationPage({
       memo: c.memo ?? null,
     });
 
-    if (hqId && c.sales_member_id === hqId && joinEligible) {
+    if (hqIds.size > 0 && hqIds.has(c.sales_member_id) && joinEligible) {
       dbg_hqEligibleTotal += 1;
       const customerNodeId = findCustomerNodeId({ customer_id: c.customer_id, customer_phone: c.customer_phone });
       if (customerNodeId) {

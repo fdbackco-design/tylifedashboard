@@ -357,6 +357,12 @@ async function processItem(
     let autoCreatedSalesMemberId: string | null = null;
 
     if (rawSalesName) {
+      // 본사(안성준) 담당 계약은 항상 본사 id로 귀속되게 강제
+      if (rawSalesName === '안성준') {
+        const hqId = await getHqMemberId(db);
+        finalSalesMemberId = hqId;
+        salesLinkStatus = hqId ? 'linked' : 'pending_mapping';
+      } else {
       const nameRes = await resolveSalesMemberByNameOnly(db, rawSalesName);
       if (nameRes.kind === 'single') {
         finalSalesMemberId = nameRes.memberId;
@@ -380,6 +386,7 @@ async function processItem(
       } else {
         finalSalesMemberId = null;
         salesLinkStatus = 'pending_mapping';
+      }
       }
     }
 
