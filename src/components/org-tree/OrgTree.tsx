@@ -236,6 +236,30 @@ export default function OrgTree({ roots, contractsByMember, metricsById }: Props
   // 트리를 평탄화해 전체 노드 목록 확보
   const allNodes = useMemo(() => flattenTree(roots), [roots]);
 
+  /**
+   * UI 전용: "본사"를 단일 최상위 루트로 강제.
+   * - 데이터(organization_edges)는 건드리지 않는다.
+   * - parent_id가 NULL인 노드가 여러 개일 수 있는데,
+   *   그 경우 본사(rank='본사') 아래로 나머지 루트들을 붙여서
+   *   “본사에서 모든 노드가 파생”되는 형태로 렌더링한다.
+   */
+  const displayRoots = useMemo<OrgTreeNodeType[]>(() => {
+    if (!roots || roots.length === 0) return [];
+
+    const hq = roots.find((n) => n.rank === '본사') ?? null;
+    if (!hq) return roots;
+
+    const otherRoots = roots.filter((n) => n.id !== hq.id);
+    if (otherRoots.length === 0) return [hq];
+
+    // 얕은 복사로 props 변형 방지 (children은 새 배열로)
+    const mergedHq: OrgTreeNodeType = {
+      ...hq,
+      children: [...(hq.children ?? []), ...otherRoots],
+    };
+    return [mergedHq];
+  }, [roots]);
+
   function handleSelect(id: string) {
     setSelectedId((prev) => (prev === id ? null : id));
   }
@@ -354,7 +378,7 @@ export default function OrgTree({ roots, contractsByMember, metricsById }: Props
         >
           {/* parent-child 기반 nested tree 렌더링 */}
           <div className="flex flex-col items-center gap-10 py-6">
-            {roots.map((r) => (
+            {displayRoots.map((r) => (
               <TreeSubtree key={r.id} node={r} />
             ))}
           </div>
