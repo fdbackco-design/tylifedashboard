@@ -318,6 +318,23 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
     const list = contractsByMember[selectedId] ?? [];
     // eslint-disable-next-line no-console
     console.log('[org-debug] select', { selectedId, directContracts: list.length, sample: list.slice(0, 3) });
+
+    // 특정 고객(예: 최유주) 상태/필드 확인용
+    const target = list.filter((c) => (c.customer_name ?? '').includes('최유주'));
+    if (target.length > 0) {
+      // eslint-disable-next-line no-console
+      console.log(
+        '[org-debug] target-customer',
+        target.slice(0, 5).map((c) => ({
+          contract_code: c.contract_code,
+          status: c.status,
+          rental_request_no: c.rental_request_no,
+          invoice_no: c.invoice_no,
+          memo: c.memo,
+          displayStatus: getDisplayStatus(c),
+        })),
+      );
+    }
   }, [debug?.enabled, selectedId, contractsByMember]);
 
   function TreeSubtree({ node }: { node: OrgTreeNodeType }) {
