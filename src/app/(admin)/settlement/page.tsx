@@ -448,7 +448,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
                       {direct.contractIds.size.toLocaleString()}건
                     </td>
                     <td className="px-4 py-3 tabular-nums text-right">
-                      direct.unitSum.toLocaleString()
+                      {direct.unitSum.toLocaleString()}
                     </td>
                     <td className="px-4 py-3 tabular-nums text-right">
                       {(s.subordinate_unit_count as number).toLocaleString()}
