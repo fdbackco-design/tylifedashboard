@@ -237,34 +237,36 @@ export default function OrgTree({ roots, contractsByMember, metricsById }: Props
   const allNodes = useMemo(() => flattenTree(roots), [roots]);
 
   /**
-   * UI 전용: "본사"를 단일 최상위 루트로 강제.
-   * - 데이터(organization_edges)는 건드리지 않는다.
-   * - parent_id가 NULL인 노드가 여러 개일 수 있는데,
-   *   그 경우 본사(rank='본사') 아래로 나머지 루트들을 붙여서
-   *   “본사에서 모든 노드가 파생”되는 형태로 렌더링한다.
+   * UI 전용:
+   * - 최상위 루트는 항상 "본사" 1개로 보이게 한다.
+   * - "안성준(본사)" 개인 노드는 조직도에서 숨긴다.
+   *   (안성준 노드 아래에 있던 자식들은 본사 루트 아래로 승격)
+   *
+   * 데이터(organization_edges)는 건드리지 않는다.
    */
   const displayRoots = useMemo<OrgTreeNodeType[]>(() => {
     if (!roots || roots.length === 0) return [];
 
-    const hq = roots.find((n) => n.rank === '본사') ?? null;
-    if (!hq) return roots;
+    const hqPerson = roots.find((n) => n.name === '안성준') ?? null;
+    const remainingRoots = roots.filter((n) => n.id !== hqPerson?.id);
+    const promotedChildren = (hqPerson?.children ?? []) as OrgTreeNodeType[];
 
-    const otherRoots = roots.filter((n) => n.id !== hq.id);
-    if (otherRoots.length === 0) return [hq];
+    const hqRoot: OrgTreeNodeType = {
+      id: '__hq_root__',
+      name: '본사',
+      rank: '본사',
+      // 본사 아래로: (안성준의 자식들) + (기타 루트들)
+      children: [...promotedChildren, ...remainingRoots],
+    } as OrgTreeNodeType;
 
-    // 얕은 복사로 props 변형 방지 (children은 새 배열로)
-    const mergedHq: OrgTreeNodeType = {
-      ...hq,
-      children: [...(hq.children ?? []), ...otherRoots],
-    };
-    return [mergedHq];
+    return [hqRoot];
   }, [roots]);
 
   function handleSelect(id: string) {
     setSelectedId((prev) => (prev === id ? null : id));
   }
 
-  const selectedNode = selectedId ? findNode(roots, selectedId) : null;
+  const selectedNode = selectedId ? findNode(displayRoots, selectedId) : null;
   const selectedContracts = selectedNode
     ? collectSubtreeContracts(selectedNode, contractsByMember)
     : [];
