@@ -144,7 +144,7 @@ async function ensureOrgEdgeForceParentWithSource(
   while (cur) {
     if (cur === childId) {
       // 이 edge를 만들면 cycle이므로 스킵
-      throw new Error(`순환 엣지 방지: ${parentId} -> ${childId}`);
+      return;
     }
     if (visited.has(cur)) break;
     visited.add(cur);
@@ -281,11 +281,12 @@ async function attachCustomerIdentityToMember(
 ): Promise<void> {
   const { data: cur, error } = await db
     .from('organization_members')
-    .select('id, source_customer_id, phone')
+    .select('id, source_customer_id, phone, rank')
     .eq('id', memberId)
     .maybeSingle();
   if (error) throw new Error(`organization_members 조회 실패: ${error.message}`);
   if (!cur) return;
+  if ((cur as any).rank === '본사') return; // 본사 노드에 고객 식별자 부여 금지
 
   const next: Record<string, unknown> = {};
   if ((cur as any).source_customer_id == null) next.source_customer_id = customer.id;
@@ -304,13 +305,14 @@ async function findSingleEmployeeMemberIdByName(
   if (!n) return null;
   const { data, error } = await db
     .from('organization_members')
-    .select('id')
+    .select('id, rank')
     .eq('name', n)
     .is('external_id', null)
+    .neq('rank', '본사')
     .order('created_at', { ascending: true })
     .limit(2);
   if (error) throw new Error(`organization_members 조회 실패: ${error.message}`);
-  const rows = (data ?? []) as Array<{ id: string }>;
+  const rows = (data ?? []) as Array<{ id: string; rank: string }>;
   if (rows.length !== 1) return null;
   return rows[0].id;
 }

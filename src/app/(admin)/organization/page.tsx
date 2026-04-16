@@ -50,7 +50,7 @@ export default async function OrganizationPage({
     await Promise.all([
     db
       .from('organization_members')
-      .select('id, name, rank, external_id, phone')
+      .select('id, name, rank, external_id, phone, source_customer_id')
       .eq('is_active', true)
       .order('name'),
     db.from('organization_edges').select('parent_id, child_id'),
@@ -74,7 +74,7 @@ export default async function OrganizationPage({
   ]);
 
   // 안성준은 TY Life 시스템상 영업사원이지만 실제로는 본사(최상위)로 취급
-  const membersRaw = ((membersRes.data ?? []) as OrganizationMember[]).map((m) =>
+  const membersRaw = ((membersRes.data ?? []) as unknown as OrganizationMember[]).map((m) =>
     m.name === '안성준' ? { ...m, rank: '본사' as const } : m,
   );
   const edgesRaw = edgesRes.data ?? [];
@@ -210,11 +210,21 @@ export default async function OrganizationPage({
     );
   }
 
+  // source_customer_id가 있는 노드(=고객 식별이 붙은 노드)는 본사 직속으로 트리에 표시한다.
+  // DB에 순환/충돌 edge가 있더라도, /organization 트리에서는 "본사 직계약 고객 노드가 보이는 것"을 우선한다.
+  const hqIdForTree =
+    members.find((m: any) => m.name === '안성준')?.id ?? (hqIdsRaw.values().next().value ?? null);
+
   const treeRows: OrgTreeRow[] = members.map((m: any) => ({
     id: m.id,
     name: m.name,
     rank: m.rank,
-    parent_id: edgeMap.get(m.id) ?? null,
+    parent_id:
+      hqIdForTree &&
+      m.rank !== '본사' &&
+      (m.source_customer_id ?? null) != null
+        ? hqIdForTree
+        : (edgeMap.get(m.id) ?? null),
     depth: 0,
   }));
 
