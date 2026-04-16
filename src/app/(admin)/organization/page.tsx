@@ -266,6 +266,7 @@ export default async function OrganizationPage({
   let dbg_hqEligibleMissing = 0;
   const dbg_sampleMissing: Array<{ contract_code: string; customer_id: string; customer_name: string; customer_phone: string | null }> = [];
   const customerNodeByCustomerId = new Map<string, string>(); // external_id = customer:{customer_id}
+  const customerMemberIdByCustomerId = new Map<string, string>(); // (customer node) customer_id -> member id (source_customer_id 우선)
   const nodeIdByPhoneDigits = new Map<string, string>(); // phone digits -> member id
 
   for (const m of members as any[]) {
@@ -273,6 +274,16 @@ export default async function OrganizationPage({
     if (ext && ext.startsWith('customer:')) {
       const customerId = ext.slice('customer:'.length);
       customerNodeByCustomerId.set(customerId, (m as { id: string }).id);
+    }
+    const sid = ((m as any).source_customer_id ?? null) as string | null;
+    if (sid && (m as any).rank !== '본사') {
+      customerMemberIdByCustomerId.set(sid, (m as { id: string }).id);
+    } else if (ext && ext.startsWith('customer:') && (m as any).rank !== '본사') {
+      // source_customer_id가 없더라도 customer:* 노드는 customer_id로 매핑 가능
+      const customerId = ext.slice('customer:'.length);
+      if (!customerMemberIdByCustomerId.has(customerId)) {
+        customerMemberIdByCustomerId.set(customerId, (m as { id: string }).id);
+      }
     }
     const digits = toPhoneDigits((m as { phone?: string | null }).phone ?? null);
     if (digits) nodeIdByPhoneDigits.set(digits, (m as { id: string }).id);
@@ -302,6 +313,11 @@ export default async function OrganizationPage({
     contract_code?: string | null;
     customer_name?: string | null;
   }): string => {
+    // 정책: customer 노드(본사 직계약 고객/가상 영업사원)는 "본인이 고객인 계약"을 본인에게 귀속해 보여준다.
+    // (담당자가 누구든 customer_id가 매핑되면 해당 customer 노드의 직접 계약으로 간주)
+    const customerMemberId = customerMemberIdByCustomerId.get(c.customer_id) ?? null;
+    if (customerMemberId) return customerMemberId;
+
     // 동기화 타이밍/원본 상태 문자열 때문에 status가 '가입'으로 안 찍히는 경우가 있어도,
     // “가입 인정 기준(해약 아님 + 송장/렌탈 존재)”이면 가입으로 간주해서 예외를 항상 적용한다.
     const joinEligible = isContractJoinCompleted({
@@ -357,6 +373,26 @@ export default async function OrganizationPage({
       unit_count: c.unit_count,
       customer_name: c.customers?.name ?? '',
     });
+
+    // 표시용 보강: 담당자 기준 key와 customer 기준 key가 다르면 customer 노드에도 동일 계약을 포함시킨다.
+    // (본인이 고객인 계약이 현재 노드에 포함되게)
+    const customerKey = remapMemberId(customerMemberIdByCustomerId.get(c.customer_id) ?? '');
+    if (customerKey && customerKey !== key) {
+      if (!contractsByMember[customerKey]) contractsByMember[customerKey] = [];
+      contractsByMember[customerKey].push({
+        id: c.id,
+        contract_code: c.contract_code,
+        join_date: c.join_date,
+        product_type: c.product_type,
+        item_name: c.item_name ?? null,
+        rental_request_no: c.rental_request_no ?? null,
+        invoice_no: c.invoice_no ?? null,
+        memo: c.memo ?? null,
+        status: c.status,
+        unit_count: c.unit_count,
+        customer_name: c.customers?.name ?? '',
+      });
+    }
   }
 
   const tree = buildOrgTree(treeRows);
@@ -372,6 +408,7 @@ export default async function OrganizationPage({
       join_date: c.join_date ?? '',
       unit_count: c.unit_count ?? 0,
       status: c.status,
+      // metrics도 동일 정책: customer 노드로 귀속(origin)을 치환한다.
       sales_member_id: remapMemberId(mapSalesMemberForOrg({
         sales_member_id: c.sales_member_id,
         customer_id: c.customer_id,
