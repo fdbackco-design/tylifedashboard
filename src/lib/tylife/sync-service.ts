@@ -83,6 +83,9 @@ function isJoinEligibleByRule(params: {
 }
 
 async function getHqMemberId(db: SupabaseClient): Promise<string | null> {
+  // 호출 비용 절감 (동기화 동안 반복 조회 방지)
+  if (getHqMemberId._cached !== undefined) return getHqMemberId._cached;
+
   // 프로젝트 규칙: 안성준을 본사로 취급 (organization/page.tsx와 동일 의도)
   const { data } = await db
     .from('organization_members')
@@ -90,7 +93,10 @@ async function getHqMemberId(db: SupabaseClient): Promise<string | null> {
     .eq('name', '안성준')
     .limit(1)
     .maybeSingle();
-  if (data) return (data as { id: string }).id;
+  if (data) {
+    getHqMemberId._cached = (data as { id: string }).id;
+    return getHqMemberId._cached;
+  }
 
   // fallback: rank='본사' 중 1개
   const { data: hq } = await db
@@ -100,8 +106,11 @@ async function getHqMemberId(db: SupabaseClient): Promise<string | null> {
     .order('created_at', { ascending: true })
     .limit(1)
     .maybeSingle();
-  return hq ? (hq as { id: string }).id : null;
+  getHqMemberId._cached = hq ? (hq as { id: string }).id : null;
+  return getHqMemberId._cached;
 }
+
+getHqMemberId._cached = undefined as undefined | string | null;
 
 // ─────────────────────────────────────────────
 // 유틸
@@ -467,6 +476,32 @@ async function processItem(
         const hqId = await getHqMemberId(db);
         if (hqId) {
           await ensureOrgEdgeWithSource(db, hqId, autoCreatedSalesMemberId, contractId);
+        }
+      }
+    }
+
+    // ── 4.6. 본사(안성준) 담당 '가입' 계약 고객을 본사 직속 영업사원으로 노출 ──
+    // 요구사항:
+    // - 담당자가 본사(안성준)인 계약 중 status가 '가입'인 고객은
+    //   다른 계약이 없어도 조직도에 본사 하위 영업사원으로 보이게 한다.
+    if (salesLinkStatus === 'linked') {
+      const hqId = await getHqMemberId(db);
+      const isHqSales = hqId != null && finalSalesMemberId === hqId;
+      const status = (contractFinal.status ?? '').trim();
+      if (isHqSales && status === '가입') {
+        const customerNodeName = (item.customer_name ?? '').trim();
+        if (customerNodeName) {
+          // 고객을 조직원으로 "가상" 등록: external_id로 고객ID 기반 고유키 사용 (이름 중복과 무관)
+          const customerSalesMemberId = await upsertSalesMember(db, {
+            name: customerNodeName,
+            rank: '영업사원',
+            external_id: `customer:${customerId}`,
+            is_active: true,
+          } as any);
+
+          if (customerSalesMemberId) {
+            await ensureOrgEdgeWithSource(db, hqId, customerSalesMemberId, contractId);
+          }
         }
       }
     }
