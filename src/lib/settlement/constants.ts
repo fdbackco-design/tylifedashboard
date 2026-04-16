@@ -28,17 +28,6 @@ export const DEFAULT_INCENTIVE_CONFIG: Partial<
   사업본부장: { threshold: 300, amount: 5_000_000 },
 };
 
-/**
- * 정산 대상 계약 상태 (is_cancelled=false 이고 이 상태에 해당해야 함).
- * 취소/해약은 제외.
- */
-export const SETTLEMENT_ELIGIBLE_STATUSES: readonly ContractStatus[] = [
-  '해피콜완료',
-  '배송준비',
-  '배송완료',
-  '정산완료',
-] as const;
-
 /** 정산에서 항상 제외되는 상태 */
 export const SETTLEMENT_EXCLUDED_STATUSES: readonly ContractStatus[] = [
   '취소',

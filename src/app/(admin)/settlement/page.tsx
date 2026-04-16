@@ -23,8 +23,6 @@ function getCurrentYearMonth(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
-const ELIGIBLE_STATUSES = ['해피콜완료', '배송준비', '배송완료', '정산완료'];
-
 function nextMonthStart(yearMonth: string): string {
   const [y, m] = yearMonth.split('-').map(Number);
   const ny = m === 12 ? y + 1 : y;
@@ -51,11 +49,11 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       .gte('join_date', monthStart)
       .lt('join_date', monthEndExclusive),
     db
-      .from('contracts')
-      .select('id', { head: true, count: 'estimated' })
-      .gte('join_date', monthStart)
-      .lt('join_date', monthEndExclusive)
-      .in('status', ELIGIBLE_STATUSES),
+      // 정산 대상 계약 수: “가입 인정 기준” (SSOT) 과 동일하게
+      // DB view(v_contract_settlement_base)는 동일 기준으로 필터링되어야 함
+      .from('v_contract_settlement_base')
+      .select('contract_id', { head: true, count: 'estimated' })
+      .eq('year_month', yearMonth),
   ]);
 
   const allContractsCount = allCountRes.count ?? 0;
@@ -132,7 +130,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
                 정산 대상 {eligibleContractsCount}건
               </span>
               {eligibleContractsCount === 0 && (
-                <> (해피콜완료 이상의 상태 필요)</>
+                <> (가입 상태 기준)</>
               )}
             </p>
           )}
@@ -215,9 +213,9 @@ export default async function SettlementPage({ searchParams }: PageProps) {
                       </p>
                     ) : eligibleContractsCount === 0 ? (
                       <p className="text-xs text-amber-600">
-                        {allContractsCount}건의 계약이 있지만 모두 &apos;준비&apos; 상태입니다.
+                        {allContractsCount}건의 계약이 있지만 정산 대상(가입 인정 기준)이 0건입니다.
                         <br />
-                        정산 계산은 <strong>해피콜완료 · 배송준비 · 배송완료 · 정산완료</strong> 상태의 계약만 포함됩니다.
+                        정산 계산은 <strong>가입 상태 기준</strong>으로 계약을 포함합니다.
                       </p>
                     ) : (
                       <p className="text-xs text-gray-400">

@@ -61,7 +61,7 @@ async function calculateMonthlySettlement(
 ): Promise<{ updated_count: number }> {
   const refDate = `${yearMonth}-01`;
 
-  // 1. 정산 대상 계약 조회
+  // 1. 정산 대상 계약 조회 (v_contract_settlement_base가 SSOT 기준으로 필터링)
   const { data: contracts, error: cErr } = await db
     .from('v_contract_settlement_base')
     .select('*')

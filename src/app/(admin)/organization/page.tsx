@@ -4,7 +4,7 @@ import { buildOrgTree } from '@/lib/settlement/calculator';
 import { BASE_AMOUNT_PER_UNIT } from '@/lib/settlement/constants';
 import { getSettlementWindowSeoul } from '@/lib/settlement/settlement-window';
 import { calculateOrgNodeMetrics } from '@/lib/settlement/org-node-metrics';
-import { isOrganizationKpiEligibleContract } from '@/lib/settlement/org-kpi-eligibility';
+import { isSettlementEligibleContract } from '@/lib/settlement/settlement-eligibility';
 import OrgTree from '@/components/org-tree/OrgTree';
 import type { ContractItem } from '@/components/org-tree/OrgTreeNode';
 import type { OrgTreeRow, OrganizationMember } from '@/lib/types';
@@ -139,7 +139,7 @@ export default async function OrganizationPage() {
 
   /** 조직 노드 구좌·수당: get_organization_kpis 와 동일한 가입 인정 기준 */
   const kpiEligibleForMetrics = rawContractRows
-    .filter(isOrganizationKpiEligibleContract)
+    .filter(isSettlementEligibleContract)
     .map((c) => ({
       contract_id: c.id,
       join_date: c.join_date ?? '',

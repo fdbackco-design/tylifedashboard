@@ -20,8 +20,8 @@ export default async function ContractDetailPage({ params }: PageProps) {
     .select(
       `
       *,
-      customers(id, name, birth_date, gender, ssn_masked, phone),
-      organization_members(id, name, rank, phone)
+      customers:customers!contracts_customer_id_fkey(id, name, birth_date, gender, ssn_masked, phone),
+      sales_member:organization_members!contracts_sales_member_id_fkey(id, name, rank, phone)
       `,
     )
     .eq('id', id)
@@ -29,12 +29,12 @@ export default async function ContractDetailPage({ params }: PageProps) {
 
   if (error || !contract) notFound();
 
-  const customer = contract.customers as unknown as {
+  const customer = (contract as any).customers as unknown as {
     id: string; name: string; birth_date: string;
     gender: string; ssn_masked: string; phone: string;
   } | null;
 
-  const member = contract.organization_members as unknown as {
+  const member = (contract as any).sales_member as unknown as {
     id: string; name: string; rank: string; phone: string | null;
   } | null;
 

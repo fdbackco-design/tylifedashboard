@@ -8,7 +8,7 @@ import type {
 import type { RankType, OrgTreeNode } from '../types/organization';
 import type { Contract } from '../types/contract';
 import { RANK_ORDER } from '../types/organization';
-import { SETTLEMENT_ELIGIBLE_STATUSES } from './constants';
+import { isSettlementEligibleContract } from './settlement-eligibility';
 
 // ─────────────────────────────────────────────
 // 정산 규칙 조회 헬퍼
@@ -199,10 +199,15 @@ export function calculateMemberSettlement(
   }
 
   // 직접 계약 정산
-  const eligible = directContracts.filter(
-    (c) =>
-      !c.is_cancelled &&
-      (SETTLEMENT_ELIGIBLE_STATUSES as readonly string[]).includes(c.status),
+  const eligible = directContracts.filter((c) =>
+    isSettlementEligibleContract({
+      status: c.status,
+      is_cancelled: c.is_cancelled,
+      sales_member_id: c.sales_member_id,
+      sales_link_status: (c as any).sales_link_status ?? null,
+      rental_request_no: (c as any).rental_request_no ?? null,
+      invoice_no: (c as any).invoice_no ?? null,
+    }),
   );
   const { items: directItems, total: baseCommission } = calcDirectContracts(
     eligible,
