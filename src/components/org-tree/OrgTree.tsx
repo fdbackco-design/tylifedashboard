@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { OrgTreeNode as OrgTreeNodeType, RankType } from '@/lib/types';
+import type { OrgTreeNode as OrgTreeNodeType } from '@/lib/types';
 import OrgTreeNode, {
   type ContractItem,
   collectSubtreeIds,
@@ -10,10 +10,6 @@ import {
   getContractDisplayStatus,
   isContractJoinCompleted as isJoinCompleted,
 } from '@/lib/utils/contract-display-status';
-
-// ── 상수 ─────────────────────────────────────────────────
-/** 직급 표시 순서 (위 → 아래) */
-const RANK_LEVELS: RankType[] = ['본사', '사업본부장', '센터장', '리더', '영업사원'];
 
 // ── 유틸 ─────────────────────────────────────────────────
 
@@ -240,27 +236,54 @@ export default function OrgTree({ roots, contractsByMember, metricsById }: Props
   // 트리를 평탄화해 전체 노드 목록 확보
   const allNodes = useMemo(() => flattenTree(roots), [roots]);
 
-  // rank 기준으로 그룹화
-  const byRank = useMemo(() => {
-    const m = new Map<RankType, OrgTreeNodeType[]>();
-    for (const node of allNodes) {
-      const rank = node.rank as RankType;
-      if (!m.has(rank)) m.set(rank, []);
-      m.get(rank)!.push(node);
-    }
-    return m;
-  }, [allNodes]);
-
-  // 실제 데이터가 있는 직급 레벨만, RANK_LEVELS 순서대로
-  const activeLevels = useMemo(() => RANK_LEVELS.filter((r) => byRank.has(r)), [byRank]);
+  function handleSelect(id: string) {
+    setSelectedId((prev) => (prev === id ? null : id));
+  }
 
   const selectedNode = selectedId ? findNode(roots, selectedId) : null;
   const selectedContracts = selectedNode
     ? collectSubtreeContracts(selectedNode, contractsByMember)
     : [];
 
-  function handleSelect(id: string) {
-    setSelectedId((prev) => (prev === id ? null : id));
+  function TreeSubtree({ node }: { node: OrgTreeNodeType }) {
+    const children = node.children ?? [];
+    const hasChildren = children.length > 0;
+
+    return (
+      <div className="flex flex-col items-center">
+        {/* 노드 카드 */}
+        <OrgTreeNode
+          node={node}
+          contractsByMember={contractsByMember}
+          nodeMetrics={metricsById?.[node.id] ?? null}
+          selectedId={selectedId}
+          onSelect={handleSelect}
+        />
+
+        {/* 자식 서브트리 */}
+        {hasChildren && (
+          <div className="relative mt-6 pt-6 w-full">
+            {/* 부모 -> 자식들 수직 라인 */}
+            <div className="absolute left-1/2 top-0 -translate-x-1/2 h-6 w-px bg-gray-300" />
+
+            {/* 자식들 상단 수평 라인 */}
+            {children.length > 1 && (
+              <div className="absolute left-4 right-4 top-6 h-px bg-gray-300" />
+            )}
+
+            <div className="flex flex-wrap justify-center gap-6 px-4">
+              {children.map((ch) => (
+                <div key={ch.id} className="relative flex flex-col items-center">
+                  {/* 수평 라인 -> 자식 수직 라인 */}
+                  <div className="absolute left-1/2 top-0 -translate-x-1/2 h-6 w-px bg-gray-300" />
+                  <TreeSubtree node={ch} />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
   }
 
   if (allNodes.length === 0) {
@@ -329,27 +352,10 @@ export default function OrgTree({ roots, contractsByMember, metricsById }: Props
             transformOrigin: 'top center',
           }}
         >
-          {/* 직급별 레벨 행 렌더링 */}
-          <div className="flex flex-col items-center">
-            {activeLevels.map((rank, levelIdx) => (
-              <div key={rank} className="w-full flex flex-col items-center">
-                {/* 레벨 간 수직 연결선 */}
-                {levelIdx > 0 && <div className="h-8 w-0.5 bg-gray-300" />}
-
-                {/* 해당 직급 멤버 카드 행 */}
-                <div className="flex flex-wrap justify-center gap-3 px-4 w-full">
-                  {byRank.get(rank)!.map((node) => (
-                    <OrgTreeNode
-                      key={node.id}
-                      node={node}
-                      contractsByMember={contractsByMember}
-                      nodeMetrics={metricsById?.[node.id] ?? null}
-                      selectedId={selectedId}
-                      onSelect={handleSelect}
-                    />
-                  ))}
-                </div>
-              </div>
+          {/* parent-child 기반 nested tree 렌더링 */}
+          <div className="flex flex-col items-center gap-10 py-6">
+            {roots.map((r) => (
+              <TreeSubtree key={r.id} node={r} />
             ))}
           </div>
         </div>
