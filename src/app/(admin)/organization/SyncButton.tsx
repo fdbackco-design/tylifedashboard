@@ -144,6 +144,14 @@ export default function SyncButton() {
                 <span className="font-mono text-[10px] text-red-500">{String(e.created_at).slice(0, 19).replace('T', ' ')}</span>{' '}
                 <span className="font-semibold">{e.level}</span>{' '}
                 <span>{e.message}</span>
+                {e.context && (
+                  <details className="mt-1">
+                    <summary className="cursor-pointer text-[10px] text-red-600">context 보기</summary>
+                    <pre className="mt-1 whitespace-pre-wrap break-words text-[10px] text-red-700 bg-white/60 border border-red-200 rounded p-2">
+                      {JSON.stringify(e.context, null, 2)}
+                    </pre>
+                  </details>
+                )}
               </li>
             ))}
           </ul>

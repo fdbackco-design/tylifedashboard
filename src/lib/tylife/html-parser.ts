@@ -81,11 +81,19 @@ export function parseContractListHtml(listHtml: string): ParsedListItem[] {
       snapshot[key] = clean(value);
     });
 
-    // 여러 키 이름 변형을 허용하는 getter
+    // 여러 키 이름 변형을 허용하는 getter (부분 일치 포함)
+    // 예: "송장번호(운송장)" 같이 label이 변형되어도 추출되게 한다.
     const get = (...keys: string[]): string | null => {
+      const entries = Object.entries(cellMap);
       for (const k of keys) {
-        const v = clean(cellMap[k] ?? '');
-        if (v !== null) return v;
+        const exact = clean(cellMap[k] ?? '');
+        if (exact !== null) return exact;
+        for (const [ek, ev] of entries) {
+          if (ek.includes(k)) {
+            const v = clean(ev ?? '');
+            if (v !== null) return v;
+          }
+        }
       }
       return null;
     };
