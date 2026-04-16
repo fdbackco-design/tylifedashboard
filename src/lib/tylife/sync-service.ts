@@ -475,7 +475,7 @@ async function processItem(
     // ── 3. 기존 계약 조회 (상세 fetch 스킵 여부 + 실적 경로 1회 스탬핑 유지) ──
     const { data: existingContract } = await db
       .from('contracts')
-      .select('id, status, unit_count, invoice_no, item_name, performance_path_json')
+      .select('id, status, unit_count, invoice_no, rental_request_no, item_name, performance_path_json')
       .eq('contract_code', item.contract_code)
       .maybeSingle();
 
@@ -483,6 +483,7 @@ async function processItem(
       status: string;
       unit_count: number | null;
       invoice_no: string | null;
+      rental_request_no: string | null;
       item_name: string | null;
       performance_path_json: unknown;
     } | null;
@@ -492,6 +493,7 @@ async function processItem(
       ec.status === normalizeStatus(item.status_raw ?? '') &&
       ec.unit_count != null &&
       ec.invoice_no != null &&
+      ec.rental_request_no != null &&
       ec.item_name != null &&
       ec.item_name !== DEFAULT_ITEM_NAME_PLACEHOLDER;
 
