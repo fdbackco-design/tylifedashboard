@@ -201,10 +201,15 @@ export function calculateOrgNodeMetrics(params: {
       if (r === '영업사원') topSalespersonId = id;
       if (isLeaderOrAbove(r)) highestLeaderId = id;
     }
-    // 본사 직속/루트라인(ancestors에 사원이 없을 수 있음)에서는 본인이 최상위 사원 후보
-    if (originRank === '영업사원' && !topSalespersonId) topSalespersonId = origin;
+    // 본사 직속/루트라인 예외:
+    // - 상위 경로(본사 제외)에 리더 이상/영업사원이 전혀 없으면,
+    //   본인(리더/센터장/본부장/영업사원)이 “최상위 라인”이므로 실지급 귀속 대상이 된다.
+    if (!topSalespersonId && originRank === '영업사원') topSalespersonId = origin;
 
-    const payRecipientId = highestLeaderId ?? topSalespersonId;
+    const payRecipientId =
+      highestLeaderId ??
+      topSalespersonId ??
+      (originRank !== '본사' ? origin : null);
     if (payRecipientId) {
       const payRank = rankById.get(payRecipientId);
       if (payRank) {
