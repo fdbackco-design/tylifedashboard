@@ -129,7 +129,7 @@ export default function OrgTreeNode({ node, contractsByMember, nodeMetrics, sele
           </span>
         </div>
 
-        {nodeMetrics && (
+        {nodeMetrics && node.rank !== '본사' && (
           <div className="mt-1.5 w-full text-[11px] text-gray-600 space-y-0.5">
             <div className="flex justify-between">
               <span className="text-gray-500">누적 구좌</span>
@@ -143,22 +143,18 @@ export default function OrgTreeNode({ node, contractsByMember, nodeMetrics, sele
                 {nodeMetrics.monthlyUnitCount.toLocaleString('ko-KR')}
               </span>
             </div>
-            {node.rank !== '본사' && (
-              <>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">인정수당</span>
-                  <span className="font-semibold text-gray-800 tabular-nums">
-                    {formatManwon(nodeMetrics.recognizedCommissionWon)}만원
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">실지급액</span>
-                  <span className="font-semibold text-gray-800 tabular-nums">
-                    {formatManwon(nodeMetrics.paidCommissionWon)}만원
-                  </span>
-                </div>
-              </>
-            )}
+            <div className="flex justify-between">
+              <span className="text-gray-500">인정수당</span>
+              <span className="font-semibold text-gray-800 tabular-nums">
+                {formatManwon(nodeMetrics.recognizedCommissionWon)}만원
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">실지급액</span>
+              <span className="font-semibold text-gray-800 tabular-nums">
+                {formatManwon(nodeMetrics.paidCommissionWon)}만원
+              </span>
+            </div>
           </div>
         )}
       </div>
