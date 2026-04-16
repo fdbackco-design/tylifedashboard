@@ -17,11 +17,13 @@ export default function SyncButton() {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<Array<{ created_at: string; level: string; message: string; context: any }> | null>(null);
 
   async function handleSync() {
     setLoading(true);
     setProgress(null);
     setError(null);
+    setErrorDetails(null);
 
     let runId: string | null = null;
     let page = 1;
@@ -74,6 +76,16 @@ export default function SyncButton() {
         };
         setProgress(current);
 
+        if ((current.totalErrors ?? 0) > 0) {
+          try {
+            const lr = await fetch(`/api/sync/logs?runId=${encodeURIComponent(runId)}&limit=10`);
+            const lj = (await lr.json()) as any;
+            if (lr.ok && lj?.success) setErrorDetails(lj.data ?? []);
+          } catch {
+            // ignore
+          }
+        }
+
         if (!json.hasMore) {
           // 완료 처리
           await fetch('/api/sync/run', {
@@ -121,6 +133,22 @@ export default function SyncButton() {
 
       {error && (
         <span className="text-xs text-red-500">{error}</span>
+      )}
+
+      {errorDetails && errorDetails.length > 0 && (
+        <div className="w-full max-w-[520px] text-xs bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-gray-700">
+          <div className="font-semibold text-red-700 mb-1">최근 동기화 오류</div>
+          <ul className="space-y-1">
+            {errorDetails.slice(0, 10).map((e, idx) => (
+              <li key={idx} className="text-red-700">
+                <span className="font-mono text-[10px] text-red-500">{String(e.created_at).slice(0, 19).replace('T', ' ')}</span>{' '}
+                <span className="font-semibold">{e.level}</span>{' '}
+                <span>{e.message}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="text-[10px] text-red-500 mt-1">상세 context는 서버 로그/DB(sync_logs)에서 확인 가능합니다.</div>
+        </div>
       )}
     </div>
   );

@@ -320,7 +320,8 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
     console.log('[org-debug] select', { selectedId, directContracts: list.length, sample: list.slice(0, 3) });
 
     // 특정 고객(예: 최유주) 상태/필드 확인용
-    const target = list.filter((c) => (c.customer_name ?? '').includes('최유주'));
+    const norm = (v: string | null | undefined) => (v ?? '').replace(/\s+/g, '').trim();
+    const target = list.filter((c) => norm(c.customer_name).includes('최유주'));
     if (target.length > 0) {
       // eslint-disable-next-line no-console
       console.log(
@@ -334,6 +335,16 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
           displayStatus: getDisplayStatus(c),
         })),
       );
+    }
+
+    if (target.length === 0) {
+      // eslint-disable-next-line no-console
+      console.log('[org-debug] target-customer', {
+        selectedId,
+        target: '최유주',
+        found: 0,
+        uniqueCustomers: Array.from(new Set(list.map((c) => (c.customer_name ?? '').trim()))).slice(0, 30),
+      });
     }
   }, [debug?.enabled, selectedId, contractsByMember]);
 
