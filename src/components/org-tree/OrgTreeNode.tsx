@@ -1,6 +1,7 @@
 'use client';
 
 import type { OrgTreeNode as OrgTreeNodeType } from '@/lib/types';
+import { isContractJoinCompleted as isJoinCompleted } from '@/lib/utils/contract-display-status';
 
 // ── 타입 ─────────────────────────────────────────────────
 export interface ContractItem {
@@ -31,12 +32,6 @@ export function collectSubtreeIds(node: OrgTreeNodeType): string[] {
   return [node.id, ...node.children.flatMap(collectSubtreeIds)];
 }
 
-function isJoinCompleted(c: ContractItem): boolean {
-  if (c.status === '가입') return true;
-  const hasRental = (c.rental_request_no ?? '').trim().length > 0;
-  const hasInvoice = (c.invoice_no ?? '').trim().length > 0;
-  return c.status !== '해약' && hasRental && hasInvoice;
-}
 const CARD_STATUSES = ['준비', '대기', '해약', '가입'] as const;
 type CardStatus = (typeof CARD_STATUSES)[number];
 

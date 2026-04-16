@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import type { ContractStatus } from '@/lib/types';
+import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
 
 export const metadata: Metadata = { title: '계약 관리' };
 export const dynamic = 'force-dynamic';
@@ -31,24 +32,6 @@ const STATUS_COLORS: Record<ContractStatus, string> = {
   취소: 'bg-red-100 text-red-700',
   해약: 'bg-red-200 text-red-800',
 };
-
-function getDisplayStatus(c: {
-  status: ContractStatus;
-  rental_request_no?: string | null;
-  invoice_no?: string | null;
-  memo?: string | null;
-}): ContractStatus | '렌탈 미충족' {
-  const v = (c.rental_request_no ?? c.memo ?? '').trim();
-  if ((c.status === '준비' || c.status === '대기') && v === '렌탈기준 미충족') {
-    return '렌탈 미충족';
-  }
-  const hasRental = (c.rental_request_no ?? '').trim().length > 0;
-  const hasInvoice = (c.invoice_no ?? '').trim().length > 0;
-  if (c.status === '가입' || (c.status !== '해약' && hasRental && hasInvoice)) {
-    return '가입';
-  }
-  return c.status;
-}
 
 const PAGE_SIZE = 50;
 
@@ -187,7 +170,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
           memo: ((c as { memo?: string | null }).memo ?? null) as string | null,
           unit_count: ((c as { unit_count?: number }).unit_count ?? 0) as number,
           join_method: (c as { join_method: string }).join_method,
-          status: getDisplayStatus({
+          status: getContractDisplayStatus({
             status: (c as { status: ContractStatus }).status,
             rental_request_no: ((c as { rental_request_no?: string | null }).rental_request_no ?? null) as
               | string
@@ -222,7 +205,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
         existing.memo = ((c as { memo?: string | null }).memo ?? null) as string | null;
       }
 
-      const s = getDisplayStatus({
+      const s = getContractDisplayStatus({
         status: (c as { status: ContractStatus }).status,
         rental_request_no: ((c as { rental_request_no?: string | null }).rental_request_no ?? null) as
           | string
@@ -347,7 +330,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
               {aggregated.map((c) => {
                 const customer = c.customers as { name: string } | null;
                 const member = c.sales_member as { name: string } | null;
-                const displayStatus = getDisplayStatus(c);
+                const displayStatus = getContractDisplayStatus(c);
 
                 return (
                   <tr

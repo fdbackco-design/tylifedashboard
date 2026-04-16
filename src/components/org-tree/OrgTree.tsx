@@ -6,17 +6,14 @@ import OrgTreeNode, {
   type ContractItem,
   collectSubtreeIds,
 } from './OrgTreeNode';
+import {
+  getContractDisplayStatus,
+  isContractJoinCompleted as isJoinCompleted,
+} from '@/lib/utils/contract-display-status';
 
 // ── 상수 ─────────────────────────────────────────────────
 /** 직급 표시 순서 (위 → 아래) */
 const RANK_LEVELS: RankType[] = ['본사', '사업본부장', '센터장', '리더', '영업사원'];
-
-function isJoinCompleted(c: ContractItem): boolean {
-  if (c.status === '가입') return true;
-  const hasRental = (c.rental_request_no ?? '').trim().length > 0;
-  const hasInvoice = (c.invoice_no ?? '').trim().length > 0;
-  return c.status !== '해약' && hasRental && hasInvoice;
-}
 
 // ── 유틸 ─────────────────────────────────────────────────
 
@@ -71,12 +68,12 @@ function isRentalUnmet(c: ContractItem): boolean {
 }
 
 function getDisplayStatus(c: ContractItem): string {
-  // 표시 기준:
-  // - 렌탈 미충족이면 최우선 표기
-  // - 그 외 “가입 인정 조건”이면 가입으로 표기
-  if (isRentalUnmet(c)) return '렌탈 미충족';
-  if (isJoinCompleted(c)) return '가입';
-  return c.status;
+  return getContractDisplayStatus({
+    status: c.status,
+    rental_request_no: c.rental_request_no,
+    invoice_no: c.invoice_no,
+    memo: c.memo,
+  });
 }
 
 function aggregateContracts(contracts: ContractItem[]): AggregatedContract[] {

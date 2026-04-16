@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
+import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
 
 export const metadata: Metadata = { title: '계약 상세' };
 export const dynamic = 'force-dynamic';
@@ -44,12 +45,12 @@ export default async function ContractDetailPage({ params }: PageProps) {
     .eq('contract_id', id)
     .order('changed_at', { ascending: false });
 
-  const rentalMark = ((contract.rental_request_no as string | null) ?? (contract.memo as string | null) ?? '').trim();
-  const displayStatus =
-    ((contract.status as string) === '준비' || (contract.status as string) === '대기') &&
-    rentalMark === '렌탈기준 미충족'
-      ? '렌탈 미충족'
-      : (contract.status as string);
+  const displayStatus = getContractDisplayStatus({
+    status: contract.status as string,
+    rental_request_no: contract.rental_request_no as string | null,
+    invoice_no: contract.invoice_no as string | null,
+    memo: contract.memo as string | null,
+  });
 
   return (
     <div className="p-6 max-w-4xl">
