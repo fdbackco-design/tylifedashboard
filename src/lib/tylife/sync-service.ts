@@ -432,6 +432,17 @@ async function processItem(
       };
     }
 
+    // ── 상태 정규화(가입 인정 기준) ──
+    // 원본 status가 '대기/준비/...'여도, 해약이 아니고 송장+렌탈이 있으면 "가입"으로 본다.
+    // 이렇게 DB에 저장되는 status 자체를 통일하면, /organization 예외/집계가 동기화 타이밍에 흔들리지 않는다.
+    if (isJoinEligibleByRule({
+      status: contractFinal.status,
+      rental_request_no: contractFinal.rental_request_no,
+      invoice_no: contractFinal.invoice_no,
+    })) {
+      contractFinal = { ...contractFinal, status: '가입' };
+    }
+
     // ── 5. 실적 스탬핑: 최초 1회만 경로 박제 (이후 조직 개편·퇴사에도 당시 레그 유지)
     if (salesLinkStatus === 'linked' && finalSalesMemberId && !existingPathStamped) {
       const path = await buildPerformancePath(db, finalSalesMemberId);
@@ -480,15 +491,19 @@ async function processItem(
       }
     }
 
-    // ── 4.6. 본사(안성준) 담당 '가입' 계약 고객을 본사 직속 영업사원으로 노출 ──
+    // ── 4.6. 본사(안성준) 담당 '가입(인정)' 계약 고객을 본사 직속 영업사원으로 노출 ──
     // 요구사항:
     // - 담당자가 본사(안성준)인 계약 중 status가 '가입'인 고객은
     //   다른 계약이 없어도 조직도에 본사 하위 영업사원으로 보이게 한다.
     if (salesLinkStatus === 'linked') {
       const hqId = await getHqMemberId(db);
       const isHqSales = hqId != null && finalSalesMemberId === hqId;
-      const status = (contractFinal.status ?? '').trim();
-      if (isHqSales && status === '가입') {
+      const eligible = isJoinEligibleByRule({
+        status: contractFinal.status,
+        rental_request_no: contractFinal.rental_request_no,
+        invoice_no: contractFinal.invoice_no,
+      });
+      if (isHqSales && eligible) {
         const customerNodeName = (item.customer_name ?? '').trim();
         if (customerNodeName) {
           // 고객을 조직원으로 "가상" 등록: external_id로 고객ID 기반 고유키 사용 (이름 중복과 무관)

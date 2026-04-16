@@ -5,6 +5,7 @@ import { BASE_AMOUNT_PER_UNIT } from '@/lib/settlement/constants';
 import { getSettlementWindowSeoul } from '@/lib/settlement/settlement-window';
 import { calculateOrgNodeMetrics } from '@/lib/settlement/org-node-metrics';
 import { isSettlementEligibleContract } from '@/lib/settlement/settlement-eligibility';
+import { isContractJoinCompleted } from '@/lib/utils/contract-display-status';
 import OrgTree from '@/components/org-tree/OrgTree';
 import type { ContractItem } from '@/components/org-tree/OrgTreeNode';
 import type { OrgTreeRow, OrganizationMember } from '@/lib/types';
@@ -150,8 +151,25 @@ export default async function OrganizationPage() {
     return null;
   };
 
-  const mapSalesMemberForOrg = (c: { sales_member_id: string; customer_id: string; status: string; customer_phone: string | null }): string => {
-    if (hqId && c.sales_member_id === hqId && c.status === '가입') {
+  const mapSalesMemberForOrg = (c: {
+    sales_member_id: string;
+    customer_id: string;
+    status: string;
+    rental_request_no?: string | null;
+    invoice_no?: string | null;
+    memo?: string | null;
+    customer_phone: string | null;
+  }): string => {
+    // 동기화 타이밍/원본 상태 문자열 때문에 status가 '가입'으로 안 찍히는 경우가 있어도,
+    // “가입 인정 기준(해약 아님 + 송장/렌탈 존재)”이면 가입으로 간주해서 예외를 항상 적용한다.
+    const joinEligible = isContractJoinCompleted({
+      status: c.status,
+      rental_request_no: c.rental_request_no ?? null,
+      invoice_no: c.invoice_no ?? null,
+      memo: c.memo ?? null,
+    });
+
+    if (hqId && c.sales_member_id === hqId && joinEligible) {
       const customerNodeId = findCustomerNodeId({ customer_id: c.customer_id, customer_phone: c.customer_phone });
       if (customerNodeId) return customerNodeId;
     }
@@ -163,6 +181,9 @@ export default async function OrganizationPage() {
       sales_member_id: c.sales_member_id,
       customer_id: c.customer_id,
       status: c.status,
+      rental_request_no: c.rental_request_no ?? null,
+      invoice_no: c.invoice_no ?? null,
+      memo: c.memo ?? null,
       customer_phone: c.customers?.phone ?? null,
     });
     if (!contractsByMember[key]) contractsByMember[key] = [];
@@ -195,6 +216,9 @@ export default async function OrganizationPage() {
         sales_member_id: c.sales_member_id,
         customer_id: c.customer_id,
         status: c.status,
+        rental_request_no: c.rental_request_no ?? null,
+        invoice_no: c.invoice_no ?? null,
+        memo: c.memo ?? null,
         customer_phone: c.customers?.phone ?? null,
       }),
     }));
