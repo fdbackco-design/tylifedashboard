@@ -101,6 +101,11 @@ export default async function OrganizationPage({
   const employeesByName = new Map<string, { id: string; count: number }>(); // normalized name -> {id, count}
   const customerMergeTo = new Map<string, string>(); // customerMemberId -> employeeMemberId
   const customerIdToEffectiveMemberId = new Map<string, string>(); // customer:{customer_id} -> (customerMemberId or merged employeeMemberId)
+  const hqIdsRaw = new Set(
+    (membersRaw as any[])
+      .filter((m) => (m as any).name === '안성준' || (m as any).rank === '본사')
+      .map((m) => (m as any).id as string),
+  );
 
   for (const m of membersRaw as any[]) {
     const ext = (m as { external_id?: string | null }).external_id ?? null;
@@ -159,18 +164,33 @@ export default async function OrganizationPage({
     child_id: remapMemberId((e as any).child_id),
   }));
 
-  // child_id UNIQUE 성격 유지: remap으로 중복된 child는 하나만 남김
-  const seenChild = new Set<string>();
-  const dedupedEdges: { parent_id: string | null; child_id: string }[] = [];
+  // child_id UNIQUE 성격 유지: remap으로 중복된 child가 생기면 "더 적절한 parent"를 선택
+  // - 본사(hq) 아래로 붙는 edge가 있으면 그걸 우선
+  // - 그 외에는 parent_id가 null이 아닌 것을 우선
+  const bestByChild = new Map<string, { parent_id: string | null; child_id: string }>();
+  const isBetter = (
+    next: { parent_id: string | null; child_id: string },
+    prev: { parent_id: string | null; child_id: string },
+  ): boolean => {
+    const nextIsHq = next.parent_id != null && hqIdsRaw.has(next.parent_id);
+    const prevIsHq = prev.parent_id != null && hqIdsRaw.has(prev.parent_id);
+    if (nextIsHq !== prevIsHq) return nextIsHq;
+    if ((next.parent_id != null) !== (prev.parent_id != null)) return next.parent_id != null;
+    return false;
+  };
+
   for (const e of edges as any[]) {
-    if (seenChild.has(e.child_id)) continue;
-    seenChild.add(e.child_id);
     // remap 이후 parent가 존재하지 않으면(병합/삭제로 유실) 루트로 승격
     const parent_id = e.parent_id && memberIdSet.has(e.parent_id) ? e.parent_id : null;
-    // child가 멤버 목록에 없으면 스킵(이 페이지에선 표시 불가)
-    if (!memberIdSet.has(e.child_id)) continue;
-    dedupedEdges.push({ parent_id, child_id: e.child_id });
+    const child_id = e.child_id as string;
+    if (!memberIdSet.has(child_id)) continue;
+
+    const next = { parent_id, child_id };
+    const prev = bestByChild.get(child_id);
+    if (!prev || isBetter(next, prev)) bestByChild.set(child_id, next);
   }
+
+  const dedupedEdges = [...bestByChild.values()];
 
   const edgeMap = new Map<string, string | null>();
   for (const e of dedupedEdges) {
