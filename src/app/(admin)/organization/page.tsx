@@ -98,15 +98,23 @@ export default async function OrganizationPage({
   const normName = (v: string | null | undefined): string => (v ?? '').replace(/^\[고객\]\s*/, '').trim();
 
   const employeesByKey = new Map<string, string>(); // name|phone -> memberId (non-customer)
+  const employeesByName = new Map<string, { id: string; count: number }>(); // normalized name -> {id, count}
   const customerMergeTo = new Map<string, string>(); // customerMemberId -> employeeMemberId
 
   for (const m of membersRaw as any[]) {
     const ext = (m as { external_id?: string | null }).external_id ?? null;
-    const key = `${normName((m as any).name)}|${toPhoneDigits((m as any).phone)}`;
+    const nName = normName((m as any).name);
+    const digits = toPhoneDigits((m as any).phone);
+    const key = `${nName}|${digits}`;
     const isCustomerNode = ext?.startsWith('customer:') ?? false;
     if (!isCustomerNode && toPhoneDigits((m as any).phone)) {
       // 직원 노드 우선 등록
       if (!employeesByKey.has(key)) employeesByKey.set(key, (m as { id: string }).id);
+    }
+    if (!isCustomerNode) {
+      const cur = employeesByName.get(nName);
+      if (!cur) employeesByName.set(nName, { id: (m as { id: string }).id, count: 1 });
+      else employeesByName.set(nName, { id: cur.id, count: cur.count + 1 });
     }
   }
 
@@ -115,10 +123,21 @@ export default async function OrganizationPage({
     const isCustomerNode = ext?.startsWith('customer:') ?? false;
     if (!isCustomerNode) continue;
     const digits = toPhoneDigits((m as any).phone);
-    if (!digits) continue;
-    const key = `${normName((m as any).name)}|${digits}`;
-    const employeeId = employeesByKey.get(key);
-    if (employeeId) customerMergeTo.set((m as { id: string }).id, employeeId);
+    const nName = normName((m as any).name);
+    if (digits) {
+      const key = `${nName}|${digits}`;
+      const employeeId = employeesByKey.get(key);
+      if (employeeId) {
+        customerMergeTo.set((m as { id: string }).id, employeeId);
+        continue;
+      }
+    }
+    // phone이 없거나 매칭이 실패한 경우:
+    // 동일 이름의 직원 노드가 "유일하게 1개"일 때만 안전하게 병합
+    const byName = employeesByName.get(nName);
+    if (byName && byName.count === 1) {
+      customerMergeTo.set((m as { id: string }).id, byName.id);
+    }
   }
 
   const remapMemberId = (id: string): string => customerMergeTo.get(id) ?? id;
