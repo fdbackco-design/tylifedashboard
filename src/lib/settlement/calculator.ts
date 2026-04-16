@@ -8,6 +8,7 @@ import type {
 import type { RankType, OrgTreeNode } from '../types/organization';
 import type { Contract } from '../types/contract';
 import { RANK_ORDER } from '../types/organization';
+import { BASE_AMOUNT_PER_UNIT, DEFAULT_COMMISSION_BY_RANK, DEFAULT_INCENTIVE_CONFIG } from './constants';
 
 function monthEndDate(yearMonth: string): string {
   // 'YYYY-MM' -> 'YYYY-MM-DD' (해당 월 말일)
@@ -39,6 +40,32 @@ export function findActiveRule(
     .sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0];
 }
 
+function getActiveRuleOrFallback(
+  rules: SettlementRule[],
+  rank: RankType,
+  date: string, // 'YYYY-MM-DD'
+): SettlementRule {
+  const active = findActiveRule(rules, rank, date);
+  if (active) return active;
+
+  const commission =
+    (rank === '사업본부장' ? 600_000 : (DEFAULT_COMMISSION_BY_RANK[rank] ?? 0));
+  const incentive = DEFAULT_INCENTIVE_CONFIG[rank] ?? null;
+
+  return {
+    id: `fallback:${rank}`,
+    rank,
+    base_amount_per_unit: BASE_AMOUNT_PER_UNIT,
+    commission_per_unit: commission,
+    incentive_unit_threshold: incentive?.threshold ?? null,
+    incentive_amount: incentive?.amount ?? null,
+    effective_from: '1900-01-01',
+    effective_until: null,
+    note: 'fallback',
+    created_at: new Date().toISOString(),
+  };
+}
+
 // ─────────────────────────────────────────────
 // 직급 간 롤업 차액 계산
 // ─────────────────────────────────────────────
@@ -53,10 +80,8 @@ export function getRollupAmountPerUnit(
   rules: SettlementRule[],
   date: string,
 ): number {
-  const upperRule = findActiveRule(rules, upperRank, date);
-  const lowerRule = findActiveRule(rules, lowerRank, date);
-
-  if (!upperRule || !lowerRule) return 0;
+  const upperRule = getActiveRuleOrFallback(rules, upperRank, date);
+  const lowerRule = getActiveRuleOrFallback(rules, lowerRank, date);
 
   const diff = upperRule.commission_per_unit - lowerRule.commission_per_unit;
   return Math.max(0, diff);
@@ -198,12 +223,7 @@ export function calculateMemberSettlement(
   const refDate = monthEndDate(yearMonth);
 
   // 정산 규칙 조회
-  const rule = findActiveRule(rules, member.rank, refDate);
-  if (!rule) {
-    throw new Error(
-      `No active settlement rule for rank '${member.rank}' on ${refDate}`,
-    );
-  }
+  const rule = getActiveRuleOrFallback(rules, member.rank, refDate);
 
   // 직접 계약 정산
   // directContracts는 v_contract_settlement_base(가입 인정 기준)에서 이미 필터링된 결과를 받는다.

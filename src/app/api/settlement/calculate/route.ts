@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
-import { calculateMemberSettlement, buildOrgTree, findActiveRule } from '@/lib/settlement/calculator';
+import { calculateMemberSettlement, buildOrgTree } from '@/lib/settlement/calculator';
 import type { Contract, OrganizationMember, SettlementRule, OrgTreeRow } from '@/lib/types';
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -126,9 +126,6 @@ async function calculateMonthlySettlement(
   let updatedCount = 0;
 
   for (const member of (membersRes.data ?? []) as OrganizationMember[]) {
-    const rule = findActiveRule(rules as SettlementRule[], member.rank, refDate);
-    if (!rule) continue;
-
     const orgNode = nodeById.get(member.id) ?? null;
     if (!orgNode) continue;
 
