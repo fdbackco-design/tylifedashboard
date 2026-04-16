@@ -43,7 +43,7 @@ export default async function OrganizationPage() {
     await Promise.all([
     db
       .from('organization_members')
-      .select('id, name, rank, external_id')
+      .select('id, name, rank, external_id, phone')
       .eq('is_active', true)
       .order('name'),
     db.from('organization_edges').select('parent_id, child_id'),
@@ -57,7 +57,7 @@ export default async function OrganizationPage() {
     db
       .from('contracts')
       .select(
-        'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, customer_id, sales_member_id, is_cancelled, sales_link_status, customers(name)',
+        'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, customer_id, sales_member_id, is_cancelled, sales_link_status, customers(name, phone)',
       )
       .not('sales_member_id', 'is', null),
     db.rpc('get_organization_kpis', { p_start_date: start_date, p_end_date: end_date }),
@@ -115,32 +115,56 @@ export default async function OrganizationPage() {
     sales_member_id: string;
     is_cancelled?: boolean | null;
     sales_link_status?: string | null;
-    customers: { name: string } | null;
+    customers: { name: string; phone: string | null } | null;
   }>;
 
-  // 예외 규칙: "안성준(본사) 담당 + status='가입' 계약"은 고객을 본사 직속 영업사원 노드로 노출
-  // → /organization 집계(구좌/수당/리스트 표시)에서는 해당 계약을 고객 노드에 귀속
+  // 예외 규칙(요청): "안성준(본사) 담당 + status='가입' 계약"인데,
+  // 고객이 조직도에 이미 존재하는 노드(가상 영업사원 노드 포함)로 식별되면
+  // /organization 집계(구좌/수당/리스트 표시)에서는 해당 계약의 origin을 고객 노드로 바꿔서 계산한다.
   const hqId = members.find((m) => m.name === '안성준')?.id ?? null;
-  const customerNodeByCustomerId = new Map<string, string>();
+  const customerNodeByCustomerId = new Map<string, string>(); // external_id = customer:{customer_id}
+  const nodeIdByPhoneDigits = new Map<string, string>(); // phone digits -> member id
+
+  const toPhoneDigits = (v: string | null | undefined): string => (v ?? '').replace(/\D/g, '');
+
   for (const m of members as any[]) {
     const ext = (m as { external_id?: string | null }).external_id ?? null;
     if (ext && ext.startsWith('customer:')) {
       const customerId = ext.slice('customer:'.length);
       customerNodeByCustomerId.set(customerId, (m as { id: string }).id);
     }
+    const digits = toPhoneDigits((m as { phone?: string | null }).phone ?? null);
+    if (digits) nodeIdByPhoneDigits.set(digits, (m as { id: string }).id);
   }
 
-  const mapSalesMemberForOrg = (c: { sales_member_id: string; customer_id: string }): string => {
-    // 예외: 안성준(본사) 담당 계약인데, 고객이 조직도 노드로 식별되면 고객 노드로 직접 귀속
-    if (hqId && c.sales_member_id === hqId) {
-      const customerNodeId = customerNodeByCustomerId.get(c.customer_id);
+  const findCustomerNodeId = (c: { customer_id: string; customer_phone: string | null }): string | null => {
+    // (1) external_id == customer:{customer_id}
+    const byExt = customerNodeByCustomerId.get(c.customer_id);
+    if (byExt) return byExt;
+    // (2) phone match
+    const digits = toPhoneDigits(c.customer_phone);
+    if (digits) {
+      const byPhone = nodeIdByPhoneDigits.get(digits);
+      if (byPhone) return byPhone;
+    }
+    return null;
+  };
+
+  const mapSalesMemberForOrg = (c: { sales_member_id: string; customer_id: string; status: string; customer_phone: string | null }): string => {
+    if (hqId && c.sales_member_id === hqId && c.status === '가입') {
+      const customerNodeId = findCustomerNodeId({ customer_id: c.customer_id, customer_phone: c.customer_phone });
       if (customerNodeId) return customerNodeId;
     }
     return c.sales_member_id;
   };
 
   for (const c of rawContractRows) {
-    const key = mapSalesMemberForOrg(c);
+    const key = mapSalesMemberForOrg({
+      sales_member_id: c.sales_member_id,
+      customer_id: c.customer_id,
+      status: c.status,
+      customer_phone: c.customers?.phone ?? null,
+    });
     if (!contractsByMember[key]) contractsByMember[key] = [];
     contractsByMember[key].push({
       id: c.id,
@@ -167,7 +191,12 @@ export default async function OrganizationPage() {
       join_date: c.join_date ?? '',
       unit_count: c.unit_count ?? 0,
       status: c.status,
-      sales_member_id: mapSalesMemberForOrg(c),
+      sales_member_id: mapSalesMemberForOrg({
+        sales_member_id: c.sales_member_id,
+        customer_id: c.customer_id,
+        status: c.status,
+        customer_phone: c.customers?.phone ?? null,
+      }),
     }));
 
   const orgMetricsById = calculateOrgNodeMetrics({
