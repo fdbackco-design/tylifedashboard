@@ -217,6 +217,25 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     return (member?.name ?? '') === ZERO_OUT_MEMBER_NAME;
   };
 
+  const displayRows = (settlements ?? [])
+    .map((s) => {
+      const member = s.organization_members as unknown as { name: string } | null;
+      const rawName = member?.name ?? '';
+      const displayName = rawName.replace(/^\[고객\]\s*/, '');
+      const zeroOut = rawName === ZERO_OUT_MEMBER_NAME;
+      const base = orgMetricsById[(s.member_id as string)]?.paidCommissionWon ?? 0;
+      const total = base; // 현재 정책: 합계 = 기본수당(=조직도 실지급액)
+      return { s, rawName, displayName, zeroOut, base, total };
+    })
+    .sort((a, b) => {
+      // 합계금 기준 내림차순
+      if (b.total !== a.total) return b.total - a.total;
+      // 동점이면 이름/ID로 안정 정렬
+      const nameCmp = a.displayName.localeCompare(b.displayName, 'ko-KR');
+      if (nameCmp !== 0) return nameCmp;
+      return String(a.s.member_id).localeCompare(String(b.s.member_id));
+    });
+
   const totalAmount = (settlements ?? []).reduce((sum, s) => {
     if (isZeroOutMember(s)) return sum;
     return sum + (orgMetricsById[(s.member_id as string)]?.paidCommissionWon ?? 0);
@@ -383,12 +402,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
                   </td>
                 </tr>
               )}
-              {(settlements ?? []).map((s) => {
-                const member = s.organization_members as unknown as { name: string } | null;
-                const rawName = member?.name ?? '';
-                const displayName = rawName.replace(/^\[고객\]\s*/, '');
-                const zeroOut = rawName === ZERO_OUT_MEMBER_NAME;
-                const base = orgMetricsById[(s.member_id as string)]?.paidCommissionWon ?? 0;
+              {displayRows.map(({ s, displayName, rawName, zeroOut, base }) => {
                 return (
                   <tr key={s.id as string} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium">
