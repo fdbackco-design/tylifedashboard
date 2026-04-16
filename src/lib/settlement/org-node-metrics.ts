@@ -1,6 +1,7 @@
 import type { RankType, OrganizationMember, OrganizationEdge } from '@/lib/types';
 import type { SettlementRule } from '@/lib/types/settlement';
 import { findActiveRule } from '@/lib/settlement/calculator';
+import { DEFAULT_COMMISSION_BY_RANK } from '@/lib/settlement/constants';
 
 export type OrgNodeMetrics = {
   cumulativeUnitCount: number;
@@ -34,8 +35,12 @@ function getCommissionPerUnit(
   rank: RankType,
   refDate: string, // 'YYYY-MM-DD'
 ): number {
+  // 본사는 수당 대상이 아님
+  if (rank === '본사') return 0;
   const rule = findActiveRule(rules, rank, refDate);
-  return rule?.commission_per_unit ?? 0;
+  // settlement_rules를 못 읽거나(초기 데이터 미적용/권한/환경),
+  // 특정 월 규칙이 없을 때도 조직도 KPI가 0이 되지 않도록 폴백 제공
+  return rule?.commission_per_unit ?? DEFAULT_COMMISSION_BY_RANK[rank] ?? 0;
 }
 
 function buildParentMap(edges: { parent_id: string | null; child_id: string }[]): Map<string, string | null> {
