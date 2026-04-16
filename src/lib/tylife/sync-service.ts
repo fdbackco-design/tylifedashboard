@@ -217,22 +217,39 @@ async function upsertSalesMember(
   }
 
   // external_id 없으면 이름으로 조회 후 없으면 insert
+  // (병렬 동기화 레이스 방지) DB unique index(WHERE external_id IS NULL)와 함께 동작:
+  // - 동시에 insert 경쟁이 나면 1개만 성공, 나머지는 다시 select로 회수
+  const name = memberData.name.trim();
   const { data: existing } = await db
     .from('organization_members')
     .select('id')
-    .eq('name', memberData.name)
+    .eq('name', name)
+    .order('created_at', { ascending: true })
     .limit(1)
     .maybeSingle();
 
   if (existing) return (existing as { id: string }).id;
 
-  const { data, error } = await db
+  const { data: inserted, error: insErr } = await db
     .from('organization_members')
-    .insert(memberData)
+    .insert({ ...memberData, name })
     .select('id')
     .single();
-  if (error) throw new Error(`organization_members insert 실패: ${error.message}`);
-  return (data as { id: string }).id;
+
+  if (!insErr && inserted) return (inserted as { id: string }).id;
+
+  // unique 충돌 등으로 insert가 실패한 경우: 누군가 먼저 만들었을 수 있으니 다시 조회
+  const { data: retry, error: retryErr } = await db
+    .from('organization_members')
+    .select('id')
+    .eq('name', name)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (retryErr) throw new Error(`organization_members 재조회 실패: ${retryErr.message}`);
+  if (retry) return (retry as { id: string }).id;
+
+  throw new Error(`organization_members insert 실패: ${insErr?.message ?? 'unknown'}`);
 }
 
 async function upsertCustomer(

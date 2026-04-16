@@ -82,6 +82,7 @@ function formatManwon(won: number): string {
 export default function OrgTreeNode({ node, contractsByMember, nodeMetrics, selectedId, onSelect }: Props) {
   const isSelected = selectedId === node.id;
   const style = RANK_STYLE[node.rank] ?? RANK_STYLE['영업사원'];
+  const displayName = (node.name ?? '').replace(/^\[고객\]\s*/, '');
 
   const subtreeIds = collectSubtreeIds(node);
   const counts = countByStatus(subtreeIds, contractsByMember);
@@ -106,7 +107,7 @@ export default function OrgTreeNode({ node, contractsByMember, nodeMetrics, sele
 
         {/* 이름 */}
         <span className="text-sm font-bold text-gray-800 leading-snug">
-          {node.name}
+          {displayName}
         </span>
 
         {/* 가입 건수 */}

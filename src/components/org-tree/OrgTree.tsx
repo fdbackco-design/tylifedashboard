@@ -260,6 +260,12 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
     function stripHqPersonNodes(nodes: OrgTreeNodeType[]): OrgTreeNodeType[] {
       const out: OrgTreeNodeType[] = [];
       for (const n of nodes) {
+        const normalizedName = (n.name ?? '').replace(/^\[고객\]\s*/, '');
+        // 영업사원으로 생성된 "[고객] 안성준" 노드는 조직도에서 숨김
+        if (normalizedName === '안성준' && n.rank === '영업사원') {
+          out.push(...stripHqPersonNodes((n.children ?? []) as OrgTreeNodeType[]));
+          continue;
+        }
         const isHqPerson = n.rank === '본사' && n.name !== '본사';
         if (isHqPerson) {
           // 본사(person) 노드는 숨기고 자식만 같은 레벨로 승격
