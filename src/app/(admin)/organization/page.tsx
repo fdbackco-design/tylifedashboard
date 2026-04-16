@@ -54,7 +54,7 @@ export default async function OrganizationPage({
       .eq('is_active', true)
       .order('name'),
     db.from('organization_edges').select('parent_id, child_id'),
-    db.from('contracts').select('id', { count: 'exact', head: true }),
+    db.from('contracts').select('id', { count: 'estimated', head: true }),
     db
       .from('sync_runs')
       .select('id, status, triggered_by, started_at, finished_at, total_fetched, total_created, total_updated, total_errors')
@@ -66,7 +66,9 @@ export default async function OrganizationPage({
       .select(
         'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, customer_id, sales_member_id, is_cancelled, sales_link_status, customers(name, phone)',
       )
-      .not('sales_member_id', 'is', null),
+      .not('sales_member_id', 'is', null)
+      .order('join_date', { ascending: false })
+      .limit(20000),
     db.rpc('get_organization_kpis', { p_start_date: start_date, p_end_date: end_date }),
     db.from('settlement_rules').select('*'),
   ]);

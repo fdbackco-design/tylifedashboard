@@ -553,8 +553,12 @@ async function processItem(
         const customerNodeName = (item.customer_name ?? '').trim();
         if (customerNodeName) {
           // 고객을 조직원으로 "가상" 등록: external_id로 고객ID 기반 고유키 사용 (이름 중복과 무관)
+          // UI에서 실제 영업사원과 혼동되지 않도록 접두어 부여
+          const displayName = customerNodeName.startsWith('[고객] ')
+            ? customerNodeName
+            : `[고객] ${customerNodeName}`;
           const customerSalesMemberId = await upsertSalesMember(db, {
-            name: customerNodeName,
+            name: displayName,
             rank: '영업사원',
             external_id: `customer:${customerId}`,
             phone: (customerData as any).phone ?? null,
