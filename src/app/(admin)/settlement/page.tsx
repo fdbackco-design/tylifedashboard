@@ -18,6 +18,7 @@ interface PageProps {
     year_month?: string;
     rank?: string;
     member_id?: string;
+    debug?: string;
   }>;
 }
 
@@ -37,6 +38,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const yearMonth = params.year_month ?? getCurrentYearMonth();
   const rankFilter = params.rank as RankType | undefined;
+  const debugEnabled = params.debug === '1';
 
   const db = createAdminSupabaseClient();
 
@@ -64,7 +66,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const eligibleContractsCount = eligibleCountRes.count ?? 0;
 
   // 조직도 결과(실지급액) → 정산현황 기본수당에 반영
-  const [membersRes, edgesRes, eligibleContractsRes, rulesRes] = await Promise.all([
+  const [membersRes, edgesRes, eligibleBaseRes, rulesRes] = await Promise.all([
     db
       .from('organization_members')
       .select('id, name, rank, external_id, phone, source_customer_id')
@@ -110,11 +112,65 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   }));
 
   const roots = buildOrgTree(treeRows as any[]);
+
+  const baseRows = (eligibleBaseRes.data ?? []) as Array<{
+    contract_id: string;
+    contract_code: string;
+    join_date: string | null;
+    unit_count: number | null;
+    status: string;
+    is_cancelled: boolean;
+    sales_member_id: string;
+  }>;
+  const contractIds = baseRows.map((r) => r.contract_id);
+  const { data: contractCustomerRows } = await db
+    .from('contracts')
+    .select('id, customer_id')
+    .in('id', contractIds);
+  const customerIdByContractId = new Map<string, string>();
+  for (const r of (contractCustomerRows ?? []) as Array<{ id: string; customer_id: string }>) {
+    customerIdByContractId.set(r.id, r.customer_id);
+  }
+
+  // customer_id -> member_id (source_customer_id 우선, 없으면 external_id=customer:* 사용)
+  const memberIdByCustomerId = new Map<string, string>();
+  for (const m of membersRaw as any[]) {
+    const sid = (m.source_customer_id ?? null) as string | null;
+    if (sid) {
+      memberIdByCustomerId.set(sid, m.id as string);
+      continue;
+    }
+    const ext = (m.external_id ?? null) as string | null;
+    if (ext && ext.startsWith('customer:')) {
+      memberIdByCustomerId.set(ext.slice('customer:'.length), m.id as string);
+    }
+  }
+
+  // 본사 담당 계약은 customer 노드로 origin 치환(/organization과 동일)
+  const eligibleContracts = baseRows.map((r) => {
+    const customer_id = customerIdByContractId.get(r.contract_id) ?? null;
+    let sales_member_id = r.sales_member_id;
+    if (customer_id && hqIdsRaw.has(r.sales_member_id)) {
+      const mapped = memberIdByCustomerId.get(customer_id);
+      if (mapped) sales_member_id = mapped;
+    }
+    return { ...r, id: r.contract_id, customer_id, sales_member_id, unit_count: r.unit_count ?? 0 };
+  });
+
+  if (debugEnabled) {
+    const sample = eligibleContracts
+      .filter((c) => c.sales_member_id && (membersRaw.find((m: any) => m.id === c.sales_member_id)?.name ?? '').includes('김세영'))
+      .slice(0, 3)
+      .map((c) => ({ contract_code: c.contract_code, sales_member_id: c.sales_member_id, customer_id: c.customer_id }));
+    // eslint-disable-next-line no-console
+    console.log('[settlement-debug] eligibleContracts', { yearMonth, total: eligibleContracts.length, sample });
+  }
+
   const orgMetricsById = calculateOrgNodeMetrics({
     roots,
     members: membersRaw.map((m) => ({ id: m.id as string, rank: m.rank as RankType })),
     edges: edgesRaw,
-    contracts: (eligibleContractsRes.data ?? []) as any[],
+    contracts: eligibleContracts as any[],
     rules: (rulesRes.data ?? []) as any[],
     settlementWindow: { start_date, end_date, label_year_month: yearMonth },
   });
