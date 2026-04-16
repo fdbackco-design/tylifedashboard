@@ -291,6 +291,7 @@ import type { OrgTreeRow } from '../types/organization';
 
 export function buildOrgTree(rows: OrgTreeRow[]): OrgTreeNode[] {
   const nodeMap = new Map<string, OrgTreeNode>();
+  const parentById = new Map<string, string | null>();
 
   for (const row of rows) {
     nodeMap.set(row.id, {
@@ -305,6 +306,7 @@ export function buildOrgTree(rows: OrgTreeRow[]): OrgTreeNode[] {
       updated_at: '',
       children: [],
     });
+    parentById.set(row.id, row.parent_id ?? null);
   }
 
   const roots: OrgTreeNode[] = [];
@@ -316,7 +318,21 @@ export function buildOrgTree(rows: OrgTreeRow[]): OrgTreeNode[] {
     } else {
       const parent = nodeMap.get(row.parent_id);
       if (parent) {
-        parent.children.push(node);
+        // cycle 방어: row.parent_id가 row.id의 조상 체인에 이미 있으면 연결하지 않는다.
+        // (DB에 순환 엣지가 있어도 UI가 무한 재귀로 멈추지 않게)
+        let cur: string | null = row.parent_id;
+        let isCycle = false;
+        const seen = new Set<string>();
+        while (cur) {
+          if (cur === row.id) {
+            isCycle = true;
+            break;
+          }
+          if (seen.has(cur)) break; // 이미 순환이 있는 조상 체인은 더 추적하지 않음
+          seen.add(cur);
+          cur = parentById.get(cur) ?? null;
+        }
+        if (!isCycle) parent.children.push(node);
       }
     }
   }

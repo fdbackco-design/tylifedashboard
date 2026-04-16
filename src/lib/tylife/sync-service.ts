@@ -134,6 +134,28 @@ async function ensureOrgEdgeForceParentWithSource(
   childId: string,
   sourceContractId: string,
 ): Promise<void> {
+  if (parentId === childId) return;
+
+  // cycle 방지: parentId가 childId의 하위(자손)라면 parent 변경은 순환을 만든다.
+  // DB 전체를 재귀로 조회하는 대신, 최소한 "parent 체인"에서 childId가 등장하는지 확인한다.
+  // (organization_edges는 child_id 기준으로 사실상 단일 parent를 가정한다)
+  const visited = new Set<string>();
+  let cur: string | null = parentId;
+  while (cur) {
+    if (cur === childId) {
+      // 이 edge를 만들면 cycle이므로 스킵
+      throw new Error(`순환 엣지 방지: ${parentId} -> ${childId}`);
+    }
+    if (visited.has(cur)) break;
+    visited.add(cur);
+    const { data: parentRow } = (await db
+      .from('organization_edges')
+      .select('parent_id')
+      .eq('child_id', cur)
+      .maybeSingle()) as { data: { parent_id: string | null } | null };
+    cur = parentRow ? ((parentRow as { parent_id: string | null }).parent_id as string | null) : null;
+  }
+
   // 고객 노드 등 "본사 직속 보장" 케이스: 기존 parent가 있어도 강제로 parent를 맞춘다.
   const { data: edge, error } = await db
     .from('organization_edges')
