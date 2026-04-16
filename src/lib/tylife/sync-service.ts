@@ -71,6 +71,38 @@ function isTerminalContractStatus(status: string | null | undefined): boolean {
   return status === '가입' || status === '해약';
 }
 
+function isJoinEligibleByRule(params: {
+  status: string | null | undefined;
+  rental_request_no?: string | null;
+  invoice_no?: string | null;
+}): boolean {
+  const status = params.status ?? '';
+  if (status === '가입') return true;
+  if (status === '해약') return false;
+  return (params.rental_request_no ?? '').trim() !== '' && (params.invoice_no ?? '').trim() !== '';
+}
+
+async function getHqMemberId(db: SupabaseClient): Promise<string | null> {
+  // 프로젝트 규칙: 안성준을 본사로 취급 (organization/page.tsx와 동일 의도)
+  const { data } = await db
+    .from('organization_members')
+    .select('id')
+    .eq('name', '안성준')
+    .limit(1)
+    .maybeSingle();
+  if (data) return (data as { id: string }).id;
+
+  // fallback: rank='본사' 중 1개
+  const { data: hq } = await db
+    .from('organization_members')
+    .select('id')
+    .eq('rank', '본사')
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  return hq ? (hq as { id: string }).id : null;
+}
+
 // ─────────────────────────────────────────────
 // 유틸
 // ─────────────────────────────────────────────
@@ -276,6 +308,7 @@ async function processItem(
     const rawSalesName = item.sales_member_name?.trim() ?? null;
     let finalSalesMemberId: string | null = null;
     let salesLinkStatus: 'linked' | 'pending_mapping' = 'linked';
+    let autoCreatedSalesMemberId: string | null = null;
 
     if (rawSalesName) {
       const nameRes = await resolveSalesMemberByNameOnly(db, rawSalesName);
@@ -284,13 +317,19 @@ async function processItem(
         salesLinkStatus = 'linked';
       } else if (nameRes.kind === 'missing') {
         // 조직도에 없는 이름이면 자동 생성 (동명이인 문제는 'ambiguous'에서만 처리)
-        const memberData = normalizeSalesMember({
+        // 요구사항: “가입 인정 기준을 만족해 가입인 사람들만 영업사원 노드로 자동 생성”
+        // → rank는 무조건 영업사원으로 생성한다.
+        const memberData = {
+          ...normalizeSalesMember({
           sales_member_name: rawSalesName,
           sales_member_external_id: null,
           org_rank: item.affiliation_name,
-        });
+          }),
+          rank: '영업사원' as const,
+        };
         const createdId = await upsertSalesMember(db, memberData);
         finalSalesMemberId = createdId;
+        autoCreatedSalesMemberId = createdId;
         salesLinkStatus = createdId ? 'linked' : 'pending_mapping';
       } else {
         finalSalesMemberId = null;
@@ -412,6 +451,25 @@ async function processItem(
     }
 
     const { id: contractId, isNew } = await upsertContract(db, contractFinal);
+
+    // ── 4.5. 본사(안성준) 아래 영업사원 노드 자동 편입 ──
+    // 조건:
+    // - 담당자명이 DB에 없어서 새로 생성된 영업사원(autoCreatedSalesMemberId)
+    // - 가입 인정 기준을 만족하는 계약만
+    // - linked 상태만
+    if (autoCreatedSalesMemberId && salesLinkStatus === 'linked') {
+      const eligible = isJoinEligibleByRule({
+        status: contractFinal.status,
+        rental_request_no: contractFinal.rental_request_no,
+        invoice_no: contractFinal.invoice_no,
+      });
+      if (eligible) {
+        const hqId = await getHqMemberId(db);
+        if (hqId) {
+          await ensureOrgEdgeWithSource(db, hqId, autoCreatedSalesMemberId, contractId);
+        }
+      }
+    }
 
     // ── 6. 신규 영업사원 편입(추천 트리): A(판매자) 아래에 B(계약자=내부 영업사원) 붙이기
     // 조건:
