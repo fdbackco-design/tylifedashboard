@@ -40,12 +40,11 @@ export default async function OrganizationPage({
 }: {
   searchParams?: Promise<{ debug?: string }>;
 }) {
-  try {
-    const sp = (await searchParams) ?? {};
-    const debugEnabled = sp.debug === '1';
-    const db = createAdminSupabaseClient();
+  const sp = (await searchParams) ?? {};
+  const debugEnabled = sp.debug === '1';
+  const db = createAdminSupabaseClient();
 
-    const { start_date, end_date, label_year_month } = getSettlementWindowSeoul();
+  const { start_date, end_date, label_year_month } = getSettlementWindowSeoul();
 
   const [membersRes, edgesRes, contractCountRes, lastSyncRes, contractsRes, kpiRes, rulesRes] =
     await Promise.all([
@@ -55,8 +54,7 @@ export default async function OrganizationPage({
       .eq('is_active', true)
       .order('name'),
     db.from('organization_edges').select('parent_id, child_id'),
-    // exact는 커질수록 매우 느릴 수 있어 estimated로 전환
-    db.from('contracts').select('id', { count: 'estimated', head: true }),
+    db.from('contracts').select('id', { count: 'exact', head: true }),
     db
       .from('sync_runs')
       .select('id, status, triggered_by, started_at, finished_at, total_fetched, total_created, total_updated, total_errors')
@@ -68,10 +66,7 @@ export default async function OrganizationPage({
       .select(
         'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, customer_id, sales_member_id, is_cancelled, sales_link_status, customers(name, phone)',
       )
-      .not('sales_member_id', 'is', null)
-      .order('join_date', { ascending: false })
-      // 서버 렌더 타임아웃 방지: 최근 계약만 로드 (필요시 노드 클릭 시 추가 로딩으로 확장)
-      .limit(20000),
+      .not('sales_member_id', 'is', null),
     db.rpc('get_organization_kpis', { p_start_date: start_date, p_end_date: end_date }),
     db.from('settlement_rules').select('*'),
   ]);
@@ -132,8 +127,7 @@ export default async function OrganizationPage({
 
   // 예외 규칙(최종):
   // "안성준(본사) 담당 + 가입 인정 기준" 계약은 동기화 단계에서
-  // 고객을 영업사원 노드로 편입(동명이인 불허)하고 본사 아래로 연결하므로,
-  // 여기서는 가능한 경우 고객 노드로 origin을 치환한다.
+  // customer:{customer_id} 노드가 생성/연결되므로, 여기서는 그 노드로 origin을 치환한다.
   const hqIds = new Set(
     members
       .filter((m) => m.name === '안성준' || m.rank === '본사')
@@ -144,17 +138,26 @@ export default async function OrganizationPage({
   let dbg_hqEligibleMapped = 0;
   let dbg_hqEligibleMissing = 0;
   const dbg_sampleMissing: Array<{ contract_code: string; customer_id: string; customer_name: string; customer_phone: string | null }> = [];
+  const customerNodeByCustomerId = new Map<string, string>(); // external_id = customer:{customer_id}
   const nodeIdByPhoneDigits = new Map<string, string>(); // phone digits -> member id
 
   const toPhoneDigits = (v: string | null | undefined): string => (v ?? '').replace(/\D/g, '');
 
   for (const m of members as any[]) {
+    const ext = (m as { external_id?: string | null }).external_id ?? null;
+    if (ext && ext.startsWith('customer:')) {
+      const customerId = ext.slice('customer:'.length);
+      customerNodeByCustomerId.set(customerId, (m as { id: string }).id);
+    }
     const digits = toPhoneDigits((m as { phone?: string | null }).phone ?? null);
     if (digits) nodeIdByPhoneDigits.set(digits, (m as { id: string }).id);
   }
 
   const findCustomerNodeId = (c: { customer_id: string; customer_phone: string | null }): string | null => {
-    // phone match (현 시점 최선의 보조식별)
+    // (1) external_id == customer:{customer_id} (SSOT)
+    const byExt = customerNodeByCustomerId.get(c.customer_id);
+    if (byExt) return byExt;
+    // (2) fallback: phone match (과거 데이터/임시 노드 보정용)
     const digits = toPhoneDigits(c.customer_phone);
     if (digits) {
       const byPhone = nodeIdByPhoneDigits.get(digits);
@@ -291,8 +294,8 @@ export default async function OrganizationPage({
     running: '진행 중',
   };
 
-    return (
-      <div className="p-6">
+  return (
+    <div className="p-6">
       {/* 헤더 + 동기화 버튼 */}
       <div className="flex items-start justify-between mb-6">
         <div>
@@ -403,19 +406,6 @@ export default async function OrganizationPage({
           }
         />
       </div>
-      </div>
-    );
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error('[organization] render failed:', message);
-    return (
-      <div className="p-6">
-        <h2 className="text-2xl font-bold text-gray-800">조직도</h2>
-        <p className="mt-2 text-sm text-red-600">페이지 로드 실패: {message}</p>
-        <p className="mt-1 text-xs text-gray-500">
-          최근 변경으로 서버에서 예외가 발생했습니다. 위 메시지를 공유해주시면 바로 고치겠습니다.
-        </p>
-      </div>
-    );
-  }
+    </div>
+  );
 }
