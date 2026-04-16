@@ -43,7 +43,7 @@ export default async function OrganizationPage() {
     await Promise.all([
     db
       .from('organization_members')
-      .select('id, name, rank')
+      .select('id, name, rank, external_id')
       .eq('is_active', true)
       .order('name'),
     db.from('organization_edges').select('parent_id, child_id'),
@@ -57,7 +57,7 @@ export default async function OrganizationPage() {
     db
       .from('contracts')
       .select(
-        'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, is_cancelled, sales_link_status, customers(name)',
+        'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, customer_id, sales_member_id, is_cancelled, sales_link_status, customers(name)',
       )
       .not('sales_member_id', 'is', null),
     db.rpc('get_organization_kpis', { p_start_date: start_date, p_end_date: end_date }),
@@ -111,14 +111,35 @@ export default async function OrganizationPage() {
     memo?: string | null;
     status: string;
     unit_count: number | null;
+    customer_id: string;
     sales_member_id: string;
     is_cancelled?: boolean | null;
     sales_link_status?: string | null;
     customers: { name: string } | null;
   }>;
 
+  // 예외 규칙: "안성준(본사) 담당 + status='가입' 계약"은 고객을 본사 직속 영업사원 노드로 노출
+  // → /organization 집계(구좌/수당/리스트 표시)에서는 해당 계약을 고객 노드에 귀속
+  const hqId = members.find((m) => m.name === '안성준')?.id ?? null;
+  const customerNodeByCustomerId = new Map<string, string>();
+  for (const m of members as any[]) {
+    const ext = (m as { external_id?: string | null }).external_id ?? null;
+    if (ext && ext.startsWith('customer:')) {
+      const customerId = ext.slice('customer:'.length);
+      customerNodeByCustomerId.set(customerId, (m as { id: string }).id);
+    }
+  }
+
+  const mapSalesMemberForOrg = (c: { sales_member_id: string; customer_id: string; status: string }): string => {
+    if (hqId && c.sales_member_id === hqId && c.status === '가입') {
+      const customerNodeId = customerNodeByCustomerId.get(c.customer_id);
+      if (customerNodeId) return customerNodeId;
+    }
+    return c.sales_member_id;
+  };
+
   for (const c of rawContractRows) {
-    const key = c.sales_member_id;
+    const key = mapSalesMemberForOrg(c);
     if (!contractsByMember[key]) contractsByMember[key] = [];
     contractsByMember[key].push({
       id: c.id,
@@ -145,7 +166,7 @@ export default async function OrganizationPage() {
       join_date: c.join_date ?? '',
       unit_count: c.unit_count ?? 0,
       status: c.status,
-      sales_member_id: c.sales_member_id,
+      sales_member_id: mapSalesMemberForOrg(c),
     }));
 
   const orgMetricsById = calculateOrgNodeMetrics({
