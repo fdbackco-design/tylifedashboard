@@ -33,6 +33,9 @@ const STATUS_COLORS: Record<ContractStatus, string> = {
   해약: 'bg-red-200 text-red-800',
 };
 
+/** 목록 상단 상태 필터에 노출할 값만 (나머지는 URL/직접 조회는 가능) */
+const STATUS_FILTER_OPTIONS = ['준비', '대기', '가입', '해약'] as const satisfies readonly ContractStatus[];
+
 const PAGE_SIZE = 50;
 
 interface PageProps {
@@ -281,7 +284,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
         >
           전체
         </Link>
-        {(Object.keys(STATUS_LABELS) as ContractStatus[]).map((s) => (
+        {STATUS_FILTER_OPTIONS.map((s) => (
           <Link
             key={s}
             href={`/contracts${querySuffix({ status: s, page: '1' })}`}
