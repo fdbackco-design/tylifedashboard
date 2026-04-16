@@ -127,7 +127,8 @@ export default async function OrganizationPage({
 
   // 예외 규칙(최종):
   // "안성준(본사) 담당 + 가입 인정 기준" 계약은 동기화 단계에서
-  // customer:{customer_id} 노드가 생성/연결되므로, 여기서는 그 노드로 origin을 치환한다.
+  // 고객을 영업사원 노드로 편입(동명이인 불허)하고 본사 아래로 연결하므로,
+  // 여기서는 가능한 경우 고객 노드로 origin을 치환한다.
   const hqIds = new Set(
     members
       .filter((m) => m.name === '안성준' || m.rank === '본사')
@@ -138,26 +139,17 @@ export default async function OrganizationPage({
   let dbg_hqEligibleMapped = 0;
   let dbg_hqEligibleMissing = 0;
   const dbg_sampleMissing: Array<{ contract_code: string; customer_id: string; customer_name: string; customer_phone: string | null }> = [];
-  const customerNodeByCustomerId = new Map<string, string>(); // external_id = customer:{customer_id}
   const nodeIdByPhoneDigits = new Map<string, string>(); // phone digits -> member id
 
   const toPhoneDigits = (v: string | null | undefined): string => (v ?? '').replace(/\D/g, '');
 
   for (const m of members as any[]) {
-    const ext = (m as { external_id?: string | null }).external_id ?? null;
-    if (ext && ext.startsWith('customer:')) {
-      const customerId = ext.slice('customer:'.length);
-      customerNodeByCustomerId.set(customerId, (m as { id: string }).id);
-    }
     const digits = toPhoneDigits((m as { phone?: string | null }).phone ?? null);
     if (digits) nodeIdByPhoneDigits.set(digits, (m as { id: string }).id);
   }
 
   const findCustomerNodeId = (c: { customer_id: string; customer_phone: string | null }): string | null => {
-    // (1) external_id == customer:{customer_id} (SSOT)
-    const byExt = customerNodeByCustomerId.get(c.customer_id);
-    if (byExt) return byExt;
-    // (2) fallback: phone match (과거 데이터/임시 노드 보정용)
+    // phone match (현 시점 최선의 보조식별)
     const digits = toPhoneDigits(c.customer_phone);
     if (digits) {
       const byPhone = nodeIdByPhoneDigits.get(digits);

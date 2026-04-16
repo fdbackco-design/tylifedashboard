@@ -552,15 +552,31 @@ async function processItem(
       if (isHqSales && eligible) {
         const customerNodeName = (item.customer_name ?? '').trim();
         if (customerNodeName) {
-          // 고객을 조직원으로 "가상" 등록: external_id로 고객ID 기반 고유키 사용 (이름 중복과 무관)
-          const customerSalesMemberId = await upsertSalesMember(db, {
-            // 실제 영업사원과 이름이 겹칠 수 있으므로 UI에서 구분되게 접두어를 붙인다.
-            name: `[고객] ${customerNodeName}`,
-            rank: '영업사원',
-            external_id: `customer:${customerId}`,
-            phone: (customerData as any).phone ?? null,
-            is_active: true,
-          } as any);
+          // 정책 변경:
+          // - 본사 직속 계약 고객은 "가상 고객 노드"를 따로 만들지 않는다.
+          // - 동명이인 허용 없이, 조직원(영업사원)으로 편입:
+          //   * 이름이 1명만 존재하면 그 노드를 재사용
+          //   * 이름이 0명이면 새로 생성 (영업사원)
+          //   * 이름이 2명 이상이면 생성/귀속하지 않음 (중복 방지)
+          const nameRes = await resolveSalesMemberByNameOnly(db, customerNodeName);
+          let customerSalesMemberId: string | null = null;
+
+          if (nameRes.kind === 'single') {
+            customerSalesMemberId = nameRes.memberId;
+          } else if (nameRes.kind === 'missing') {
+            customerSalesMemberId = await upsertSalesMember(db, {
+              name: customerNodeName,
+              rank: '영업사원',
+              external_id: null,
+              phone: (customerData as any).phone ?? null,
+              is_active: true,
+            } as any);
+          } else {
+            await log(db, runId, 'warn', `본사 직속 고객 편입 스킵(동명이인): ${customerNodeName}`, {
+              customer_id: customerId,
+              contract_code: item.contract_code,
+            });
+          }
 
           if (customerSalesMemberId) {
             await ensureOrgEdgeForceParentWithSource(db, hqId, customerSalesMemberId, contractId);
