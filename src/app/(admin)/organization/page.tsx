@@ -130,8 +130,9 @@ export default async function OrganizationPage() {
     }
   }
 
-  const mapSalesMemberForOrg = (c: { sales_member_id: string; customer_id: string; status: string }): string => {
-    if (hqId && c.sales_member_id === hqId && c.status === '가입') {
+  const mapSalesMemberForOrg = (c: { sales_member_id: string; customer_id: string }): string => {
+    // 예외: 안성준(본사) 담당 계약인데, 고객이 조직도 노드로 식별되면 고객 노드로 직접 귀속
+    if (hqId && c.sales_member_id === hqId) {
       const customerNodeId = customerNodeByCustomerId.get(c.customer_id);
       if (customerNodeId) return customerNodeId;
     }
