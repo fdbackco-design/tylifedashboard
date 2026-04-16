@@ -598,6 +598,24 @@ async function processItem(
       };
     }
 
+    // upsert 시 리스트 값(null)이 기존 상세 값을 덮어쓰지 않도록 보호
+    // (송장번호/렌탈번호가 상세에만 존재하는 케이스가 있어, 상세 fetch가 일시 실패하면 null로 떨어질 수 있음)
+    if (ec) {
+      if ((contractFinal.invoice_no ?? null) == null && (ec.invoice_no ?? null) != null) {
+        contractFinal = { ...contractFinal, invoice_no: ec.invoice_no };
+      }
+      if ((contractFinal.rental_request_no ?? null) == null && (ec.rental_request_no ?? null) != null) {
+        contractFinal = { ...contractFinal, rental_request_no: ec.rental_request_no };
+      }
+      if (
+        (contractFinal.item_name ?? null) === DEFAULT_ITEM_NAME_PLACEHOLDER &&
+        (ec.item_name ?? null) != null &&
+        ec.item_name !== DEFAULT_ITEM_NAME_PLACEHOLDER
+      ) {
+        contractFinal = { ...contractFinal, item_name: ec.item_name ?? undefined };
+      }
+    }
+
     const { id: contractId, isNew } = await upsertContract(db, contractFinal);
 
     // ── 4.5. 본사(안성준) 아래 영업사원 노드 자동 편입 ──
@@ -636,6 +654,13 @@ async function processItem(
       if (isHqSales && eligible) {
         const customerNodeName = (item.customer_name ?? '').trim();
         if (customerNodeName) {
+          // 본사(안성준)가 "고객"으로 찍힌 데이터는 고객 노드 생성/재사용을 하지 않는다.
+          // (본사 노드에 customer 식별자가 붙거나, 본사<->고객 노드가 순환/중복되는 문제 방지)
+          if (customerNodeName.replace(/^\[고객\]\s*/, '') === '안성준') {
+            // 계약/상태 upsert는 이미 완료됐으므로, 여기서는 스킵만 한다.
+            return isNew ? 'created' : 'updated';
+          }
+
           // 요구사항(최종): DB에도 1개 노드만 유지
           // - 동일 이름의 "직원 노드(external_id NULL)"가 1개면 그 노드를 고객 노드로 재사용한다.
           // - 없으면 customer:* 노드를 생성하되 source_customer_id를 기록한다.
