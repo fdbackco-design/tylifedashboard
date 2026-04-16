@@ -82,6 +82,22 @@ function isJoinEligibleByRule(params: {
   return (params.rental_request_no ?? '').trim() !== '' && (params.invoice_no ?? '').trim() !== '';
 }
 
+function isEligibleForHqCustomerAttribution(params: {
+  status: string | null | undefined;
+  is_cancelled?: boolean | null;
+  rental_request_no?: string | null;
+  invoice_no?: string | null;
+}): boolean {
+  if (params.is_cancelled) return false;
+  const status = (params.status ?? '').trim();
+  if (status === '취소' || status === '해약') return false;
+  return isJoinEligibleByRule({
+    status,
+    rental_request_no: params.rental_request_no,
+    invoice_no: params.invoice_no,
+  });
+}
+
 async function getHqMemberId(db: SupabaseClient): Promise<string | null> {
   // 호출 비용 절감 (동기화 동안 반복 조회 방지)
   if (getHqMemberId._cached !== undefined) return getHqMemberId._cached;
@@ -111,6 +127,27 @@ async function getHqMemberId(db: SupabaseClient): Promise<string | null> {
 }
 
 getHqMemberId._cached = undefined as undefined | string | null;
+
+async function ensureOrgEdgeForceParentWithSource(
+  db: SupabaseClient,
+  parentId: string,
+  childId: string,
+  sourceContractId: string,
+): Promise<void> {
+  // 고객 노드 등 "본사 직속 보장" 케이스: 기존 parent가 있어도 강제로 parent를 맞춘다.
+  const { data: edge, error } = await db
+    .from('organization_edges')
+    .upsert({ parent_id: parentId, child_id: childId }, { onConflict: 'child_id' })
+    .select('id')
+    .single();
+  if (error) throw new Error(`organization_edges upsert 실패: ${error.message}`);
+
+  const edgeId = (edge as { id: string }).id;
+  await db.from('organization_edge_sources').upsert(
+    { edge_id: edgeId, source_contract_id: sourceContractId, created_by: 'sync-service' },
+    { onConflict: 'edge_id,source_contract_id' },
+  );
+}
 
 // ─────────────────────────────────────────────
 // 유틸
@@ -491,15 +528,17 @@ async function processItem(
       }
     }
 
-    // ── 4.6. 본사(안성준) 담당 '가입(인정)' 계약 고객을 본사 직속 영업사원으로 노출 ──
+    // ── 4.6. 본사(안성준) 담당 + 가입 인정 고객을 "본사 직속" 노드로 보장 ──
     // 요구사항:
-    // - 담당자가 본사(안성준)인 계약 중 status가 '가입'인 고객은
-    //   다른 계약이 없어도 조직도에 본사 하위 영업사원으로 보이게 한다.
+    // - sales_member_id가 안성준(본사)이고, 가입 인정 기준을 만족하면
+    //   고객을 organization_members(영업사원)로 생성/재사용하고,
+    //   organization_edges에서 안성준(본사) 아래로 직접 연결을 보장한다.
     if (salesLinkStatus === 'linked') {
       const hqId = await getHqMemberId(db);
       const isHqSales = hqId != null && finalSalesMemberId === hqId;
-      const eligible = isJoinEligibleByRule({
+      const eligible = isEligibleForHqCustomerAttribution({
         status: contractFinal.status,
+        is_cancelled: (contractFinal as any).is_cancelled ?? null,
         rental_request_no: contractFinal.rental_request_no,
         invoice_no: contractFinal.invoice_no,
       });
@@ -511,11 +550,12 @@ async function processItem(
             name: customerNodeName,
             rank: '영업사원',
             external_id: `customer:${customerId}`,
+            phone: (customerData as any).phone ?? null,
             is_active: true,
           } as any);
 
           if (customerSalesMemberId) {
-            await ensureOrgEdgeWithSource(db, hqId, customerSalesMemberId, contractId);
+            await ensureOrgEdgeForceParentWithSource(db, hqId, customerSalesMemberId, contractId);
           }
         }
       }

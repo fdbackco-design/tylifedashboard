@@ -119,9 +119,9 @@ export default async function OrganizationPage() {
     customers: { name: string; phone: string | null } | null;
   }>;
 
-  // 예외 규칙(요청): "안성준(본사) 담당 + status='가입' 계약"인데,
-  // 고객이 조직도에 이미 존재하는 노드(가상 영업사원 노드 포함)로 식별되면
-  // /organization 집계(구좌/수당/리스트 표시)에서는 해당 계약의 origin을 고객 노드로 바꿔서 계산한다.
+  // 예외 규칙(최종):
+  // "안성준(본사) 담당 + 가입 인정 기준" 계약은 동기화 단계에서
+  // customer:{customer_id} 노드가 생성/연결되므로, 여기서는 그 노드로 origin을 치환한다.
   const hqId = members.find((m) => m.name === '안성준')?.id ?? null;
   const customerNodeByCustomerId = new Map<string, string>(); // external_id = customer:{customer_id}
   const nodeIdByPhoneDigits = new Map<string, string>(); // phone digits -> member id
@@ -139,10 +139,10 @@ export default async function OrganizationPage() {
   }
 
   const findCustomerNodeId = (c: { customer_id: string; customer_phone: string | null }): string | null => {
-    // (1) external_id == customer:{customer_id}
+    // (1) external_id == customer:{customer_id} (SSOT)
     const byExt = customerNodeByCustomerId.get(c.customer_id);
     if (byExt) return byExt;
-    // (2) phone match
+    // (2) fallback: phone match (과거 데이터/임시 노드 보정용)
     const digits = toPhoneDigits(c.customer_phone);
     if (digits) {
       const byPhone = nodeIdByPhoneDigits.get(digits);
