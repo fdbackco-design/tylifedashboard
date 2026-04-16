@@ -67,6 +67,10 @@ function shouldExcludeRecruitmentName(name: string, relationship: string): boole
 /** 병렬 처리 최대 동시 요청 수 (환경변수로 조정 가능) */
 const CONCURRENCY = parseInt(process.env.TYLIFE_CONCURRENCY ?? '5', 10);
 
+function isTerminalContractStatus(status: string | null | undefined): boolean {
+  return status === '가입' || status === '해약';
+}
+
 // ─────────────────────────────────────────────
 // 유틸
 // ─────────────────────────────────────────────
@@ -319,7 +323,13 @@ async function processItem(
 
     // ── 4. 상세 HTML → TY Life external_id 로 담당자 확정 (동명이인/미매칭 해소)
     let detail: ReturnType<typeof parseContractDetailHtml> | null = null;
-    if (item.external_id && !alreadyHasDetail) {
+    // 성능 최적화(캐싱):
+    // - status가 '가입'/'해약'인 계약은 상세 재조회 비용 대비 이득이 낮아 “박제”로 취급하고 더 이상 상세 fetch 하지 않는다.
+    // - 이미 DB에 '가입'/'해약'으로 저장된 계약도 동일하게 스킵한다.
+    const listStatus = normalizeStatus(item.status_raw ?? '');
+    const skipDetailFetch = isTerminalContractStatus(listStatus) || isTerminalContractStatus(ec?.status ?? null);
+
+    if (item.external_id && !alreadyHasDetail && !skipDetailFetch) {
       try {
         let html = await fetchContractDetailHtml(item.external_id);
         // 상세 URL id vs HTML 내부 contractNo 불일치 케이스 보정 (backfill과 동일 정책)
