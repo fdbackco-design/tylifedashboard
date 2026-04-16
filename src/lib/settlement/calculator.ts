@@ -8,7 +8,13 @@ import type {
 import type { RankType, OrgTreeNode } from '../types/organization';
 import type { Contract } from '../types/contract';
 import { RANK_ORDER } from '../types/organization';
-import { isSettlementEligibleContract } from './settlement-eligibility';
+
+function monthEndDate(yearMonth: string): string {
+  // 'YYYY-MM' -> 'YYYY-MM-DD' (해당 월 말일)
+  const [y, m] = yearMonth.split('-').map(Number);
+  const end = new Date(y, m, 0); // day 0 of next month = last day of this month
+  return `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
+}
 
 // ─────────────────────────────────────────────
 // 정산 규칙 조회 헬퍼
@@ -129,7 +135,7 @@ function calcRollupItems(
   rules: SettlementRule[],
   yearMonth: string,
 ): { items: RollupItem[]; total: number } {
-  const refDate = `${yearMonth}-01`;
+  const refDate = monthEndDate(yearMonth);
   const items: RollupItem[] = [];
 
   for (const child of node.children) {
@@ -188,7 +194,8 @@ export function calculateMemberSettlement(
   rules: SettlementRule[],
   yearMonth: string,
 ): MonthlySettlementInsert {
-  const refDate = `${yearMonth}-01`;
+  // 규칙 effective_from이 월 중간(예: 2026-04-13)이어도 해당 월 정산에 적용되도록 말일 기준으로 매칭
+  const refDate = monthEndDate(yearMonth);
 
   // 정산 규칙 조회
   const rule = findActiveRule(rules, member.rank, refDate);
@@ -199,16 +206,8 @@ export function calculateMemberSettlement(
   }
 
   // 직접 계약 정산
-  const eligible = directContracts.filter((c) =>
-    isSettlementEligibleContract({
-      status: c.status,
-      is_cancelled: c.is_cancelled,
-      sales_member_id: c.sales_member_id,
-      sales_link_status: (c as any).sales_link_status ?? null,
-      rental_request_no: (c as any).rental_request_no ?? null,
-      invoice_no: (c as any).invoice_no ?? null,
-    }),
-  );
+  // directContracts는 v_contract_settlement_base(가입 인정 기준)에서 이미 필터링된 결과를 받는다.
+  const eligible = directContracts;
   const { items: directItems, total: baseCommission } = calcDirectContracts(
     eligible,
     rule,

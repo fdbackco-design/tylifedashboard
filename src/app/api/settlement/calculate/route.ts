@@ -59,7 +59,10 @@ async function calculateMonthlySettlement(
   yearMonth: string,
   db: ReturnType<typeof createAdminSupabaseClient>,
 ): Promise<{ updated_count: number }> {
-  const refDate = `${yearMonth}-01`;
+  // 규칙 effective_from이 월 중간이어도 해당 월 정산에 적용되도록 말일 기준으로 매칭
+  const [y, m] = yearMonth.split('-').map(Number);
+  const end = new Date(y, m, 0);
+  const refDate = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
 
   // 1. 정산 대상 계약 조회 (v_contract_settlement_base가 SSOT 기준으로 필터링)
   const { data: contracts, error: cErr } = await db
