@@ -343,10 +343,13 @@ export default function OrgTree({ roots, contractsByMember, metricsById }: Props
       {/* 줌 가능한 뷰포트 */}
       <div
         ref={viewportRef}
-        className="w-full overflow-hidden rounded-lg"
+        className={`w-full overflow-hidden rounded-lg select-none ${dragRef.current.active ? 'cursor-grabbing' : 'cursor-grab'}`}
         title="휠: 확대/축소 · 드래그: 이동"
-        onMouseDown={(e) => {
-          // 왼쪽 드래그로 패닝
+        onPointerDown={(e) => {
+          // 캔버스처럼 패닝: pointer capture로 영역 밖으로 나가도 드래그 유지
+          if (e.button !== 0) return;
+          e.preventDefault();
+          (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
           dragRef.current = {
             active: true,
             startX: e.clientX,
@@ -355,16 +358,22 @@ export default function OrgTree({ roots, contractsByMember, metricsById }: Props
             baseY: pan.y,
           };
         }}
-        onMouseMove={(e) => {
+        onPointerMove={(e) => {
           if (!dragRef.current.active) return;
+          e.preventDefault();
           const dx = e.clientX - dragRef.current.startX;
           const dy = e.clientY - dragRef.current.startY;
           setPan({ x: dragRef.current.baseX + dx, y: dragRef.current.baseY + dy });
         }}
-        onMouseUp={() => {
+        onPointerUp={(e) => {
           dragRef.current.active = false;
+          try {
+            (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+          } catch {
+            // ignore
+          }
         }}
-        onMouseLeave={() => {
+        onPointerCancel={() => {
           dragRef.current.active = false;
         }}
       >
