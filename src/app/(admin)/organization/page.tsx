@@ -153,6 +153,7 @@ export default async function OrganizationPage({
   }
 
   const members = membersRaw.filter((m: any) => !customerMergeTo.has((m as { id: string }).id));
+  const memberIdSet = new Set((members as any[]).map((m) => (m as { id: string }).id));
   const edges = (edgesRaw as any[]).map((e) => ({
     parent_id: (e as any).parent_id ? remapMemberId((e as any).parent_id) : null,
     child_id: remapMemberId((e as any).child_id),
@@ -164,7 +165,11 @@ export default async function OrganizationPage({
   for (const e of edges as any[]) {
     if (seenChild.has(e.child_id)) continue;
     seenChild.add(e.child_id);
-    dedupedEdges.push(e);
+    // remap 이후 parent가 존재하지 않으면(병합/삭제로 유실) 루트로 승격
+    const parent_id = e.parent_id && memberIdSet.has(e.parent_id) ? e.parent_id : null;
+    // child가 멤버 목록에 없으면 스킵(이 페이지에선 표시 불가)
+    if (!memberIdSet.has(e.child_id)) continue;
+    dedupedEdges.push({ parent_id, child_id: e.child_id });
   }
 
   const edgeMap = new Map<string, string | null>();
