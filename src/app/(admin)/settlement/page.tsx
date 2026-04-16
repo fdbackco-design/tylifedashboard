@@ -146,16 +146,37 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     }
   }
 
-  // 본사 담당 계약은 customer 노드로 origin 치환(/organization과 동일)
+  // /organization과 동일 정책:
+  // - customer_id가 조직원(고객 노드/가상 노드 포함)으로 매핑되면, 담당자와 무관하게 그 노드의 "직접 계약"으로 귀속한다.
+  // - 그 외에 본사 담당(HQ)인 계약도 동일하게 customer 노드로 치환한다.
   const eligibleContracts = baseRows.map((r) => {
     const customer_id = customerIdByContractId.get(r.contract_id) ?? null;
     let sales_member_id = r.sales_member_id;
-    if (customer_id && hqIdsRaw.has(r.sales_member_id)) {
+    if (customer_id) {
       const mapped = memberIdByCustomerId.get(customer_id);
-      if (mapped) sales_member_id = mapped;
+      if (mapped) {
+        sales_member_id = mapped;
+      } else if (hqIdsRaw.has(r.sales_member_id)) {
+        // fallback (HQ only): customer 매핑이 존재할 때만 치환 가능하므로 여기선 그대로 둔다
+      }
     }
     return { ...r, id: r.contract_id, customer_id, sales_member_id, unit_count: r.unit_count ?? 0 };
   });
+
+  // 정산현황 표의 "직접계약/직접구좌"도 위 귀속 기준으로 재계산
+  const directByMember = new Map<string, { contractIds: Set<string>; unitSum: number }>();
+  for (const c of eligibleContracts) {
+    const mid = c.sales_member_id as string | null;
+    if (!mid) continue;
+    const id = c.id as string;
+    const unit = (c.unit_count ?? 0) as number;
+    const cur = directByMember.get(mid) ?? { contractIds: new Set<string>(), unitSum: 0 };
+    if (!cur.contractIds.has(id)) {
+      cur.contractIds.add(id);
+      cur.unitSum += unit;
+    }
+    directByMember.set(mid, cur);
+  }
 
   if (debugEnabled) {
     const sample = eligibleContracts
@@ -217,16 +238,24 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     return (member?.name ?? '') === ZERO_OUT_MEMBER_NAME;
   };
 
+  const isHiddenMember = (s: any): boolean => {
+    const member = s.organization_members as unknown as { name?: string } | null;
+    const rawName = (member?.name ?? '').replace(/^\[고객\]\s*/, '').trim();
+    return rawName === '안성준';
+  };
+
   const displayRows = (settlements ?? [])
     .map((s) => {
       const member = s.organization_members as unknown as { name: string } | null;
       const rawName = member?.name ?? '';
       const displayName = rawName.replace(/^\[고객\]\s*/, '');
       const zeroOut = rawName === ZERO_OUT_MEMBER_NAME;
+      const direct = directByMember.get(s.member_id as string) ?? { contractIds: new Set<string>(), unitSum: 0 };
       const base = orgMetricsById[(s.member_id as string)]?.paidCommissionWon ?? 0;
       const total = base; // 현재 정책: 합계 = 기본수당(=조직도 실지급액)
-      return { s, rawName, displayName, zeroOut, base, total };
+      return { s, rawName, displayName, zeroOut, base, total, direct };
     })
+    .filter((r) => !isHiddenMember(r.s))
     .sort((a, b) => {
       // 합계금 기준 내림차순
       if (b.total !== a.total) return b.total - a.total;
@@ -237,6 +266,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     });
 
   const totalAmount = (settlements ?? []).reduce((sum, s) => {
+    if (isHiddenMember(s)) return sum;
     if (isZeroOutMember(s)) return sum;
     return sum + (orgMetricsById[(s.member_id as string)]?.paidCommissionWon ?? 0);
   }, 0);
@@ -402,7 +432,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
                   </td>
                 </tr>
               )}
-              {displayRows.map(({ s, displayName, rawName, zeroOut, base }) => {
+              {displayRows.map(({ s, displayName, rawName, zeroOut, base, direct }) => {
                 return (
                   <tr key={s.id as string} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium">
@@ -415,10 +445,10 @@ export default async function SettlementPage({ searchParams }: PageProps) {
                     </td>
                     <td className="px-4 py-3 text-gray-600">{s.rank as string}</td>
                     <td className="px-4 py-3 tabular-nums text-right">
-                      {(s.direct_contract_count as number).toLocaleString()}건
+                      {direct.contractIds.size.toLocaleString()}건
                     </td>
                     <td className="px-4 py-3 tabular-nums text-right">
-                      {(s.direct_unit_count as number).toLocaleString()}
+                      direct.unitSum.toLocaleString()
                     </td>
                     <td className="px-4 py-3 tabular-nums text-right">
                       {(s.subordinate_unit_count as number).toLocaleString()}
@@ -454,6 +484,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
                   </td>
                   <td className="px-4 py-3 tabular-nums text-right font-semibold">
                     {formatKRW((settlements ?? []).reduce((sum, r) => {
+                      if (isHiddenMember(r)) return sum;
                       if (isZeroOutMember(r)) return sum;
                       return sum + (orgMetricsById[(r.member_id as string)]?.paidCommissionWon ?? 0);
                     }, 0))}
