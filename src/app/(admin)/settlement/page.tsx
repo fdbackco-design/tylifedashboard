@@ -95,8 +95,15 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     );
   }
 
+  const ZERO_OUT_MEMBER_NAME = '정성은';
+
+  const isZeroOutMember = (s: any): boolean => {
+    const member = s.organization_members as unknown as { name?: string } | null;
+    return (member?.name ?? '') === ZERO_OUT_MEMBER_NAME;
+  };
+
   const totalAmount = (settlements ?? []).reduce(
-    (sum, s) => sum + (s.total_amount as number),
+    (sum, s) => sum + (isZeroOutMember(s) ? 0 : (s.total_amount as number)),
     0,
   );
 
@@ -228,6 +235,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
               )}
               {(settlements ?? []).map((s) => {
                 const member = s.organization_members as unknown as { name: string } | null;
+                const zeroOut = (member?.name ?? '') === ZERO_OUT_MEMBER_NAME;
                 return (
                   <tr key={s.id as string} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium">
@@ -249,16 +257,16 @@ export default async function SettlementPage({ searchParams }: PageProps) {
                       {(s.subordinate_unit_count as number).toLocaleString()}
                     </td>
                     <td className="px-4 py-3 tabular-nums text-right text-gray-700">
-                      {formatKRW(s.base_commission as number)}
+                      {formatKRW(zeroOut ? 0 : (s.base_commission as number))}
                     </td>
                     <td className="px-4 py-3 tabular-nums text-right text-gray-700">
-                      {formatKRW(s.rollup_commission as number)}
+                      {formatKRW(zeroOut ? 0 : (s.rollup_commission as number))}
                     </td>
                     <td className="px-4 py-3 tabular-nums text-right text-indigo-700">
-                      {formatKRW(s.incentive_amount as number)}
+                      {formatKRW(zeroOut ? 0 : (s.incentive_amount as number))}
                     </td>
                     <td className="px-4 py-3 tabular-nums text-right font-bold text-gray-900">
-                      {formatKRW(s.total_amount as number)}
+                      {formatKRW(zeroOut ? 0 : (s.total_amount as number))}
                     </td>
                     <td className="px-4 py-3 text-center">
                       {s.is_finalized ? (
@@ -278,13 +286,13 @@ export default async function SettlementPage({ searchParams }: PageProps) {
                     합계
                   </td>
                   <td className="px-4 py-3 tabular-nums text-right font-semibold">
-                    {formatKRW((settlements ?? []).reduce((s, r) => s + (r.base_commission as number), 0))}
+                    {formatKRW((settlements ?? []).reduce((s, r) => s + (isZeroOutMember(r) ? 0 : (r.base_commission as number)), 0))}
                   </td>
                   <td className="px-4 py-3 tabular-nums text-right font-semibold">
-                    {formatKRW((settlements ?? []).reduce((s, r) => s + (r.rollup_commission as number), 0))}
+                    {formatKRW((settlements ?? []).reduce((s, r) => s + (isZeroOutMember(r) ? 0 : (r.rollup_commission as number)), 0))}
                   </td>
                   <td className="px-4 py-3 tabular-nums text-right font-semibold text-indigo-700">
-                    {formatKRW((settlements ?? []).reduce((s, r) => s + (r.incentive_amount as number), 0))}
+                    {formatKRW((settlements ?? []).reduce((s, r) => s + (isZeroOutMember(r) ? 0 : (r.incentive_amount as number)), 0))}
                   </td>
                   <td className="px-4 py-3 tabular-nums text-right font-bold text-gray-900">
                     {formatKRW(totalAmount)}
