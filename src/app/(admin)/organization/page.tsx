@@ -170,6 +170,8 @@ export default async function OrganizationPage() {
     acc[m.rank] = (acc[m.rank] ?? 0) + 1;
     return acc;
   }, {});
+  // UI 규칙: 본사는 최상단 1개로만 표시
+  if ((rankCounts['본사'] ?? 0) > 0) rankCounts['본사'] = 1;
 
   const statusColor: Record<string, string> = {
     completed: 'text-green-600',
