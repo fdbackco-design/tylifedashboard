@@ -100,6 +100,7 @@ export default async function OrganizationPage({
   const employeesByKey = new Map<string, string>(); // name|phone -> memberId (non-customer)
   const employeesByName = new Map<string, { id: string; count: number }>(); // normalized name -> {id, count}
   const customerMergeTo = new Map<string, string>(); // customerMemberId -> employeeMemberId
+  const customerIdToEffectiveMemberId = new Map<string, string>(); // customer:{customer_id} -> (customerMemberId or merged employeeMemberId)
 
   for (const m of membersRaw as any[]) {
     const ext = (m as { external_id?: string | null }).external_id ?? null;
@@ -141,6 +142,15 @@ export default async function OrganizationPage({
   }
 
   const remapMemberId = (id: string): string => customerMergeTo.get(id) ?? id;
+
+  // customer:{customer_id} 외부키 기반 매핑은 "병합 결과"까지 반영해야 한다.
+  // (customer 노드가 직원 노드로 병합되어 members에서 제외돼도, 계약 origin 치환이 가능해야 함)
+  for (const m of membersRaw as any[]) {
+    const ext = (m as { external_id?: string | null }).external_id ?? null;
+    if (!ext || !ext.startsWith('customer:')) continue;
+    const customerId = ext.slice('customer:'.length);
+    customerIdToEffectiveMemberId.set(customerId, remapMemberId((m as { id: string }).id));
+  }
 
   const members = membersRaw.filter((m: any) => !customerMergeTo.has((m as { id: string }).id));
   const edges = (edgesRaw as any[]).map((e) => ({
@@ -220,8 +230,8 @@ export default async function OrganizationPage({
   }
 
   const findCustomerNodeId = (c: { customer_id: string; customer_phone: string | null }): string | null => {
-    // (1) external_id == customer:{customer_id} (SSOT)
-    const byExt = customerNodeByCustomerId.get(c.customer_id);
+    // (1) external_id == customer:{customer_id} (SSOT) — 병합 결과(직원 노드)까지 포함
+    const byExt = customerIdToEffectiveMemberId.get(c.customer_id) ?? customerNodeByCustomerId.get(c.customer_id);
     if (byExt) return byExt;
     // (2) fallback: phone match (과거 데이터/임시 노드 보정용)
     const digits = toPhoneDigits(c.customer_phone);
