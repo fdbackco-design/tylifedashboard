@@ -48,3 +48,27 @@ export function getSettlementWindowSeoul(
   return { start_date, end_date, label_year_month };
 }
 
+/**
+ * 특정 정산월(YYYY-MM)에 해당하는 기간(26일~25일)을 반환.
+ *
+ * 예: label_year_month = '2026-04' 이면
+ * - start_date: 2026-03-26
+ * - end_date:   2026-04-25
+ */
+export function getSettlementWindowForYearMonth(
+  label_year_month: string,
+): { start_date: string; end_date: string; label_year_month: string } {
+  if (!/^\d{4}-\d{2}$/.test(label_year_month)) {
+    throw new Error(`Invalid year_month: ${label_year_month}`);
+  }
+  const [ys, ms] = label_year_month.split('-');
+  const y = parseInt(ys, 10);
+  const m = parseInt(ms, 10);
+  const base = { y, m };
+  const prev = addMonths(base.y, base.m, -1);
+
+  const start_date = formatYmd(prev.y, prev.m, 26);
+  const end_date = formatYmd(base.y, base.m, 25);
+  return { start_date, end_date, label_year_month };
+}
+

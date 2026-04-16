@@ -18,7 +18,11 @@ SELECT
   c.id                  AS contract_id,
   c.contract_code,
   c.join_date,
-  TO_CHAR(c.join_date, 'YYYY-MM') AS year_month,
+  CASE
+    WHEN EXTRACT(DAY FROM c.join_date) >= 26
+      THEN TO_CHAR((DATE_TRUNC('month', c.join_date)::date + INTERVAL '1 month')::date, 'YYYY-MM')
+    ELSE TO_CHAR(DATE_TRUNC('month', c.join_date)::date, 'YYYY-MM')
+  END AS year_month,
   c.unit_count,
   c.status,
   c.is_cancelled,

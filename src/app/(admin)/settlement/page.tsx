@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { formatKRW } from '@/lib/settlement/calculator';
+import { getSettlementWindowForYearMonth } from '@/lib/settlement/settlement-window';
 import type { RankType } from '@/lib/types';
 import RecalcButton from './RecalcButton';
 
@@ -23,11 +24,11 @@ function getCurrentYearMonth(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
-function nextMonthStart(yearMonth: string): string {
-  const [y, m] = yearMonth.split('-').map(Number);
-  const ny = m === 12 ? y + 1 : y;
-  const nm = m === 12 ? 1 : m + 1;
-  return `${ny}-${String(nm).padStart(2, '0')}-01`;
+function nextDay(dateYmd: string): string {
+  const [y, m, d] = dateYmd.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + 1);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
 }
 
 export default async function SettlementPage({ searchParams }: PageProps) {
@@ -39,15 +40,15 @@ export default async function SettlementPage({ searchParams }: PageProps) {
 
   // 해당 월 계약 현황 (정산 대상 여부 파악용)
   // 목록 전체를 내려받지 말고 count만 조회 (빠름)
-  const monthStart = `${yearMonth}-01`;
-  const monthEndExclusive = nextMonthStart(yearMonth);
+  const { start_date, end_date } = getSettlementWindowForYearMonth(yearMonth);
+  const endExclusive = nextDay(end_date);
 
   const [allCountRes, eligibleCountRes] = await Promise.all([
     db
       .from('contracts')
       .select('id', { head: true, count: 'estimated' })
-      .gte('join_date', monthStart)
-      .lt('join_date', monthEndExclusive),
+      .gte('join_date', start_date)
+      .lt('join_date', endExclusive),
     db
       // 정산 대상 계약 수: “가입 인정 기준” (SSOT) 과 동일하게
       // DB view(v_contract_settlement_base)는 동일 기준으로 필터링되어야 함
