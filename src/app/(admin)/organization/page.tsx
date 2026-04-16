@@ -40,11 +40,12 @@ export default async function OrganizationPage({
 }: {
   searchParams?: Promise<{ debug?: string }>;
 }) {
-  const sp = (await searchParams) ?? {};
-  const debugEnabled = sp.debug === '1';
-  const db = createAdminSupabaseClient();
+  try {
+    const sp = (await searchParams) ?? {};
+    const debugEnabled = sp.debug === '1';
+    const db = createAdminSupabaseClient();
 
-  const { start_date, end_date, label_year_month } = getSettlementWindowSeoul();
+    const { start_date, end_date, label_year_month } = getSettlementWindowSeoul();
 
   const [membersRes, edgesRes, contractCountRes, lastSyncRes, contractsRes, kpiRes, rulesRes] =
     await Promise.all([
@@ -286,8 +287,8 @@ export default async function OrganizationPage({
     running: '진행 중',
   };
 
-  return (
-    <div className="p-6">
+    return (
+      <div className="p-6">
       {/* 헤더 + 동기화 버튼 */}
       <div className="flex items-start justify-between mb-6">
         <div>
@@ -398,6 +399,19 @@ export default async function OrganizationPage({
           }
         />
       </div>
-    </div>
-  );
+      </div>
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[organization] render failed:', message);
+    return (
+      <div className="p-6">
+        <h2 className="text-2xl font-bold text-gray-800">조직도</h2>
+        <p className="mt-2 text-sm text-red-600">페이지 로드 실패: {message}</p>
+        <p className="mt-1 text-xs text-gray-500">
+          최근 변경으로 서버에서 예외가 발생했습니다. 위 메시지를 공유해주시면 바로 고치겠습니다.
+        </p>
+      </div>
+    );
+  }
 }
