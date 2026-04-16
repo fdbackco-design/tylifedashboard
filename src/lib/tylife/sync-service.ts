@@ -252,6 +252,47 @@ async function upsertSalesMember(
   throw new Error(`organization_members insert 실패: ${insErr?.message ?? 'unknown'}`);
 }
 
+async function attachCustomerIdentityToMember(
+  db: SupabaseClient,
+  memberId: string,
+  customer: { id: string; phone: string | null },
+): Promise<void> {
+  const { data: cur, error } = await db
+    .from('organization_members')
+    .select('id, source_customer_id, phone')
+    .eq('id', memberId)
+    .maybeSingle();
+  if (error) throw new Error(`organization_members 조회 실패: ${error.message}`);
+  if (!cur) return;
+
+  const next: Record<string, unknown> = {};
+  if ((cur as any).source_customer_id == null) next.source_customer_id = customer.id;
+  if (((cur as any).phone == null || String((cur as any).phone).trim() === '') && customer.phone) next.phone = customer.phone;
+  if (Object.keys(next).length === 0) return;
+
+  const { error: upErr } = await db.from('organization_members').update(next).eq('id', memberId);
+  if (upErr) throw new Error(`organization_members 업데이트 실패: ${upErr.message}`);
+}
+
+async function findSingleEmployeeMemberIdByName(
+  db: SupabaseClient,
+  name: string,
+): Promise<string | null> {
+  const n = name.trim();
+  if (!n) return null;
+  const { data, error } = await db
+    .from('organization_members')
+    .select('id')
+    .eq('name', n)
+    .is('external_id', null)
+    .order('created_at', { ascending: true })
+    .limit(2);
+  if (error) throw new Error(`organization_members 조회 실패: ${error.message}`);
+  const rows = (data ?? []) as Array<{ id: string }>;
+  if (rows.length !== 1) return null;
+  return rows[0].id;
+}
+
 async function upsertCustomer(
   db: SupabaseClient,
   customerData: NonNullable<ReturnType<typeof normalizeCustomerFromList>>,
@@ -569,18 +610,29 @@ async function processItem(
       if (isHqSales && eligible) {
         const customerNodeName = (item.customer_name ?? '').trim();
         if (customerNodeName) {
-          // 고객을 조직원으로 "가상" 등록: external_id로 고객ID 기반 고유키 사용 (이름 중복과 무관)
-          // UI에서 실제 영업사원과 혼동되지 않도록 접두어 부여
-          const displayName = customerNodeName.startsWith('[고객] ')
-            ? customerNodeName
-            : `[고객] ${customerNodeName}`;
-          const customerSalesMemberId = await upsertSalesMember(db, {
-            name: displayName,
-            rank: '영업사원',
-            external_id: `customer:${customerId}`,
-            phone: (customerData as any).phone ?? null,
-            is_active: true,
-          } as any);
+          // 요구사항(최종): DB에도 1개 노드만 유지
+          // - 동일 이름의 "직원 노드(external_id NULL)"가 1개면 그 노드를 고객 노드로 재사용한다.
+          // - 없으면 customer:* 노드를 생성하되 source_customer_id를 기록한다.
+          const existingEmployeeId = await findSingleEmployeeMemberIdByName(db, customerNodeName);
+          const customerPhone = ((customerData as any).phone ?? null) as string | null;
+          let customerSalesMemberId: string | null = null;
+
+          if (existingEmployeeId) {
+            customerSalesMemberId = existingEmployeeId;
+            await attachCustomerIdentityToMember(db, existingEmployeeId, { id: customerId, phone: customerPhone });
+          } else {
+            const displayName = customerNodeName.startsWith('[고객] ')
+              ? customerNodeName
+              : `[고객] ${customerNodeName}`;
+            customerSalesMemberId = await upsertSalesMember(db, {
+              name: displayName,
+              rank: '영업사원',
+              external_id: `customer:${customerId}`,
+              phone: customerPhone,
+              is_active: true,
+              source_customer_id: customerId,
+            } as any);
+          }
 
           if (customerSalesMemberId) {
             await ensureOrgEdgeForceParentWithSource(db, hqId, customerSalesMemberId, contractId);

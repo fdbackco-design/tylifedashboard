@@ -98,7 +98,6 @@ export default async function OrganizationPage({
   const normName = (v: string | null | undefined): string => (v ?? '').replace(/^\[고객\]\s*/, '').trim();
 
   const employeesByKey = new Map<string, string>(); // name|phone -> memberId (non-customer)
-  const employeesByName = new Map<string, { id: string; count: number; hasPhone: boolean }>(); // normalized name -> {id, count, hasPhone}
   const customerMergeTo = new Map<string, string>(); // customerMemberId -> employeeMemberId
   const customerIdToEffectiveMemberId = new Map<string, string>(); // customer:{customer_id} -> (customerMemberId or merged employeeMemberId)
   const hqIdsRaw = new Set(
@@ -124,12 +123,6 @@ export default async function OrganizationPage({
       // 직원 노드 우선 등록
       if (!employeesByKey.has(key)) employeesByKey.set(key, (m as { id: string }).id);
     }
-    if (!isCustomerNode) {
-      const cur = employeesByName.get(nName);
-      const hasPhone = digits !== '';
-      if (!cur) employeesByName.set(nName, { id: (m as { id: string }).id, count: 1, hasPhone });
-      else employeesByName.set(nName, { id: cur.id, count: cur.count + 1, hasPhone: cur.hasPhone || hasPhone });
-    }
   }
 
   for (const m of membersRaw as any[]) {
@@ -146,25 +139,23 @@ export default async function OrganizationPage({
         continue;
       }
     }
-    // 병합 폴백(요청 반영):
-    // - 직원 phone이 null이라도, "같은 이름 직원 노드가 정확히 1개"이고
-    // - customer 노드에는 phone이 있고(=식별 근거 존재)
-    // 일 때만 customer 노드를 그 직원 노드로 병합한다.
-    const byName = employeesByName.get(nName);
-    if (byName && byName.count === 1 && !byName.hasPhone && digits) {
-      customerMergeTo.set((m as { id: string }).id, byName.id);
-    }
   }
 
   const remapMemberId = (id: string): string => customerMergeTo.get(id) ?? id;
 
-  // customer:{customer_id} 외부키 기반 매핑은 "병합 결과"까지 반영해야 한다.
-  // (customer 노드가 직원 노드로 병합되어 members에서 제외돼도, 계약 origin 치환이 가능해야 함)
+  // customer_id → organization_member 매핑은 (1) source_customer_id (2) external_id=customer:* 순서로 본다.
+  // 또한 customer 노드가 직원 노드로 병합되어 members에서 제외돼도, 계약 origin 치환이 가능해야 한다.
   for (const m of membersRaw as any[]) {
     const ext = (m as { external_id?: string | null }).external_id ?? null;
-    if (!ext || !ext.startsWith('customer:')) continue;
-    const customerId = ext.slice('customer:'.length);
-    customerIdToEffectiveMemberId.set(customerId, remapMemberId((m as { id: string }).id));
+    const sourceCustomerId = ((m as any).source_customer_id ?? null) as string | null;
+    if (sourceCustomerId) {
+      customerIdToEffectiveMemberId.set(sourceCustomerId, remapMemberId((m as { id: string }).id));
+      continue;
+    }
+    if (ext && ext.startsWith('customer:')) {
+      const customerId = ext.slice('customer:'.length);
+      customerIdToEffectiveMemberId.set(customerId, remapMemberId((m as { id: string }).id));
+    }
   }
 
   const members = membersRaw.filter((m: any) => !customerMergeTo.has((m as { id: string }).id));
