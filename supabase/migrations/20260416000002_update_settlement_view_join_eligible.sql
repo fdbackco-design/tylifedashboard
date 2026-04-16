@@ -23,9 +23,6 @@ SELECT
   c.status,
   c.is_cancelled,
   c.sales_member_id,
-  c.sales_link_status,
-  c.rental_request_no,
-  c.invoice_no,
   om.name               AS sales_member_name,
   om.rank               AS sales_member_rank
 FROM contracts c
