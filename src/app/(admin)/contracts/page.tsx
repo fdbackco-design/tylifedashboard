@@ -224,11 +224,14 @@ export default async function ContractsPage({ searchParams }: PageProps) {
     return [...map.values()];
   })();
 
-  const querySuffix = (overrides: Record<string, string | undefined>) => {
+  const querySuffix = (overrides: Record<string, string | null | undefined>) => {
     const sp = new URLSearchParams();
     const next = {
       page: overrides.page ?? String(page),
-      status: overrides.status ?? (statusFilter ? String(statusFilter) : undefined),
+      status:
+        overrides.status === null
+          ? undefined
+          : (overrides.status ?? (statusFilter ? String(statusFilter) : undefined)),
       year_month: overrides.year_month ?? yearMonth ?? undefined,
       q: overrides.q ?? (q || undefined),
     } as const;
@@ -279,7 +282,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
       {/* 필터 (TODO: 클라이언트 필터 컴포넌트로 분리) */}
       <div className="flex gap-2 mb-4 flex-wrap">
         <Link
-          href={`/contracts${querySuffix({ status: undefined, page: '1' })}`}
+          href={`/contracts${querySuffix({ status: null, page: '1' })}`}
           className={`px-3 py-1.5 rounded text-sm border ${!statusFilter ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'}`}
         >
           전체
