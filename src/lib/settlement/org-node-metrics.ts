@@ -109,6 +109,31 @@ function getAncestors(
   return out;
 }
 
+/**
+ * 수당 계산용 상위 체인.
+ * - 본사는 조직 루트로는 유지(구좌 집계에는 포함)하되,
+ * - 수당 계산(인정/실지급)에서는 본사를 상위자/귀속 후보로 보지 않는다.
+ *
+ * 따라서 상위 탐색은 계속하되(rankById로 본사 판단),
+ * 반환되는 체인에서는 본사 노드를 제외한다.
+ */
+function getCommissionAncestorsExcludingHq(
+  memberId: string,
+  parentByChild: Map<string, string | null>,
+  rankById: Map<string, RankType>,
+): string[] {
+  const out: string[] = [];
+  let cur: string | null = memberId;
+  while (true) {
+    const p = parentByChild.get(cur);
+    if (!p) break;
+    const r = rankById.get(p);
+    if (r && r !== '본사') out.push(p);
+    cur = p;
+  }
+  return out;
+}
+
 export function calculateOrgNodeMetrics(params: {
   roots: any[]; // OrgTreeNode[]
   members: Pick<OrganizationMember, 'id' | 'rank'>[];
@@ -145,21 +170,29 @@ export function calculateOrgNodeMetrics(params: {
     const unit = c.unit_count ?? 0;
     if (unit <= 0) continue;
 
-    const directParentId = parentByChild.get(origin) ?? null;
-    if (!directParentId) continue;
+    const originRank = rankById.get(origin);
+    if (!originRank) continue;
 
-    const parentRank = rankById.get(directParentId);
-    if (!parentRank) continue;
+    // 수당 계산은 “본사 제외 체인”으로 수행
+    const ancestors = getCommissionAncestorsExcludingHq(origin, parentByChild, rankById);
 
-    // 보완 규칙: 직접 상위자가 본사인 경우 인정수당 0
-    const parentRate = parentRank === '본사' ? 0 : getCommissionPerUnit(rules, parentRank, refDate);
-    if (parentRate > 0) {
-      const prev = metrics.get(directParentId)!;
-      prev.recognizedCommissionWon += parentRate * unit;
+    // 2-1) 인정수당
+    // - direct upper(본사 제외)이 있으면 그 노드가 인정수당 대상
+    // - 없으면(즉 본사 직속/루트라인) 본인이 최상위 사원으로 간주되어 인정수당을 받는다
+    const directUplineId = ancestors[0] ?? null;
+    const recognizedRecipientId = directUplineId ?? origin;
+    const recognizedRank = directUplineId ? rankById.get(directUplineId) : originRank;
+    if (recognizedRank) {
+      const rate = getCommissionPerUnit(rules, recognizedRank, refDate);
+      if (rate > 0) {
+        const prev = metrics.get(recognizedRecipientId)!;
+        prev.recognizedCommissionWon += rate * unit;
+      }
     }
 
-    const ancestors = getAncestors(origin, parentByChild);
-    // 상위 경로에 리더 이상이 있으면 “가장 높은(루트에 가까운) 리더 이상”에게 실지급 귀속
+    // 2-2) 실지급액
+    // - 리더 이상이 있으면 “가장 높은(루트에 가까운) 리더 이상”에게 귀속
+    // - 리더 이상이 없으면 “본사 제외 체인에서의 최상위 사원(영업사원)”에게 귀속
     let highestLeaderId: string | null = null;
     let topSalespersonId: string | null = null;
     for (const id of ancestors) {
@@ -168,18 +201,31 @@ export function calculateOrgNodeMetrics(params: {
       if (r === '영업사원') topSalespersonId = id;
       if (isLeaderOrAbove(r)) highestLeaderId = id;
     }
-    const payRecipientId = highestLeaderId ?? topSalespersonId;
-    if (payRecipientId && parentRate > 0) {
-      const prev = metrics.get(payRecipientId)!;
-      prev.paidCommissionWon += parentRate * unit;
-    }
+    // 본사 직속/루트라인(ancestors에 사원이 없을 수 있음)에서는 본인이 최상위 사원 후보
+    if (originRank === '영업사원' && !topSalespersonId) topSalespersonId = origin;
 
-    // 차액 인정(override): 실지급 귀속 대상이 리더 이상이면, (상위 수당 - 직접상위 수당)만큼 인정수당을 추가로 기록
+    const payRecipientId = highestLeaderId ?? topSalespersonId;
     if (payRecipientId) {
       const payRank = rankById.get(payRecipientId);
-      if (payRank && isLeaderOrAbove(payRank) && parentRate > 0) {
+      if (payRank) {
         const payRate = getCommissionPerUnit(rules, payRank, refDate);
-        const diff = Math.max(0, payRate - parentRate);
+        if (payRate > 0) {
+          const prev = metrics.get(payRecipientId)!;
+          prev.paidCommissionWon += payRate * unit;
+        }
+      }
+    }
+
+    // 2-3) 차액 인정(override)
+    // 실지급 귀속 대상이 리더 이상이면, (실지급 대상 수당 - direct upper 수당)만큼 인정수당을 추가로 기록
+    // (본사 직속/루트라인처럼 direct upper가 없으면 차액 개념이 없으므로 스킵)
+    if (payRecipientId && directUplineId) {
+      const payRank = rankById.get(payRecipientId);
+      const directRank = rankById.get(directUplineId);
+      if (payRank && directRank && isLeaderOrAbove(payRank)) {
+        const payRate = getCommissionPerUnit(rules, payRank, refDate);
+        const directRate = getCommissionPerUnit(rules, directRank, refDate);
+        const diff = Math.max(0, payRate - directRate);
         if (diff > 0) {
           const prev = metrics.get(payRecipientId)!;
           prev.recognizedCommissionWon += diff * unit;
