@@ -247,16 +247,33 @@ export default function OrgTree({ roots, contractsByMember, metricsById }: Props
   const displayRoots = useMemo<OrgTreeNodeType[]>(() => {
     if (!roots || roots.length === 0) return [];
 
-    const hqPerson = roots.find((n) => n.name === '안성준') ?? null;
-    const remainingRoots = roots.filter((n) => n.id !== hqPerson?.id);
-    const promotedChildren = (hqPerson?.children ?? []) as OrgTreeNodeType[];
+    // "본사" 개인 노드(예: 안성준)가 중복으로 존재할 수 있으므로,
+    // UI에서는 본사(person) 노드를 모두 제거하고 자식만 승격한다.
+    function stripHqPersonNodes(nodes: OrgTreeNodeType[]): OrgTreeNodeType[] {
+      const out: OrgTreeNodeType[] = [];
+      for (const n of nodes) {
+        const isHqPerson = n.rank === '본사' && n.name !== '본사';
+        if (isHqPerson) {
+          // 본사(person) 노드는 숨기고 자식만 같은 레벨로 승격
+          out.push(...stripHqPersonNodes((n.children ?? []) as OrgTreeNodeType[]));
+          continue;
+        }
+        out.push({
+          ...n,
+          children: stripHqPersonNodes((n.children ?? []) as OrgTreeNodeType[]),
+        });
+      }
+      return out;
+    }
+
+    const cleanedRoots = stripHqPersonNodes(roots);
 
     const hqRoot: OrgTreeNodeType = {
       id: '__hq_root__',
       name: '본사',
       rank: '본사',
       // 본사 아래로: (안성준의 자식들) + (기타 루트들)
-      children: [...promotedChildren, ...remainingRoots],
+      children: cleanedRoots,
     } as OrgTreeNodeType;
 
     return [hqRoot];
