@@ -98,7 +98,6 @@ export default async function OrganizationPage({
   const normName = (v: string | null | undefined): string => (v ?? '').replace(/^\[고객\]\s*/, '').trim();
 
   const employeesByKey = new Map<string, string>(); // name|phone -> memberId (non-customer)
-  const employeesByName = new Map<string, { id: string; count: number }>(); // normalized name -> {id, count}
   const customerMergeTo = new Map<string, string>(); // customerMemberId -> employeeMemberId
   const customerIdToEffectiveMemberId = new Map<string, string>(); // customer:{customer_id} -> (customerMemberId or merged employeeMemberId)
   const hqIdsRaw = new Set(
@@ -107,8 +106,15 @@ export default async function OrganizationPage({
       .map((m) => (m as any).id as string),
   );
 
+  // debug(서버): 병합/트리 단계별 카운트
+  let dbg_customerNodes_raw = 0;
+  let dbg_customerNodes_afterMerge = 0;
+  let dbg_customerNodes_childOfHq = 0;
+  let dbg_customerNodes_inTree = 0;
+
   for (const m of membersRaw as any[]) {
     const ext = (m as { external_id?: string | null }).external_id ?? null;
+    if (ext?.startsWith('customer:')) dbg_customerNodes_raw += 1;
     const nName = normName((m as any).name);
     const digits = toPhoneDigits((m as any).phone);
     const key = `${nName}|${digits}`;
@@ -116,11 +122,6 @@ export default async function OrganizationPage({
     if (!isCustomerNode && toPhoneDigits((m as any).phone)) {
       // 직원 노드 우선 등록
       if (!employeesByKey.has(key)) employeesByKey.set(key, (m as { id: string }).id);
-    }
-    if (!isCustomerNode) {
-      const cur = employeesByName.get(nName);
-      if (!cur) employeesByName.set(nName, { id: (m as { id: string }).id, count: 1 });
-      else employeesByName.set(nName, { id: cur.id, count: cur.count + 1 });
     }
   }
 
@@ -138,12 +139,7 @@ export default async function OrganizationPage({
         continue;
       }
     }
-    // phone이 없거나 매칭이 실패한 경우:
-    // 동일 이름의 직원 노드가 "유일하게 1개"일 때만 안전하게 병합
-    const byName = employeesByName.get(nName);
-    if (byName && byName.count === 1) {
-      customerMergeTo.set((m as { id: string }).id, byName.id);
-    }
+    // 중요 정책: 직원 노드 phone이 null인 경우에는 안전하게 병합하지 않고 customer 노드를 그대로 보여준다.
   }
 
   const remapMemberId = (id: string): string => customerMergeTo.get(id) ?? id;
@@ -158,6 +154,7 @@ export default async function OrganizationPage({
   }
 
   const members = membersRaw.filter((m: any) => !customerMergeTo.has((m as { id: string }).id));
+  dbg_customerNodes_afterMerge = (members as any[]).filter((m) => ((m as any).external_id ?? '').startsWith('customer:')).length;
   const memberIdSet = new Set((members as any[]).map((m) => (m as { id: string }).id));
   const edges = (edgesRaw as any[]).map((e) => ({
     parent_id: (e as any).parent_id ? remapMemberId((e as any).parent_id) : null,
@@ -191,6 +188,14 @@ export default async function OrganizationPage({
   }
 
   const dedupedEdges = [...bestByChild.values()];
+
+  // 본사(hq) 직속 customer 노드 수(트리 구성 전)
+  dbg_customerNodes_childOfHq = dedupedEdges.filter(
+    (e) =>
+      e.parent_id != null &&
+      hqIdsRaw.has(e.parent_id) &&
+      ((membersRaw.find((m: any) => (m as any).id === e.child_id)?.external_id ?? '') as string).startsWith('customer:'),
+  ).length;
 
   const edgeMap = new Map<string, string | null>();
   for (const e of dedupedEdges) {
@@ -336,6 +341,9 @@ export default async function OrganizationPage({
   }
 
   const tree = buildOrgTree(treeRows);
+  // buildOrgTree 결과에 customer 노드가 실제로 남아있는지
+  const flatten = (nodes: any[]): any[] => nodes.flatMap((n) => [n, ...(n.children ? flatten(n.children) : [])]);
+  dbg_customerNodes_inTree = flatten(tree).filter((n) => ((membersRaw.find((m: any) => (m as any).id === n.id)?.external_id ?? '') as string).startsWith('customer:')).length;
 
   /** 조직 노드 구좌·수당: get_organization_kpis 와 동일한 가입 인정 기준 */
   const kpiEligibleForMetrics = rawContractRows
@@ -502,6 +510,10 @@ export default async function OrganizationPage({
                   hqEligibleMappedToCustomerNode: dbg_hqEligibleMapped,
                   hqEligibleMissingCustomerNode: dbg_hqEligibleMissing,
                   sampleMissing: dbg_sampleMissing,
+                  customerNodesRaw: dbg_customerNodes_raw,
+                  customerNodesAfterMerge: dbg_customerNodes_afterMerge,
+                  customerNodesChildOfHq: dbg_customerNodes_childOfHq,
+                  customerNodesInTree: dbg_customerNodes_inTree,
                 }
               : { enabled: false, hqId, hqEligibleTotal: 0, hqEligibleMappedToCustomerNode: 0, hqEligibleMissingCustomerNode: 0 }
           }

@@ -215,6 +215,10 @@ interface Props {
     hqEligibleTotal: number;
     hqEligibleMappedToCustomerNode: number;
     hqEligibleMissingCustomerNode: number;
+    customerNodesRaw?: number;
+    customerNodesAfterMerge?: number;
+    customerNodesChildOfHq?: number;
+    customerNodesInTree?: number;
     sampleMissing?: Array<{ contract_code: string; customer_id: string; customer_name: string; customer_phone: string | null }>;
   };
   metricsById?: Record<
