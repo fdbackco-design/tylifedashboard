@@ -74,10 +74,10 @@ export default async function OrganizationPage({
   ]);
 
   // 안성준은 TY Life 시스템상 영업사원이지만 실제로는 본사(최상위)로 취급
-  const members = ((membersRes.data ?? []) as OrganizationMember[]).map((m) =>
+  const membersRaw = ((membersRes.data ?? []) as OrganizationMember[]).map((m) =>
     m.name === '안성준' ? { ...m, rank: '본사' as const } : m,
   );
-  const edges = edgesRes.data ?? [];
+  const edgesRaw = edgesRes.data ?? [];
   const contractCount = contractCountRes.count ?? 0;
   const lastSync = lastSyncRes.data as {
     id: string;
@@ -91,15 +91,62 @@ export default async function OrganizationPage({
     total_errors: number | null;
   } | null;
 
+  // ── 고객 노드(customer:*)와 실제 영업사원 노드 병합(표시/집계용) ──
+  // 같은 사람(이름+전화)이 customer 노드와 직원 노드로 동시에 존재하면,
+  // 조직도에서는 하나의 노드로 합쳐 보여주기 위해 customer 노드를 직원 노드로 병합한다.
+  const toPhoneDigits = (v: string | null | undefined): string => (v ?? '').replace(/\D/g, '');
+  const normName = (v: string | null | undefined): string => (v ?? '').replace(/^\[고객\]\s*/, '').trim();
+
+  const employeesByKey = new Map<string, string>(); // name|phone -> memberId (non-customer)
+  const customerMergeTo = new Map<string, string>(); // customerMemberId -> employeeMemberId
+
+  for (const m of membersRaw as any[]) {
+    const ext = (m as { external_id?: string | null }).external_id ?? null;
+    const key = `${normName((m as any).name)}|${toPhoneDigits((m as any).phone)}`;
+    const isCustomerNode = ext?.startsWith('customer:') ?? false;
+    if (!isCustomerNode && toPhoneDigits((m as any).phone)) {
+      // 직원 노드 우선 등록
+      if (!employeesByKey.has(key)) employeesByKey.set(key, (m as { id: string }).id);
+    }
+  }
+
+  for (const m of membersRaw as any[]) {
+    const ext = (m as { external_id?: string | null }).external_id ?? null;
+    const isCustomerNode = ext?.startsWith('customer:') ?? false;
+    if (!isCustomerNode) continue;
+    const digits = toPhoneDigits((m as any).phone);
+    if (!digits) continue;
+    const key = `${normName((m as any).name)}|${digits}`;
+    const employeeId = employeesByKey.get(key);
+    if (employeeId) customerMergeTo.set((m as { id: string }).id, employeeId);
+  }
+
+  const remapMemberId = (id: string): string => customerMergeTo.get(id) ?? id;
+
+  const members = membersRaw.filter((m: any) => !customerMergeTo.has((m as { id: string }).id));
+  const edges = (edgesRaw as any[]).map((e) => ({
+    parent_id: (e as any).parent_id ? remapMemberId((e as any).parent_id) : null,
+    child_id: remapMemberId((e as any).child_id),
+  }));
+
+  // child_id UNIQUE 성격 유지: remap으로 중복된 child는 하나만 남김
+  const seenChild = new Set<string>();
+  const dedupedEdges: { parent_id: string | null; child_id: string }[] = [];
+  for (const e of edges as any[]) {
+    if (seenChild.has(e.child_id)) continue;
+    seenChild.add(e.child_id);
+    dedupedEdges.push(e);
+  }
+
   const edgeMap = new Map<string, string | null>();
-  for (const e of edges) {
+  for (const e of dedupedEdges) {
     edgeMap.set(
       (e as { child_id: string }).child_id,
       (e as { parent_id: string | null }).parent_id,
     );
   }
 
-  const treeRows: OrgTreeRow[] = members.map((m) => ({
+  const treeRows: OrgTreeRow[] = members.map((m: any) => ({
     id: m.id,
     name: m.name,
     rank: m.rank,
@@ -131,7 +178,7 @@ export default async function OrganizationPage({
   // "안성준(본사) 담당 + 가입 인정 기준" 계약은 동기화 단계에서
   // customer:{customer_id} 노드가 생성/연결되므로, 여기서는 그 노드로 origin을 치환한다.
   const hqIds = new Set(
-    members
+    (members as any[])
       .filter((m) => m.name === '안성준' || m.rank === '본사')
       .map((m) => m.id),
   );
@@ -142,8 +189,6 @@ export default async function OrganizationPage({
   const dbg_sampleMissing: Array<{ contract_code: string; customer_id: string; customer_name: string; customer_phone: string | null }> = [];
   const customerNodeByCustomerId = new Map<string, string>(); // external_id = customer:{customer_id}
   const nodeIdByPhoneDigits = new Map<string, string>(); // phone digits -> member id
-
-  const toPhoneDigits = (v: string | null | undefined): string => (v ?? '').replace(/\D/g, '');
 
   for (const m of members as any[]) {
     const ext = (m as { external_id?: string | null }).external_id ?? null;
@@ -209,7 +254,7 @@ export default async function OrganizationPage({
   };
 
   for (const c of rawContractRows) {
-    const key = mapSalesMemberForOrg({
+    const key = remapMemberId(mapSalesMemberForOrg({
       sales_member_id: c.sales_member_id,
       customer_id: c.customer_id,
       status: c.status,
@@ -219,7 +264,7 @@ export default async function OrganizationPage({
       customer_phone: c.customers?.phone ?? null,
       contract_code: c.contract_code,
       customer_name: c.customers?.name ?? '',
-    });
+    }));
     if (!contractsByMember[key]) contractsByMember[key] = [];
     contractsByMember[key].push({
       id: c.id,
@@ -246,7 +291,7 @@ export default async function OrganizationPage({
       join_date: c.join_date ?? '',
       unit_count: c.unit_count ?? 0,
       status: c.status,
-      sales_member_id: mapSalesMemberForOrg({
+      sales_member_id: remapMemberId(mapSalesMemberForOrg({
         sales_member_id: c.sales_member_id,
         customer_id: c.customer_id,
         status: c.status,
@@ -256,7 +301,7 @@ export default async function OrganizationPage({
         customer_phone: c.customers?.phone ?? null,
         contract_code: c.contract_code,
         customer_name: c.customers?.name ?? '',
-      }),
+      })),
     }));
 
   const orgMetricsById = calculateOrgNodeMetrics({
