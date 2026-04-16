@@ -22,6 +22,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const yearMonth = searchParams.get('year_month'); // 'YYYY-MM'
   const isCancelled = searchParams.get('is_cancelled');
   const includeCount = searchParams.get('include_count') === 'true';
+  const q = (searchParams.get('q') ?? '').trim();
 
   const db = createAdminSupabaseClient();
 
@@ -62,6 +63,22 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
   if (isCancelled !== null) {
     query = query.eq('is_cancelled', isCancelled === 'true');
+  }
+  if (q) {
+    const like = `%${q}%`;
+    const [customerIdsRes, memberIdsRes] = await Promise.all([
+      db.from('customers').select('id').ilike('name', like).limit(500),
+      db.from('organization_members').select('id').ilike('name', like).limit(500),
+    ]);
+    const customerIds = (customerIdsRes.data ?? []).map((r: any) => r.id as string);
+    const memberIds = (memberIdsRes.data ?? []).map((r: any) => r.id as string);
+    const orParts: string[] = [];
+    if (customerIds.length > 0) orParts.push(`customer_id.in.(${customerIds.join(',')})`);
+    if (memberIds.length > 0) orParts.push(`sales_member_id.in.(${memberIds.join(',')})`);
+    // raw_sales_member_name는 API 응답에 포함되지 않지만 검색에는 유용하므로 contracts 테이블에서 직접 필터링
+    orParts.push(`contract_code.ilike.${like}`);
+
+    query = query.or(orParts.join(','));
   }
 
   const { data, error } = await query;

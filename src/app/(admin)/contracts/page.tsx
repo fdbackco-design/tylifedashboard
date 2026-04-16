@@ -94,14 +94,22 @@ export default async function ContractsPage({ searchParams }: PageProps) {
   }
   if (q) {
     // 고객명/담당자명(확정)/미확인 담당자명까지 통합 검색
+    // Supabase의 join 컬럼 필터는 형태에 따라 동작이 불안정할 수 있어,
+    // (customers / organization_members)에서 id 후보를 먼저 구한 뒤 contracts에서 in/or로 필터링한다.
     const like = `%${q}%`;
-    query = query.or(
-      [
-        `customers.name.ilike.${like}`,
-        `sales_member.name.ilike.${like}`,
-        `raw_sales_member_name.ilike.${like}`,
-      ].join(','),
-    );
+    const [customerIdsRes, memberIdsRes] = await Promise.all([
+      db.from('customers').select('id').ilike('name', like).limit(500),
+      db.from('organization_members').select('id').ilike('name', like).limit(500),
+    ]);
+
+    const customerIds = (customerIdsRes.data ?? []).map((r: any) => r.id as string);
+    const memberIds = (memberIdsRes.data ?? []).map((r: any) => r.id as string);
+
+    const orParts: string[] = [`raw_sales_member_name.ilike.${like}`];
+    if (customerIds.length > 0) orParts.push(`customer_id.in.(${customerIds.join(',')})`);
+    if (memberIds.length > 0) orParts.push(`sales_member_id.in.(${memberIds.join(',')})`);
+
+    query = query.or(orParts.join(','));
   }
 
   const { data: contracts, count } = await query;
