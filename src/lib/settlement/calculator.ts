@@ -333,6 +333,9 @@ export function buildOrgTree(rows: OrgTreeRow[]): OrgTreeNode[] {
           cur = parentById.get(cur) ?? null;
         }
         if (!isCycle) parent.children.push(node);
+      } else {
+        // parent가 없는 dangling edge는 루트로 승격 (UI에서 노드 누락 방지)
+        roots.push(node);
       }
     }
   }

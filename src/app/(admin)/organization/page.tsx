@@ -220,6 +220,10 @@ export default async function OrganizationPage({
     name: m.name,
     rank: m.rank,
     parent_id:
+      // 트리 최상단 본사 노드는 언제나 루트로 고정
+      m.rank === '본사'
+        ? null
+        :
       hqIdForTree &&
       m.rank !== '본사' &&
       (m.source_customer_id ?? null) != null
