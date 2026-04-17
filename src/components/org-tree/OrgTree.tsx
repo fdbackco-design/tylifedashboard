@@ -327,6 +327,7 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
   function TreeSubtree({ node }: { node: OrgTreeNodeType }) {
     const children = node.children ?? [];
     const hasChildren = children.length > 0;
+    const isHqRoot = node.id === '__hq_root__';
 
     return (
       <div className="flex flex-col items-center">
@@ -341,23 +342,45 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
 
         {/* 자식 서브트리 */}
         {hasChildren && (
-          <div className="relative mt-6 pt-6 w-full">
-            {/* 부모 -> 자식들 수직 라인 */}
-            <div className="absolute left-1/2 top-0 -translate-x-1/2 h-6 w-px bg-gray-300" />
+          <div className={`mt-6 pt-6 w-full ${isHqRoot ? 'overflow-x-auto' : ''}`}>
+            <div className="relative w-full">
+              {/* 부모 -> 자식들 수직 라인 */}
+              <div className="absolute left-1/2 top-0 -translate-x-1/2 h-6 w-px bg-gray-300" />
 
-            {/* 자식들 상단 수평 라인 */}
-            {children.length > 1 && (
-              <div className="absolute left-4 right-4 top-6 h-px bg-gray-300" />
-            )}
-
-            <div className="flex flex-wrap justify-center gap-6 px-4">
-              {children.map((ch) => (
-                <div key={ch.id} className="relative flex flex-col items-center">
-                  {/* 수평 라인 -> 자식 수직 라인 */}
-                  <div className="absolute left-1/2 top-0 -translate-x-1/2 h-6 w-px bg-gray-300" />
-                  <TreeSubtree node={ch} />
+              {isHqRoot ? (
+                // 본사 직속은 한 줄(가로 스크롤)로 고정
+                <div className="relative w-max mx-auto px-4">
+                  {/* 자식들 상단 수평 라인 (스크롤 컨텐츠 폭 기준) */}
+                  {children.length > 1 && (
+                    <div className="absolute left-4 right-4 top-6 h-px bg-gray-300" />
+                  )}
+                  <div className="flex flex-nowrap justify-center gap-6 py-0">
+                    {children.map((ch) => (
+                      <div key={ch.id} className="relative flex flex-col items-center">
+                        {/* 수평 라인 -> 자식 수직 라인 */}
+                        <div className="absolute left-1/2 top-0 -translate-x-1/2 h-6 w-px bg-gray-300" />
+                        <TreeSubtree node={ch} />
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
+              ) : (
+                <>
+                  {/* 자식들 상단 수평 라인 */}
+                  {children.length > 1 && (
+                    <div className="absolute left-4 right-4 top-6 h-px bg-gray-300" />
+                  )}
+                  <div className="flex flex-wrap justify-center gap-6 px-4">
+                    {children.map((ch) => (
+                      <div key={ch.id} className="relative flex flex-col items-center">
+                        {/* 수평 라인 -> 자식 수직 라인 */}
+                        <div className="absolute left-1/2 top-0 -translate-x-1/2 h-6 w-px bg-gray-300" />
+                        <TreeSubtree node={ch} />
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
