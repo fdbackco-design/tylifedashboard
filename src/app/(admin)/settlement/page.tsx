@@ -135,11 +135,13 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const contractIds = baseRows.map((r) => r.contract_id);
   const { data: contractCustomerRows } = await db
     .from('contracts')
-    .select('id, customer_id')
+    .select('id, customer_id, item_name')
     .in('id', contractIds);
   const customerIdByContractId = new Map<string, string>();
-  for (const r of (contractCustomerRows ?? []) as Array<{ id: string; customer_id: string }>) {
+  const itemNameByContractId = new Map<string, string | null>();
+  for (const r of (contractCustomerRows ?? []) as Array<{ id: string; customer_id: string; item_name?: string | null }>) {
     customerIdByContractId.set(r.id, r.customer_id);
+    itemNameByContractId.set(r.id, (r as any).item_name ?? null);
   }
 
   // customer_id -> member_id (source_customer_id 우선, 없으면 external_id=customer:* 사용)
@@ -161,6 +163,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   // - 그 외에 본사 담당(HQ)인 계약도 동일하게 customer 노드로 치환한다.
   const eligibleContracts = baseRows.map((r) => {
     const customer_id = customerIdByContractId.get(r.contract_id) ?? null;
+    const item_name = itemNameByContractId.get(r.contract_id) ?? null;
     let sales_member_id = r.sales_member_id;
     if (customer_id) {
       const mapped = memberIdByCustomerId.get(customer_id);
@@ -170,7 +173,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
         // fallback (HQ only): customer 매핑이 존재할 때만 치환 가능하므로 여기선 그대로 둔다
       }
     }
-    return { ...r, id: r.contract_id, customer_id, sales_member_id, unit_count: r.unit_count ?? 0 };
+    return { ...r, id: r.contract_id, customer_id, sales_member_id, unit_count: r.unit_count ?? 0, item_name };
   });
 
   // 정산현황 표의 "직접계약/직접구좌"도 위 귀속 기준으로 재계산
