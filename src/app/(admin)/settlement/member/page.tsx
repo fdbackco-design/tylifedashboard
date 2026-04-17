@@ -78,7 +78,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     db
       .from('contracts')
       .select(
-        'id, contract_code, join_date, status, unit_count, sales_member_id, customer_id, rental_request_no, invoice_no, memo, customers(name)',
+        'id, contract_code, join_date, status, unit_count, item_name, sales_member_id, customer_id, rental_request_no, invoice_no, memo, customers(name)',
       )
       .gte('join_date', start_date)
       .lt('join_date', endExclusive),
@@ -208,14 +208,17 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     .map((r) => {
       const origin = attributedSalesMemberId(r);
       const c = contractById.get(r.contract_id) ?? null;
+      const joinYmd = String(r.join_date ?? '').slice(0, 10);
       return {
         contract_id: r.contract_id,
         contract_code: r.contract_code,
         join_date: r.join_date,
+        join_ymd: joinYmd,
         unit_count: r.unit_count ?? 0,
         status: r.status,
         origin,
         customer_name: (c?.customers as any)?.name ?? '-',
+        item_name: (c?.item_name as string | null | undefined) ?? null,
         display_status: getContractDisplayStatus({
           status: (c?.status ?? r.status) as string,
           rental_request_no: (c?.rental_request_no ?? null) as string | null,
@@ -227,6 +230,53 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     })
     .filter((x) => subtreeIds.has(x.origin))
     .sort((a, b) => (b.join_date ?? '').localeCompare(a.join_date ?? ''));
+
+  // 같은 고객명 + 같은 가입일 계약은 구좌 합산으로 한 줄로 묶는다.
+  const groupedRows = (() => {
+    const m = new Map<
+      string,
+      {
+        contract_ids: string[];
+        contract_codes: string[];
+        customer_name: string;
+        join_ymd: string;
+        // 표시값은 첫 항목 기준(동일 가입일 그룹 내에는 보통 동일하나, 다를 수 있어도 UI 요구는 구좌 묶기)
+        display_status: string;
+        item_name: string | null;
+        unit_count: number;
+        origin: string;
+        raw_sales_member_id: string;
+        sort_join_date: string;
+      }
+    >();
+
+    for (const r of rows) {
+      const key = `${r.customer_name}__${r.join_ymd}`;
+      const existing = m.get(key);
+      if (!existing) {
+        m.set(key, {
+          contract_ids: [r.contract_id],
+          contract_codes: [r.contract_code],
+          customer_name: r.customer_name,
+          join_ymd: r.join_ymd,
+          display_status: r.display_status,
+          item_name: r.item_name,
+          unit_count: Number(r.unit_count ?? 0),
+          origin: r.origin,
+          raw_sales_member_id: r.raw_sales_member_id,
+          sort_join_date: String(r.join_date ?? ''),
+        });
+        continue;
+      }
+      existing.contract_ids.push(r.contract_id);
+      existing.contract_codes.push(r.contract_code);
+      existing.unit_count += Number(r.unit_count ?? 0);
+      // item_name이 비어있던 케이스만 보강
+      if (!existing.item_name && r.item_name) existing.item_name = r.item_name;
+    }
+
+    return [...m.values()].sort((a, b) => (b.sort_join_date ?? '').localeCompare(a.sort_join_date ?? ''));
+  })();
 
   const displayName = String(member.name ?? '').replace(/^\[고객\]\s*/, '');
 
@@ -247,7 +297,10 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
           <p className="text-sm text-gray-500 mt-1">
             기준 {start_date}~{end_date} · 정산 대상(가입 인정) 계약 중, 조직 트리 기준 산하에 귀속된 계약만 표시합니다.
           </p>
-          <p className="text-xs text-gray-400 mt-1">총 {rows.length.toLocaleString()}건</p>
+          <p className="text-xs text-gray-400 mt-1">
+            총 {groupedRows.length.toLocaleString()}행
+            <span className="ml-1">({rows.length.toLocaleString()}건)</span>
+          </p>
         </div>
       </div>
 
@@ -256,7 +309,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                {['계약코드', '고객명', '가입일', '표시상태', '구좌', '귀속(산하)', '원 담당자'].map((h) => (
+                {['계약코드', '고객명', '가입일', '물품명', '표시상태', '구좌', '귀속(산하)', '원 담당자'].map((h) => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-600 whitespace-nowrap">
                     {h}
                   </th>
@@ -264,18 +317,23 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {rows.length === 0 && (
+              {groupedRows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-6 py-10 text-center text-sm text-gray-500">
+                  <td colSpan={8} className="px-6 py-10 text-center text-sm text-gray-500">
                     표시할 계약이 없습니다.
                   </td>
                 </tr>
               )}
-              {rows.map((r) => (
-                <tr key={r.contract_id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-mono text-xs text-gray-700">{r.contract_code}</td>
+              {groupedRows.map((r) => (
+                <tr key={`${r.customer_name}__${r.join_ymd}`} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 font-mono text-xs text-gray-700">
+                    {r.contract_codes.join(', ')}
+                  </td>
                   <td className="px-4 py-3">{r.customer_name}</td>
-                  <td className="px-4 py-3 tabular-nums text-gray-600">{String(r.join_date ?? '').slice(0, 10)}</td>
+                  <td className="px-4 py-3 tabular-nums text-gray-600">{r.join_ymd}</td>
+                  <td className="px-4 py-3 text-xs text-gray-700 whitespace-nowrap">
+                    {r.item_name ?? '-'}
+                  </td>
                   <td className="px-4 py-3">{r.display_status}</td>
                   <td className="px-4 py-3 tabular-nums text-right">{Number(r.unit_count ?? 0).toLocaleString()}</td>
                   <td className="px-4 py-3 text-xs text-gray-600">
