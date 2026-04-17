@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { buildOrgTree, formatKRW } from '@/lib/settlement/calculator';
 import { getSettlementWindowForYearMonth } from '@/lib/settlement/settlement-window';
@@ -39,6 +40,14 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const yearMonth = params.year_month ?? getCurrentYearMonth();
   const rankFilter = params.rank as RankType | undefined;
   const debugEnabled = params.debug === '1';
+
+  if (params.member_id) {
+    const sp = new URLSearchParams();
+    sp.set('year_month', yearMonth);
+    sp.set('member_id', params.member_id);
+    if (debugEnabled) sp.set('debug', '1');
+    redirect(`/settlement/member?${sp.toString()}`);
+  }
 
   const db = createAdminSupabaseClient();
 
@@ -437,7 +446,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
                   <tr key={s.id as string} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium">
                       <Link
-                        href={`/settlement?year_month=${yearMonth}&member_id=${s.member_id}`}
+                        href={`/settlement/member?year_month=${yearMonth}&member_id=${s.member_id}`}
                         className="text-blue-600 hover:underline"
                       >
                         {displayName || '-'}
