@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { formatKRW } from '@/lib/settlement/calculator';
+import { calculateSettlementTotalAmountForYearMonth } from '@/lib/settlement/settlement-total';
 
 export const metadata: Metadata = { title: '대시보드' };
 
@@ -11,20 +12,17 @@ async function getDashboardStats() {
   const now = new Date();
   const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-  const [contractsRes, settlementsRes, syncRes] = await Promise.all([
+  const [contractsRes, syncRes, monthlyTotal] = await Promise.all([
     db
       .from('contracts')
       .select('status, is_cancelled, unit_count', { count: 'exact' }),
-    db
-      .from('monthly_settlements')
-      .select('total_amount')
-      .eq('year_month', yearMonth),
     db
       .from('sync_runs')
       .select('*')
       .order('started_at', { ascending: false })
       .limit(1)
       .single(),
+    calculateSettlementTotalAmountForYearMonth(db, yearMonth),
   ]);
 
   const contracts = contractsRes.data ?? [];
@@ -34,11 +32,6 @@ async function getDashboardStats() {
   ).length;
   const totalUnits = contracts.reduce(
     (sum, c) => sum + (c.is_cancelled ? 0 : (c.unit_count as number)),
-    0,
-  );
-
-  const monthlyTotal = (settlementsRes.data ?? []).reduce(
-    (sum, s) => sum + (s.total_amount as number),
     0,
   );
 
