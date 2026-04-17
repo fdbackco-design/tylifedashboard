@@ -22,7 +22,7 @@ type EligibleContract = {
 
 const LEADER_OR_ABOVE: readonly RankType[] = ['리더', '센터장', '사업본부장'];
 const COMMISSION_PENALTY_ITEM_NAME = '아이클레보 V1000 펫버틀러';
-const COMMISSION_PENALTY_WON = 100_000;
+const COMMISSION_PENALTY_WON = 50_000;
 
 function isLeaderOrAbove(rank: RankType): boolean {
   return (LEADER_OR_ABOVE as readonly string[]).includes(rank);
