@@ -12,6 +12,7 @@ import {
 } from '@/lib/utils/contract-display-status';
 import {
   flattenOrgTreeNodes,
+  collectStrippedNodeIdsForDisplay,
   stripOrgTreeNodesForDisplay,
 } from '@/lib/organization/org-tree-display';
 
@@ -31,8 +32,10 @@ function findNode(nodes: OrgTreeNodeType[], id: string): OrgTreeNodeType | null 
 function collectSubtreeContracts(
   node: OrgTreeNodeType,
   map: Record<string, ContractItem[]>,
+  extraIds?: string[],
 ): ContractItem[] {
-  return collectSubtreeIds(node)
+  const ids = [...new Set([...collectSubtreeIds(node), ...(extraIds ?? [])])];
+  return ids
     .flatMap((id) => map[id] ?? [])
     .sort((a, b) => (b.join_date ?? '').localeCompare(a.join_date ?? ''));
 }
@@ -246,6 +249,7 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
 
   // 트리를 평탄화해 전체 노드 목록 확보
   const allNodes = useMemo(() => flattenOrgTreeNodes(roots as OrgTreeNodeType[]), [roots]);
+  const strippedNodeIds = useMemo(() => collectStrippedNodeIdsForDisplay(roots as OrgTreeNodeType[]), [roots]);
 
   /**
    * UI 전용:
@@ -285,7 +289,11 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
 
   const selectedNode = selectedId ? findNode(displayRoots, selectedId) : null;
   const selectedContracts = selectedNode
-    ? collectSubtreeContracts(selectedNode, contractsByMember)
+    ? collectSubtreeContracts(
+        selectedNode,
+        contractsByMember,
+        selectedNode.id === '__hq_root__' ? strippedNodeIds : undefined,
+      )
     : [];
 
   useEffect(() => {
@@ -335,6 +343,7 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
         <OrgTreeNode
           node={node}
           contractsByMember={contractsByMember}
+          extraSubtreeIds={isHqRoot ? strippedNodeIds : undefined}
           nodeMetrics={metricsById?.[node.id] ?? null}
           selectedId={selectedId}
           onSelect={handleSelect}

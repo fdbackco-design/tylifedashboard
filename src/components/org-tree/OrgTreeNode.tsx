@@ -61,6 +61,7 @@ export function countByStatus(
 interface Props {
   node: OrgTreeNodeType;
   contractsByMember: Record<string, ContractItem[]>;
+  extraSubtreeIds?: string[];
   nodeMetrics: null | {
     cumulativeUnitCount: number;
     monthlyUnitCount: number;
@@ -79,12 +80,12 @@ function formatManwon(won: number): string {
   return v.toLocaleString('ko-KR');
 }
 
-export default function OrgTreeNode({ node, contractsByMember, nodeMetrics, selectedId, onSelect }: Props) {
+export default function OrgTreeNode({ node, contractsByMember, extraSubtreeIds, nodeMetrics, selectedId, onSelect }: Props) {
   const isSelected = selectedId === node.id;
   const style = RANK_STYLE[node.rank] ?? RANK_STYLE['영업사원'];
   const displayName = (node.name ?? '').replace(/^\[고객\]\s*/, '');
 
-  const subtreeIds = collectSubtreeIds(node);
+  const subtreeIds = [...new Set([...collectSubtreeIds(node), ...(extraSubtreeIds ?? [])])];
   const counts = countByStatus(subtreeIds, contractsByMember);
 
   return (
