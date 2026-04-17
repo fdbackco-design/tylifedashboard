@@ -10,14 +10,12 @@ import {
   getContractDisplayStatus,
   isContractJoinCompleted as isJoinCompleted,
 } from '@/lib/utils/contract-display-status';
-import { isOrgDisplayHiddenMemberName } from '@/lib/organization/org-display-hidden';
+import {
+  flattenOrgTreeNodes,
+  stripOrgTreeNodesForDisplay,
+} from '@/lib/organization/org-tree-display';
 
 // ── 유틸 ─────────────────────────────────────────────────
-
-/** 재귀 트리 → 평탄 배열 */
-function flattenTree(nodes: OrgTreeNodeType[]): OrgTreeNodeType[] {
-  return nodes.flatMap((n) => [n, ...flattenTree(n.children)]);
-}
 
 /** id로 노드 찾기 */
 function findNode(nodes: OrgTreeNodeType[], id: string): OrgTreeNodeType | null {
@@ -247,7 +245,7 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
   });
 
   // 트리를 평탄화해 전체 노드 목록 확보
-  const allNodes = useMemo(() => flattenTree(roots), [roots]);
+  const allNodes = useMemo(() => flattenOrgTreeNodes(roots as OrgTreeNodeType[]), [roots]);
 
   /**
    * UI 전용:
@@ -261,36 +259,8 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
     if (!roots || roots.length === 0) return [];
 
     // "본사" 개인 노드(예: 안성준)가 중복으로 존재할 수 있으므로,
-    // UI에서는 본사(person) 노드를 모두 제거하고 자식만 승격한다.
-    function stripHqPersonNodes(nodes: OrgTreeNodeType[]): OrgTreeNodeType[] {
-      const out: OrgTreeNodeType[] = [];
-      for (const n of nodes) {
-        const normalizedName = (n.name ?? '').replace(/^\[고객\]\s*/, '');
-        // 영업사원으로 생성된 "[고객] 안성준" 노드는 조직도에서 숨김
-        if (normalizedName === '안성준' && n.rank === '영업사원') {
-          out.push(...stripHqPersonNodes((n.children ?? []) as OrgTreeNodeType[]));
-          continue;
-        }
-        // 요청: 특정 [고객] 노드는 조직도에서 숨김 (자식만 승격)
-        if (n.rank === '영업사원' && isOrgDisplayHiddenMemberName(n.name ?? '')) {
-          out.push(...stripHqPersonNodes((n.children ?? []) as OrgTreeNodeType[]));
-          continue;
-        }
-        const isHqPerson = n.rank === '본사' && n.name !== '본사';
-        if (isHqPerson) {
-          // 본사(person) 노드는 숨기고 자식만 같은 레벨로 승격
-          out.push(...stripHqPersonNodes((n.children ?? []) as OrgTreeNodeType[]));
-          continue;
-        }
-        out.push({
-          ...n,
-          children: stripHqPersonNodes((n.children ?? []) as OrgTreeNodeType[]),
-        });
-      }
-      return out;
-    }
-
-    const cleanedRoots = stripHqPersonNodes(roots);
+    // UI에서는 본사(person) 노드를 모두 제거하고 자식만 승격한다. (서버 직급 배지와 동일 로직)
+    const cleanedRoots = stripOrgTreeNodesForDisplay(roots as OrgTreeNodeType[]);
 
     const hqRoot: OrgTreeNodeType = {
       id: '__hq_root__',

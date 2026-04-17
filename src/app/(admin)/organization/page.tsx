@@ -7,6 +7,10 @@ import { calculateOrgNodeMetrics } from '@/lib/settlement/org-node-metrics';
 import { isSettlementEligibleContract } from '@/lib/settlement/settlement-eligibility';
 import { isContractJoinCompleted } from '@/lib/utils/contract-display-status';
 import OrgTree from '@/components/org-tree/OrgTree';
+import {
+  flattenOrgTreeNodes,
+  stripOrgTreeNodesForDisplay,
+} from '@/lib/organization/org-tree-display';
 import type { ContractItem } from '@/components/org-tree/OrgTreeNode';
 import type { OrgTreeRow, OrganizationMember } from '@/lib/types';
 import SyncButton from './SyncButton';
@@ -396,6 +400,9 @@ export default async function OrganizationPage({
   }
 
   const tree = buildOrgTree(treeRows);
+  // 조직도(OrgTree)와 동일한 숨김·승격 후 평탄 노드 — 직급 배지·헤더 인원수 집계에 사용
+  const orgTreeVisibleNodes = flattenOrgTreeNodes(stripOrgTreeNodesForDisplay(tree));
+  const orgTreeVisibleCountExcludingHqRank = orgTreeVisibleNodes.filter((n) => n.rank !== '본사').length;
   // buildOrgTree 결과에 customer 노드가 실제로 남아있는지
   const flatten = (nodes: any[]): any[] => nodes.flatMap((n) => [n, ...(n.children ? flatten(n.children) : [])]);
   dbg_customerNodes_inTree = flatten(tree).filter((n) => ((membersRaw.find((m: any) => (m as any).id === n.id)?.external_id ?? '') as string).startsWith('customer:')).length;
@@ -439,13 +446,14 @@ export default async function OrganizationPage({
   const totalSales = totalJoinUnits * BASE_AMOUNT_PER_UNIT;
   const periodSales = periodJoinUnits * BASE_AMOUNT_PER_UNIT;
 
-  // 직급별 카운트
-  const rankCounts = members.reduce<Record<string, number>>((acc, m) => {
+  // 직급별 카운트: DB 전체가 아니라 조직도에 실제로 그려지는 노드(가상 본사 루트 제외, strip 반영)
+  const rankCounts = orgTreeVisibleNodes.reduce<Record<string, number>>((acc, m) => {
     acc[m.rank] = (acc[m.rank] ?? 0) + 1;
     return acc;
   }, {});
-  // UI 규칙: 본사는 최상단 1개로만 표시
+  // UI 규칙: 본사는 최상단 1개로만 표시(클라이언트의 __hq_root__ 본사 1칸에 대응)
   if ((rankCounts['본사'] ?? 0) > 0) rankCounts['본사'] = 1;
+  else if (tree.length > 0) rankCounts['본사'] = 1;
 
   const statusColor: Record<string, string> = {
     completed: 'text-green-600',
@@ -466,7 +474,7 @@ export default async function OrganizationPage({
         <div>
           <h2 className="text-2xl font-bold text-gray-800">조직도</h2>
           <p className="text-sm text-gray-500 mt-0.5">
-            총 {members.length}명 · 계약 {contractCount.toLocaleString()}건 저장됨
+            총 {orgTreeVisibleCountExcludingHqRank}명 · 계약 {contractCount.toLocaleString()}건 저장됨
           </p>
         </div>
         <SyncButton />
