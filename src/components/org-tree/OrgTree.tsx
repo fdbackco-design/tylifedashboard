@@ -386,7 +386,23 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
 
       const delta = e.deltaY;
       const factor = Math.exp(-delta * 0.001);
-      setScale((prev) => clamp(prev * factor, 0.4, 2.5));
+      const rect = el.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      setScale((prevScale) => {
+        const nextScale = clamp(prevScale * factor, 0.4, 2.5);
+        // 포인터 중심(focal) 줌: 화면 좌표(mouse)가 같은 컨텐츠 좌표를 계속 가리키도록 pan 보정
+        setPan((prevPan) => {
+          const contentX = (mouseX - prevPan.x) / prevScale;
+          const contentY = (mouseY - prevPan.y) / prevScale;
+          return {
+            x: mouseX - contentX * nextScale,
+            y: mouseY - contentY * nextScale,
+          };
+        });
+        return nextScale;
+      });
     };
 
     el.addEventListener('wheel', handler, { passive: false });
@@ -434,19 +450,15 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
           dragRef.current.active = false;
         }}
       >
-        <div
-          style={{
-            // zoom은 레이아웃에도 반영되어 축소 시 한 줄에 더 많이 배치됨
-            ...( { zoom: scale } as unknown as React.CSSProperties ),
-            transform: `translate(${pan.x}px, ${pan.y}px)`,
-            transformOrigin: 'top center',
-          }}
-        >
-          {/* parent-child 기반 nested tree 렌더링 */}
-          <div className="flex flex-col items-center gap-10 py-6">
-            {displayRoots.map((r) => (
-              <TreeSubtree key={r.id} node={r} />
-            ))}
+        {/* 고정 레이아웃 트리를 transform(translate+scale)로만 확대/이동 */}
+        <div style={{ transform: `translate(${pan.x}px, ${pan.y}px)` }}>
+          <div style={{ transform: `scale(${scale})`, transformOrigin: '0 0' }}>
+            {/* parent-child 기반 nested tree 렌더링 */}
+            <div className="flex flex-col items-center gap-10 py-6">
+              {displayRoots.map((r) => (
+                <TreeSubtree key={r.id} node={r} />
+              ))}
+            </div>
           </div>
         </div>
       </div>
