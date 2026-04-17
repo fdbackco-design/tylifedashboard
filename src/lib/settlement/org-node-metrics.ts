@@ -17,9 +17,12 @@ type EligibleContract = {
   unit_count: number;
   status: string;
   sales_member_id: string | null;
+  item_name?: string | null;
 };
 
 const LEADER_OR_ABOVE: readonly RankType[] = ['리더', '센터장', '사업본부장'];
+const COMMISSION_PENALTY_ITEM_NAME = '아이클레보 V1000 펫버틀러';
+const COMMISSION_PENALTY_WON = 100_000;
 
 function isLeaderOrAbove(rank: RankType): boolean {
   return (LEADER_OR_ABOVE as readonly string[]).includes(rank);
@@ -169,6 +172,7 @@ export function calculateOrgNodeMetrics(params: {
     if (!origin) continue;
     const unit = c.unit_count ?? 0;
     if (unit <= 0) continue;
+    const hasItemPenalty = (c.item_name ?? '').trim() === COMMISSION_PENALTY_ITEM_NAME;
 
     const originRank = rankById.get(origin);
     if (!originRank) continue;
@@ -188,6 +192,10 @@ export function calculateOrgNodeMetrics(params: {
         const prev = metrics.get(recognizedRecipientId)!;
         prev.recognizedCommissionWon += rate * unit;
       }
+    }
+    if (hasItemPenalty) {
+      const prev = metrics.get(recognizedRecipientId);
+      if (prev) prev.recognizedCommissionWon -= COMMISSION_PENALTY_WON;
     }
 
     // 2-2) 실지급액
@@ -219,6 +227,10 @@ export function calculateOrgNodeMetrics(params: {
           prev.paidCommissionWon += payRate * unit;
         }
       }
+    }
+    if (hasItemPenalty && payRecipientId) {
+      const prev = metrics.get(payRecipientId);
+      if (prev) prev.paidCommissionWon -= COMMISSION_PENALTY_WON;
     }
 
     // 2-3) 차액 인정(override)

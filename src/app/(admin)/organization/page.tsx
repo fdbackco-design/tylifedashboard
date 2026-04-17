@@ -415,6 +415,7 @@ export default async function OrganizationPage({
       join_date: c.join_date ?? '',
       unit_count: c.unit_count ?? 0,
       status: c.status,
+      item_name: c.item_name ?? null,
       // metrics도 동일 정책: customer 노드로 귀속(origin)을 치환한다.
       sales_member_id: remapMemberId(mapSalesMemberForOrg({
         sales_member_id: c.sales_member_id,
