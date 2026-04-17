@@ -90,6 +90,7 @@ export default function OrgTreeNode({ node, contractsByMember, nodeMetrics, sele
   return (
     <div
       onClick={() => onSelect(node.id)}
+      data-org-node-card="1"
       className={`
         min-w-[130px] max-w-[180px] rounded-xl border-2 bg-white shadow-sm
         cursor-pointer select-none transition-all

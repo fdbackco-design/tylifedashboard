@@ -442,8 +442,10 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
         onPointerDown={(e) => {
           // 캔버스처럼 패닝: pointer capture로 영역 밖으로 나가도 드래그 유지
           if (e.button !== 0) return;
-          // 카드 위에서 시작한 포인터는 "클릭 선택"을 우선 (패닝은 빈 공간 드래그로만)
-          if (e.currentTarget !== e.target) return;
+          // 노드 카드 위에서 시작한 포인터는 "클릭 선택"을 우선 (패닝은 카드 밖 드래그)
+          const target = e.target as HTMLElement | null;
+          const isOnCard = !!target?.closest?.('[data-org-node-card="1"]');
+          if (isOnCard) return;
           e.preventDefault();
           (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
           dragRef.current = {
