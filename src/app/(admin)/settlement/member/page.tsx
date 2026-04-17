@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { getSettlementWindowForYearMonth } from '@/lib/settlement/settlement-window';
 import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
+import { isOrgDisplayHiddenMemberName } from '@/lib/organization/org-display-hidden';
 import type { RankType } from '@/lib/types';
 
 export const metadata: Metadata = { title: '정산 현황 · 산하 내역' };
@@ -88,6 +89,18 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     return (
       <div className="p-6">
         <p className="text-sm text-red-600">멤버를 찾을 수 없습니다.</p>
+        <Link className="text-sm text-blue-600 underline mt-2 inline-block" href={`/settlement?year_month=${yearMonth}`}>
+          정산 현황으로
+        </Link>
+      </div>
+    );
+  }
+
+  const rawName = (member.name ?? '').replace(/^\[고객\]\s*/, '').trim();
+  if (rawName === '안성준' || isOrgDisplayHiddenMemberName(member.name ?? '')) {
+    return (
+      <div className="p-6">
+        <p className="text-sm text-muted-foreground">이 멤버는 정산 목록에서 표시되지 않습니다.</p>
         <Link className="text-sm text-blue-600 underline mt-2 inline-block" href={`/settlement?year_month=${yearMonth}`}>
           정산 현황으로
         </Link>

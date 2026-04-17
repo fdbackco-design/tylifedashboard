@@ -10,6 +10,7 @@ import {
   getContractDisplayStatus,
   isContractJoinCompleted as isJoinCompleted,
 } from '@/lib/utils/contract-display-status';
+import { isOrgDisplayHiddenMemberName } from '@/lib/organization/org-display-hidden';
 
 // ── 유틸 ─────────────────────────────────────────────────
 
@@ -267,6 +268,11 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
         const normalizedName = (n.name ?? '').replace(/^\[고객\]\s*/, '');
         // 영업사원으로 생성된 "[고객] 안성준" 노드는 조직도에서 숨김
         if (normalizedName === '안성준' && n.rank === '영업사원') {
+          out.push(...stripHqPersonNodes((n.children ?? []) as OrgTreeNodeType[]));
+          continue;
+        }
+        // 요청: 특정 [고객] 노드는 조직도에서 숨김 (자식만 승격)
+        if (n.rank === '영업사원' && isOrgDisplayHiddenMemberName(n.name ?? '')) {
           out.push(...stripHqPersonNodes((n.children ?? []) as OrgTreeNodeType[]));
           continue;
         }

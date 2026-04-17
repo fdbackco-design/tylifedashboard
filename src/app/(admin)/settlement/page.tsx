@@ -8,6 +8,7 @@ import { BASE_AMOUNT_PER_UNIT } from '@/lib/settlement/constants';
 import type { RankType } from '@/lib/types';
 import { calculateOrgNodeMetrics } from '@/lib/settlement/org-node-metrics';
 import RecalcButton from './RecalcButton';
+import { isOrgDisplayHiddenMemberName } from '@/lib/organization/org-display-hidden';
 
 export const metadata: Metadata = { title: '정산 현황' };
 export const dynamic = 'force-dynamic';
@@ -249,8 +250,9 @@ export default async function SettlementPage({ searchParams }: PageProps) {
 
   const isHiddenMember = (s: any): boolean => {
     const member = s.organization_members as unknown as { name?: string } | null;
-    const rawName = (member?.name ?? '').replace(/^\[고객\]\s*/, '').trim();
-    return rawName === '안성준';
+    const name = member?.name ?? '';
+    if (name.replace(/^\[고객\]\s*/, '').trim() === '안성준') return true;
+    return isOrgDisplayHiddenMemberName(name);
   };
 
   const displayRows = (settlements ?? [])
