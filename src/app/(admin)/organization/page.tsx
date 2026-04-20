@@ -553,7 +553,7 @@ export default async function OrganizationPage({
         </div>
 
         {/* KPI (오른쪽) */}
-        <div className="grid grid-cols-2 gap-3 w-full lg:w-auto lg:ml-auto">
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 w-full lg:w-auto lg:ml-auto">
           <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
             <span className="text-gray-500">이번달 준비+대기 구좌 수</span>
             <span className="ml-2 font-bold text-gray-800">
