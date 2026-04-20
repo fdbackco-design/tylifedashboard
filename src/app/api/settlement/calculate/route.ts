@@ -16,6 +16,7 @@ import {
   computeSalesMemberPromotionThreshold,
   type AttributedJoinContractRow,
 } from '@/lib/settlement/leader-promotion';
+import { isContractStrictlyAfterPromotionThreshold } from '@/lib/settlement/leader-promotion';
 import type { Contract, OrganizationMember, SettlementRule } from '@/lib/types';
 import type { RankType } from '@/lib/types/organization';
 
@@ -191,11 +192,32 @@ async function calculateMonthlySettlement(
 
   // 4. 멤버별 계약 맵 구성
   const contractsByMember = new Map<string, Contract[]>();
+  // 추가 규칙(정산 귀속):
+  // - "리더 산하 영업사원"이 월 중 정책 승격하면,
+  //   승격 전(승격 계약 포함, 즉 20구좌 달성까지)의 계약 기본수당은 기존 리더에게 귀속되고
+  //   승격 후(21구좌부터)의 계약만 승격자 본인에게 귀속된다.
+  const parentByChild = new Map<string, string | null>();
+  for (const e of edgesRaw) parentByChild.set(e.child_id, e.parent_id ?? null);
+  const rankByIdRaw = new Map<string, RankType>();
+  for (const m of membersRaw) rankByIdRaw.set(m.id as string, m.rank as RankType);
+
   for (const c of normalizedContracts as any[]) {
-    if (!c.sales_member_id) continue;
-    const arr = contractsByMember.get(c.sales_member_id) ?? [];
+    const origin = (c.sales_member_id ?? null) as string | null;
+    if (!origin) continue;
+
+    let assignTo = origin;
+    const th = promotionThresholdByMemberId.get(origin) ?? null;
+    if (th && !isContractStrictlyAfterPromotionThreshold(c.join_date, c.id, th)) {
+      const parentId = parentByChild.get(origin) ?? null;
+      const parentRank = parentId ? (rankByIdRaw.get(parentId) ?? null) : null;
+      if (parentId && parentRank === '리더') {
+        assignTo = parentId;
+      }
+    }
+
+    const arr = contractsByMember.get(assignTo) ?? [];
     arr.push(c);
-    contractsByMember.set(c.sales_member_id, arr);
+    contractsByMember.set(assignTo, arr);
   }
 
   // 5. 조직 트리 빌드
