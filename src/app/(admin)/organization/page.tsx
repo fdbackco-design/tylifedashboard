@@ -555,6 +555,15 @@ export default async function OrganizationPage({
         {/* KPI (오른쪽) */}
         <div className="grid grid-cols-2 gap-3 w-full lg:w-auto lg:ml-auto">
           <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
+            <span className="text-gray-500">이번달 준비+대기 구좌 수</span>
+            <span className="ml-2 font-bold text-gray-800">
+              {periodPendingUnits.toLocaleString('ko-KR')}구좌
+            </span>
+            <div className="text-[11px] text-gray-400 mt-0.5">
+              기준 {label_year_month} · {start_date}~{end_date}
+            </div>
+          </div>
+          <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
             <span className="text-gray-500">누적 가입 구좌 수</span>
             <span className="ml-2 font-bold text-gray-800">
               {totalJoinUnits.toLocaleString('ko-KR')}구좌
@@ -573,15 +582,6 @@ export default async function OrganizationPage({
               기준 {label_year_month} · {start_date}~{end_date}
             </div>
           </div>
-            <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
-              <span className="text-gray-500">이번달 준비+대기 구좌 수</span>
-              <span className="ml-2 font-bold text-gray-800">
-                {periodPendingUnits.toLocaleString('ko-KR')}구좌
-              </span>
-              <div className="text-[11px] text-gray-400 mt-0.5">
-                기준 {label_year_month} · {start_date}~{end_date}
-              </div>
-            </div>
           <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
             <span className="text-gray-500">이번달 매출</span>
             <span className="ml-2 font-bold text-gray-800">{formatWon(periodSales)}</span>
