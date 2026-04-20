@@ -303,7 +303,18 @@ function calcRollupItemsWithLeaderPromotion(
 
   for (const child of node.children) {
     // 롤업은 자식 subtree 전체 계약에 대해 계산해야 한다.
-    const childContracts = collectSubtreeContracts(child);
+    const childThreshold = promotionThresholdByMemberId.get(child.id) ?? null;
+
+    // 월 중 정책 승격: "승격 전(누적 20 이하)"까지는 기존 상위(부모)가 롤업 귀속,
+    // "승격 후(21구좌부터)"는 부모가 더 이상 롤업을 받지 않는다.
+    // 따라서 부모(node)의 롤업 계산에서는 child가 승격한 이후 계약은 제외한다.
+    const childContractsAll = collectSubtreeContracts(child);
+    const childContracts = childThreshold
+      ? childContractsAll.filter(
+          (c) => !isContractStrictlyAfterPromotionThreshold(c.join_date, c.id, childThreshold),
+        )
+      : childContractsAll;
+
     const childUnits = childContracts.reduce((s, c) => s + c.unit_count, 0);
     if (childUnits === 0) continue;
 
