@@ -225,14 +225,19 @@ function commissionPerUnitForDirectContract(
   promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>,
 ): number {
   if (dbRank === '본사') return 0;
-  if (dbRank !== '영업사원') {
-    return getActiveRuleOrFallback(rules, dbRank, refDate).commission_per_unit;
-  }
   const th = promotionThresholdByMemberId.get(memberId) ?? null;
-  if (!th || !isContractStrictlyAfterPromotionThreshold(contract.join_date, contract.id, th)) {
-    return getActiveRuleOrFallback(rules, '영업사원', refDate).commission_per_unit;
+
+  // 정책 승격(산하 가입 20구좌) 적용 대상:
+  // - DB가 영업사원이든 리더든(threshold로 승격된 경우) 계약 단위로 30만/40만을 나눈다.
+  // - threshold가 없으면 DB rank 그대로 단가 적용(기존 리더 등).
+  if (th && (dbRank === '영업사원' || dbRank === '리더')) {
+    if (!isContractStrictlyAfterPromotionThreshold(contract.join_date, contract.id, th)) {
+      return getActiveRuleOrFallback(rules, '영업사원', refDate).commission_per_unit;
+    }
+    return getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
   }
-  return getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
+
+  return getActiveRuleOrFallback(rules, dbRank, refDate).commission_per_unit;
 }
 
 function calcDirectContractsWithLeaderPromotion(
@@ -354,10 +359,11 @@ export function calculateMemberSettlement(
   let rollupItems: RollupItem[];
   let rollupCommission: number;
 
-  const useLeaderRates =
-    !!leaderOpts && member.rank === '영업사원';
   const thresholdMap =
     leaderOpts?.promotionThresholdByMemberId ?? new Map<string, SalesMemberPromotionThreshold | null>();
+  const thForMember = thresholdMap.get(member.id) ?? null;
+  const useLeaderRates =
+    !!leaderOpts && (member.rank === '영업사원' || (member.rank === '리더' && thForMember !== null));
 
   if (useLeaderRates) {
     ({ items: directItems, total: baseCommission } = calcDirectContractsWithLeaderPromotion(
@@ -395,7 +401,7 @@ export function calculateMemberSettlement(
       : calcIncentive(rule, totalUnitCount);
 
   let leaderMaintenanceBonus = 0;
-  if (leaderOpts && member.rank === '영업사원') {
+  if (leaderOpts && (member.rank === '영업사원' || member.rank === '리더')) {
     const th = leaderOpts.promotionThresholdByMemberId.get(member.id) ?? null;
     const u25 = subtreeJoinUnitsJoinOnlyAsOf(
       member.id,
@@ -404,7 +410,8 @@ export function calculateMemberSettlement(
       leaderOpts.settlementEndDate.slice(0, 10),
     );
     leaderMaintenanceBonus = isLeaderMaintenanceBonusEligible({
-      memberDbRank: member.rank,
+      // 정책 승격으로 DB rank가 리더로 올라간 경우에도 유지장려금 판정은 영업사원 기준으로 동작해야 한다.
+      memberDbRank: member.rank === '리더' ? '영업사원' : member.rank,
       promotionThreshold: th,
       subtreeJoinUnitsAsOf25: u25,
     })
@@ -428,7 +435,7 @@ export function calculateMemberSettlement(
     const ruLeader = getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
     let label = `${member.rank} 기준`;
     let applied: number | null = getActiveRuleOrFallback(rules, member.rank, refDate).commission_per_unit;
-    if (member.rank === '영업사원') {
+    if (member.rank === '영업사원' || member.rank === '리더') {
       if (!th) {
         label = `${(ruSales / 10_000).toFixed(0)}만원/구좌(영업사원)`;
         applied = ruSales;
@@ -454,8 +461,10 @@ export function calculateMemberSettlement(
     leaderPromotion = {
       db_rank: member.rank,
       effective_is_leader: member.rank === '리더' || (member.rank === '영업사원' && th !== null),
-      leader_promotion_first_join_date: member.rank === '영업사원' ? th?.threshold_join_date ?? null : null,
-      leader_promotion_threshold_contract_id: member.rank === '영업사원' ? th?.threshold_contract_id ?? null : null,
+      leader_promotion_first_join_date:
+        member.rank === '영업사원' || member.rank === '리더' ? th?.threshold_join_date ?? null : null,
+      leader_promotion_threshold_contract_id:
+        member.rank === '영업사원' || member.rank === '리더' ? th?.threshold_contract_id ?? null : null,
       subtree_join_units_join_status_as_of_end: subtreeJoinEnd,
       commission_rate_label: label,
       applied_commission_per_unit: applied,

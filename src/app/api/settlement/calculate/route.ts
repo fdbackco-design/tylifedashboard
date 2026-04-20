@@ -150,8 +150,15 @@ async function calculateMonthlySettlement(
     edgesRaw,
   );
 
+  // 승격 threshold 계산은 DB rank 변화에 영향받지 않아야 한다.
+  // (재계산 버튼을 여러 번 눌러도 동일 결과가 나오도록)
+  // 따라서 '리더'도 임시로 '영업사원'으로 취급해 threshold를 다시 계산한다.
+  // (기존 DB 리더도 threshold가 계산될 수 있지만, 정산 계산에서의 적용 여부는 calculator에서 분기한다.)
   const rankById = new Map<string, RankType>();
-  for (const m of membersRaw) rankById.set(m.id as string, m.rank as RankType);
+  for (const m of membersRaw) {
+    const r = m.rank as RankType;
+    rankById.set(m.id as string, r === '리더' ? '영업사원' : r);
+  }
 
   const promotionThresholdByMemberId = computeSalesMemberPromotionThreshold(
     treeRows,
