@@ -132,3 +132,4 @@ function incrementMonth(yearMonth: string): string {
   const next = month === 12 ? `${year + 1}-01` : `${year}-${String(month + 1).padStart(2, '0')}`;
   return `${next}-01`;
 }
+
