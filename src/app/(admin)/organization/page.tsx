@@ -11,6 +11,7 @@ import {
   flattenOrgTreeNodes,
   stripOrgTreeNodesForDisplay,
 } from '@/lib/organization/org-tree-display';
+import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
 import type { ContractItem } from '@/components/org-tree/OrgTreeNode';
 import type { OrgTreeRow, OrganizationMember } from '@/lib/types';
 import SyncButton from './SyncButton';
@@ -457,7 +458,18 @@ export default async function OrganizationPage({
       return jd >= start_date && jd <= end_date;
     })
     .filter((c) => !c.is_cancelled)
-    .filter((c) => c.status === '준비' || c.status === '대기')
+    .filter((c) => c.status !== '해약')
+    .filter((c) => {
+      // 조직도 계약 리스트와 동일하게 "렌탈 미충족" 표시 상태는 제외
+      const displayStatus = getContractDisplayStatus({
+        status: c.status,
+        rental_request_no: c.rental_request_no ?? null,
+        invoice_no: c.invoice_no ?? null,
+        memo: c.memo ?? null,
+      });
+      if (displayStatus === '렌탈 미충족') return false;
+      return c.status === '준비' || c.status === '대기';
+    })
     .reduce((sum, c) => sum + (c.unit_count ?? 0), 0);
 
   const totalSales = totalJoinUnits * BASE_AMOUNT_PER_UNIT;
