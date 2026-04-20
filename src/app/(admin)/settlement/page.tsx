@@ -122,6 +122,27 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   }));
 
   const roots = buildOrgTree(treeRows as any[]);
+  const parentByChildForTree = new Map<string, string | null>();
+  const rankByIdForTree = new Map<string, RankType>();
+  const nameByIdForTree = new Map<string, string>();
+  for (const r of treeRows as any[]) {
+    parentByChildForTree.set(r.id as string, (r.parent_id ?? null) as string | null);
+    rankByIdForTree.set(r.id as string, r.rank as RankType);
+    nameByIdForTree.set(r.id as string, r.name as string);
+  }
+
+  const getTopLineId = (memberId: string): string => {
+    // 본사(hq) 바로 아래 라인(최상위 노드)을 찾는다.
+    // treeRows의 parent_id 규칙(본사 직속 customer/source_customer_id 등)을 그대로 따른다.
+    let cur = memberId;
+    for (let i = 0; i < 64; i++) {
+      const p = parentByChildForTree.get(cur) ?? null;
+      if (!p) return cur; // 루트 라인
+      if (hqIdsRaw.has(p)) return cur; // 본사 직속
+      cur = p;
+    }
+    return memberId;
+  };
 
   const baseRows = (eligibleBaseRes.data ?? []) as Array<{
     contract_id: string;
@@ -280,20 +301,71 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       };
     })
     .filter((r) => !isHiddenMember(r.s))
+    // 본사 직속 "최상위 라인" 기준으로 그룹화(하위 노드는 라인 합계에 포함)
+    .reduce(
+      (acc, r) => {
+        const memberId = r.s.member_id as string;
+        const topLineId = getTopLineId(memberId);
+        const topNameRaw = nameByIdForTree.get(topLineId) ?? r.displayName;
+        const topDisplayName = topNameRaw.replace(/^\[고객\]\s*/, '');
+        const key = topLineId;
+
+        const prev = acc.get(key) ?? {
+          topLineId,
+          topDisplayName,
+          topRank: rankByIdForTree.get(topLineId) ?? (r.s.rank as RankType),
+          base: 0,
+          rollup: 0,
+          ruleIncentive: 0,
+          leaderMaint: 0,
+          total: 0,
+          direct_contract_ids: new Set<string>(),
+          direct_unit_sum: 0,
+        };
+
+        prev.base += r.base;
+        prev.rollup += r.rollup;
+        prev.ruleIncentive += r.ruleIncentive;
+        prev.leaderMaint += r.leaderMaint;
+        prev.total += r.total;
+
+        for (const cid of r.direct.contractIds) prev.direct_contract_ids.add(cid);
+        prev.direct_unit_sum += r.direct.unitSum;
+
+        acc.set(key, prev);
+        return acc;
+      },
+      new Map<
+        string,
+        {
+          topLineId: string;
+          topDisplayName: string;
+          topRank: RankType;
+          base: number;
+          rollup: number;
+          ruleIncentive: number;
+          leaderMaint: number;
+          total: number;
+          direct_contract_ids: Set<string>;
+          direct_unit_sum: number;
+        }
+      >(),
+    );
+
+  const displayLineRows = [...displayRows.values()]
+    .filter((r) => {
+      // 숨김/zero-out 멤버는 이미 월정산 row 단계에서 0이 되었지만,
+      // 라인 합계가 의미 없게 되지 않도록 total=0 라인은 숨긴다(선택).
+      return true;
+    })
     .sort((a, b) => {
-      // 합계금 기준 내림차순
       if (b.total !== a.total) return b.total - a.total;
-      // 동점이면 이름/ID로 안정 정렬
-      const nameCmp = a.displayName.localeCompare(b.displayName, 'ko-KR');
+      const nameCmp = a.topDisplayName.localeCompare(b.topDisplayName, 'ko-KR');
       if (nameCmp !== 0) return nameCmp;
-      return String(a.s.member_id).localeCompare(String(b.s.member_id));
+      return a.topLineId.localeCompare(b.topLineId);
     });
 
-  const totalAmount = (settlements ?? []).reduce((sum, s) => {
-    if (isHiddenMember(s)) return sum;
-    if (isZeroOutMember(s)) return sum;
-    return sum + ((s.total_amount as number) ?? 0);
-  }, 0);
+  const totalAmount = displayLineRows.reduce((sum, r) => sum + (r.total ?? 0), 0);
 
   const kpiRow = ((kpiRes.data ?? [])[0] ?? null) as
     | { total_join_units: number; period_join_units: number }
@@ -459,54 +531,50 @@ export default async function SettlementPage({ searchParams }: PageProps) {
                   </td>
                 </tr>
               )}
-              {displayRows.map(({ s, displayName, zeroOut, base, rollup, ruleIncentive, leaderMaint, total, direct, lp }) => {
+              {displayLineRows.map((r) => {
                 return (
-                  <tr key={s.id as string} className="hover:bg-gray-50">
+                  <tr key={r.topLineId} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium">
                       <Link
-                        href={`/settlement/member?year_month=${yearMonth}&member_id=${s.member_id}`}
+                        href={`/settlement/member?year_month=${yearMonth}&member_id=${r.topLineId}`}
                         className="text-blue-600 hover:underline"
                       >
-                        {displayName || '-'}
+                        {r.topDisplayName || '-'}
                       </Link>
                     </td>
-                    <td className="px-4 py-3 text-gray-600">{s.rank as string}</td>
+                    <td className="px-4 py-3 text-gray-600">{r.topRank as string}</td>
                     <td className="px-4 py-3 text-xs text-gray-700">
-                      {lp ? (lp.effective_is_leader ? '예' : '아니오') : '-'}
+                      -
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-600 max-w-[200px] whitespace-normal">
-                      {lp?.commission_rate_label ?? '-'}
+                      라인 합계
                     </td>
                     <td className="px-4 py-3 tabular-nums text-right">
-                      {direct.contractIds.size.toLocaleString()}건
+                      {r.direct_contract_ids.size.toLocaleString()}건
                     </td>
                     <td className="px-4 py-3 tabular-nums text-right">
-                      {direct.unitSum.toLocaleString()}
+                      {r.direct_unit_sum.toLocaleString()}
                     </td>
                     <td className="px-4 py-3 tabular-nums text-right">
-                      {(s.subordinate_unit_count as number).toLocaleString()}
+                      -
                     </td>
                     <td className="px-4 py-3 tabular-nums text-right text-gray-700">
-                      {formatKRW(zeroOut ? 0 : base)}
+                      {formatKRW(r.base)}
                     </td>
                     <td className="px-4 py-3 tabular-nums text-right text-gray-700">
-                      {formatKRW(zeroOut ? 0 : rollup)}
+                      {formatKRW(r.rollup)}
                     </td>
                     <td className="px-4 py-3 tabular-nums text-right text-indigo-700">
-                      {formatKRW(zeroOut ? 0 : ruleIncentive)}
+                      {formatKRW(r.ruleIncentive)}
                     </td>
                     <td className="px-4 py-3 tabular-nums text-right text-violet-700">
-                      {formatKRW(zeroOut ? 0 : leaderMaint)}
+                      {formatKRW(r.leaderMaint)}
                     </td>
                     <td className="px-4 py-3 tabular-nums text-right font-bold text-gray-900">
-                      {formatKRW(zeroOut ? 0 : total)}
+                      {formatKRW(r.total)}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      {s.is_finalized ? (
-                        <span className="text-green-600 text-xs font-semibold">확정</span>
-                      ) : (
-                        <span className="text-gray-300 text-xs">-</span>
-                      )}
+                      -
                     </td>
                   </tr>
                 );
