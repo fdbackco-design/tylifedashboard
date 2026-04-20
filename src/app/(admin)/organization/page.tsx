@@ -437,6 +437,7 @@ export default async function OrganizationPage({
     roots: tree,
     members,
     edges: dedupedEdges as { parent_id: string | null; child_id: string }[],
+    treeRows,
     contracts: kpiEligibleForMetrics,
     rules: (rulesRes.data ?? []) as any[],
     settlementWindow: { start_date, end_date, label_year_month },

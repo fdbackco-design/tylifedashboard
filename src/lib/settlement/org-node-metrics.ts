@@ -210,23 +210,38 @@ function getCommissionAncestorsExcludingHq(
   return out;
 }
 
+function buildParentMapFromTreeRows(rows: OrgTreeRow[]): Map<string, string | null> {
+  const m = new Map<string, string | null>();
+  for (const r of rows) m.set(r.id, r.parent_id ?? null);
+  return m;
+}
+
 export function calculateOrgNodeMetrics(params: {
   roots: any[]; // OrgTreeNode[]
   members: Pick<OrganizationMember, 'id' | 'rank'>[];
   edges: Pick<OrganizationEdge, 'parent_id' | 'child_id'>[];
+  /**
+   * 조직도와 동일한 parent(예: source_customer_id 본사 직속 등). edges만 쓰면
+   * 화면 트리와 달라 E2 직속 상위가 A2로 잡혀 인정수당이 과대될 수 있다.
+   */
+  treeRows?: OrgTreeRow[];
   contracts: EligibleContract[]; // KPI 가입 인정 계약(선필터)
   rules: SettlementRule[];
   settlementWindow: { start_date: string; end_date: string; label_year_month: string };
 }): Record<string, OrgNodeMetrics> {
-  const { roots, members, edges, contracts, rules, settlementWindow } = params;
-  const parentByChild = buildParentMap(edges as { parent_id: string | null; child_id: string }[]);
+  const { roots, members, edges, treeRows: treeRowsParam, contracts, rules, settlementWindow } = params;
+  const parentByChild = treeRowsParam?.length
+    ? buildParentMapFromTreeRows(treeRowsParam)
+    : buildParentMap(edges as { parent_id: string | null; child_id: string }[]);
   const rankById = new Map<string, RankType>();
   for (const m of members) rankById.set(m.id, m.rank);
 
   // 정책 승격(산하 가입 누적 20구좌) 기준을 조직도 KPI에도 동일 적용:
   // - DB rank가 리더로 올라가 있어도, 승격 계약 이전 계약은 영업사원 단가로 계산되어야 한다.
   // - threshold 계산에는 "가입 인정 계약" 전체를 사용(월 구간 외 과거 누적 포함)
-  const treeRowsForThreshold = buildTreeRowsForPromotionThreshold({ members, edges });
+  const treeRowsForThreshold = treeRowsParam?.length
+    ? treeRowsParam
+    : buildTreeRowsForPromotionThreshold({ members, edges });
   const rankByIdForThreshold = new Map<string, RankType>();
   for (const m of members) {
     // 리더도 threshold 계산 대상에 포함시키기 위해(정책 승격으로 올라간 경우),
