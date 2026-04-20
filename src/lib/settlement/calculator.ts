@@ -308,6 +308,8 @@ function calcRollupItemsWithLeaderPromotion(
     return out;
   };
 
+  const directChildIdSet = new Set((node.children ?? []).map((c) => c.id));
+
   for (const child of node.children) {
     // 롤업은 자식 subtree 전체 계약에 대해 계산해야 한다.
     const childThreshold = promotionThresholdByMemberId.get(child.id) ?? null;
@@ -365,6 +367,10 @@ function calcRollupItemsWithLeaderPromotion(
   if (previousLeaderByPromotedMemberId) {
     for (const [promotedId, leaderId] of previousLeaderByPromotedMemberId) {
       if (!leaderId || leaderId !== node.id) continue;
+      // 아직 현재 트리에서 promotedId가 node의 직접 자식으로 연결돼 있으면,
+      // 위의 일반 롤업 계산이 이미 승격 전 계약을 포함해 계산한다.
+      // 이 경우 보강 롤업을 추가하면 이중 계산이 되므로 스킵한다.
+      if (directChildIdSet.has(promotedId)) continue;
       const th = promotionThresholdByMemberId.get(promotedId) ?? null;
       if (!th) continue;
       const all = contractsByMember.get(promotedId) ?? [];
