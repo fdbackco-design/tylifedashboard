@@ -264,9 +264,11 @@ function calcDirectContractsWithLeaderPromotion(
   promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>,
 ): { items: ContractSettlementItem[]; total: number } {
   const items: ContractSettlementItem[] = eligible.map((c) => {
+    const originMemberId = (c as any).__attributed_origin_member_id as string | undefined;
+    const originRank = (c as any).__attributed_origin_rank as RankType | undefined;
     const rate = commissionPerUnitForDirectContract(
-      member.id,
-      member.rank,
+      originMemberId ?? member.id,
+      originRank ?? member.rank,
       { id: c.id, join_date: c.join_date },
       rules,
       refDate,
@@ -449,8 +451,12 @@ export function calculateMemberSettlement(
   const thresholdMap =
     leaderOpts?.promotionThresholdByMemberId ?? new Map<string, SalesMemberPromotionThreshold | null>();
   const thForMember = thresholdMap.get(member.id) ?? null;
+  const hasAttributedOrigin = eligible.some((c) => (c as any).__attributed_origin_member_id != null);
   const useLeaderRates =
-    !!leaderOpts && (member.rank === '영업사원' || (member.rank === '리더' && thForMember !== null));
+    !!leaderOpts &&
+    (hasAttributedOrigin ||
+      member.rank === '영업사원' ||
+      (member.rank === '리더' && thForMember !== null));
 
   if (useLeaderRates) {
     ({ items: directItems, total: baseCommission } = calcDirectContractsWithLeaderPromotion(
