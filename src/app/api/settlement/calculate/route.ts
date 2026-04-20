@@ -159,6 +159,25 @@ async function calculateMonthlySettlement(
     rankById,
   );
 
+  // 승격 반영: 산하 '가입' 누적 20구좌 달성한 영업사원 → 리더 (DB rank 업데이트)
+  // 테스트/운영 모두에서 "정산 계산 시점"에도 rank가 일관되게 보이도록 동기화 외 경로에서도 반영한다.
+  {
+    const toPromote: string[] = [];
+    for (const m of membersRaw) {
+      if ((m.rank as RankType) !== '영업사원') continue;
+      const th = promotionThresholdByMemberId.get(m.id as string) ?? null;
+      if (th) toPromote.push(m.id as string);
+    }
+    if (toPromote.length > 0) {
+      const { error: upErr } = await db
+        .from('organization_members')
+        .update({ rank: '리더' })
+        .in('id', toPromote)
+        .eq('rank', '영업사원'); // 안전장치: 상위직급 덮어쓰기 방지
+      if (upErr) throw new Error(`승격 반영 실패: ${upErr.message}`);
+    }
+  }
+
   const leaderOpts: LeaderSettlementOpts = {
     treeRows,
     promotionThresholdByMemberId,
