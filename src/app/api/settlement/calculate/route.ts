@@ -201,14 +201,19 @@ async function calculateMonthlySettlement(
   const rankByIdRaw = new Map<string, RankType>();
   for (const m of membersRaw) rankByIdRaw.set(m.id as string, m.rank as RankType);
 
-  // 승격 전 귀속을 안정화하기 위한 이전 parent(리더) 조회
+  // 승격 전 귀속/유지장려(1회성) 안정화를 위한 이벤트 조회
   const { data: promoEvents } = await db
     .from('leader_promotion_events')
-    .select('member_id, previous_parent_id');
+    .select('member_id, previous_parent_id, leader_maintenance_bonus_paid_at');
   const prevParentByMemberId = new Map<string, string | null>();
+  const leaderMaintPaidByMemberId = new Map<string, boolean>();
   for (const r of (promoEvents ?? []) as any[]) {
     prevParentByMemberId.set(r.member_id as string, (r.previous_parent_id ?? null) as string | null);
+    leaderMaintPaidByMemberId.set(r.member_id as string, (r.leader_maintenance_bonus_paid_at ?? null) != null);
   }
+
+  // leaderOpts에 1회성 지급 여부 전달
+  leaderOpts.leaderMaintenanceBonusAlreadyPaidByMemberId = leaderMaintPaidByMemberId;
 
   for (const c of normalizedContracts as any[]) {
     const origin = (c.sales_member_id ?? null) as string | null;
@@ -264,6 +269,31 @@ async function calculateMonthlySettlement(
     } else {
       updatedCount++;
     }
+  }
+
+  // 이번 재계산에서 유지장려(리더) 1회성 보너스를 지급한 멤버는 지급 이력을 기록
+  // (이미 지급된 경우는 calculator에서 0으로 처리됨)
+  const paidNow: string[] = [];
+  // settlements를 별도 수집하지 않으므로, monthly_settlements의 calculation_detail을 조회해 지급 여부를 기록한다.
+  const { data: paidRows } = await db
+    .from('monthly_settlements')
+    .select('member_id, calculation_detail')
+    .eq('year_month', yearMonth);
+  for (const r of (paidRows ?? []) as any[]) {
+    const lp = r.calculation_detail?.leader_promotion ?? null;
+    if (!lp) continue;
+    if ((lp.leader_maintenance_bonus_amount ?? 0) > 0) {
+      paidNow.push(r.member_id as string);
+    }
+  }
+  if (paidNow.length > 0) {
+    await db.from('leader_promotion_events').upsert(
+      paidNow.map((id) => ({
+        member_id: id,
+        leader_maintenance_bonus_paid_at: new Date().toISOString(),
+      })),
+      { onConflict: 'member_id' },
+    );
   }
 
   // 승격 반영(조직도/프로필 표시용): 정산 계산은 "영업사원 + 승격 계약 기준"으로 수행한 뒤,

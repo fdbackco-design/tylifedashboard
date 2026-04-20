@@ -224,6 +224,8 @@ export interface LeaderSettlementOpts {
   joinOnlyAttributed: AttributedJoinContractRow[];
   /** 정산 기준월의 종료일(보통 25일, YYYY-MM-DD) */
   settlementEndDate: string;
+  /** 리더 유지장려금(1회성) 지급 여부: 지급된 멤버는 해당 보너스를 다시 받지 않음 */
+  leaderMaintenanceBonusAlreadyPaidByMemberId?: Map<string, boolean>;
 }
 
 const LEADER_MAINTENANCE_BONUS_WON = 1_000_000;
@@ -451,14 +453,18 @@ export function calculateMemberSettlement(
       leaderOpts.joinOnlyAttributed,
       leaderOpts.settlementEndDate.slice(0, 10),
     );
-    leaderMaintenanceBonus = isLeaderMaintenanceBonusEligible({
+    const alreadyPaid =
+      leaderOpts.leaderMaintenanceBonusAlreadyPaidByMemberId?.get(member.id) ?? false;
+    leaderMaintenanceBonus = alreadyPaid
+      ? 0
+      : isLeaderMaintenanceBonusEligible({
       // 정책 승격으로 DB rank가 리더로 올라간 경우에도 유지장려금 판정은 영업사원 기준으로 동작해야 한다.
       memberDbRank: member.rank === '리더' ? '영업사원' : member.rank,
       promotionThreshold: th,
       subtreeJoinUnitsAsOf25: u25,
     })
-      ? LEADER_MAINTENANCE_BONUS_WON
-      : 0;
+        ? LEADER_MAINTENANCE_BONUS_WON
+        : 0;
   }
 
   const incentiveAmountCombined = ruleIncentiveAmount + leaderMaintenanceBonus;
