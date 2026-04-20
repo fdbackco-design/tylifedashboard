@@ -448,6 +448,18 @@ export default async function OrganizationPage({
     | null;
   const totalJoinUnits = kpiRow?.total_join_units ?? 0;
   const periodJoinUnits = kpiRow?.period_join_units ?? 0;
+
+  // 이번달(정산 윈도우) 준비+대기 구좌 수
+  const periodPendingUnits = rawContractRows
+    .filter((c) => {
+      const jd = (c.join_date ?? '').slice(0, 10);
+      if (!jd) return false;
+      return jd >= start_date && jd <= end_date;
+    })
+    .filter((c) => !c.is_cancelled)
+    .filter((c) => c.status === '준비' || c.status === '대기')
+    .reduce((sum, c) => sum + (c.unit_count ?? 0), 0);
+
   const totalSales = totalJoinUnits * BASE_AMOUNT_PER_UNIT;
   const periodSales = periodJoinUnits * BASE_AMOUNT_PER_UNIT;
 
@@ -549,6 +561,15 @@ export default async function OrganizationPage({
               기준 {label_year_month} · {start_date}~{end_date}
             </div>
           </div>
+            <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
+              <span className="text-gray-500">이번달 준비+대기 구좌 수</span>
+              <span className="ml-2 font-bold text-gray-800">
+                {periodPendingUnits.toLocaleString('ko-KR')}구좌
+              </span>
+              <div className="text-[11px] text-gray-400 mt-0.5">
+                기준 {label_year_month} · {start_date}~{end_date}
+              </div>
+            </div>
           <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
             <span className="text-gray-500">이번달 매출</span>
             <span className="ml-2 font-bold text-gray-800">{formatWon(periodSales)}</span>
