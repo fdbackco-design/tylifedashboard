@@ -430,10 +430,13 @@ export default async function OrganizationPage({
       })),
     }));
 
+  // 수당(인정/실지급) parent 체인은 트리와 동일한 단일 parent(child_id UNIQUE)를 써야 한다.
+  // 원본 edges 배열을 그대로 쓰면 동일 child에 대한 중복 행 때문에 마지막 행만 남아
+  // (예: E2가 C2 산하인데 A2 직속으로 잘못 잡힘) 인정수당이 과대 계산될 수 있다.
   const orgMetricsById = calculateOrgNodeMetrics({
     roots: tree,
     members,
-    edges: (edgesRes.data ?? []) as { parent_id: string | null; child_id: string }[],
+    edges: dedupedEdges as { parent_id: string | null; child_id: string }[],
     contracts: kpiEligibleForMetrics,
     rules: (rulesRes.data ?? []) as any[],
     settlementWindow: { start_date, end_date, label_year_month },
