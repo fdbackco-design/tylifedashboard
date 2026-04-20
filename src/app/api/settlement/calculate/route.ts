@@ -83,7 +83,7 @@ async function calculateMonthlySettlement(
 
   // v_contract_settlement_base는 contract_id 컬럼을 사용한다.
   // 정산 계산 로직은 Contract.id를 사용하므로, 런타임에서 id가 undefined가 되지 않도록 정규화한다.
-  const normalizedContracts = ((contracts ?? []) as any[]).map((r) => ({
+  const normalizedContractsBase = ((contracts ?? []) as any[]).map((r) => ({
     id: String(r.contract_id ?? ''),
     contract_code: String(r.contract_code ?? ''),
     join_date: String(r.join_date ?? '').slice(0, 10),
@@ -92,6 +92,19 @@ async function calculateMonthlySettlement(
     is_cancelled: Boolean(r.is_cancelled ?? false),
     sales_member_id: (r.sales_member_id ?? null) as string | null,
   }));
+
+  // 조직도/정산현황과 동일한 정책: customer_id가 organization_members로 매핑되면 해당 노드로 귀속 치환
+  // (김세영 케이스: 조직도에서는 customer 노드/직원 노드 병합/치환을 적용하지만, 정산 재계산은 그걸 안 해서 불일치가 생김)
+  const contractIds = normalizedContractsBase.map((c) => c.id).filter(Boolean);
+  const { data: contractCustomerRows, error: ccErr } = await db
+    .from('contracts')
+    .select('id, customer_id')
+    .in('id', contractIds);
+  if (ccErr) throw new Error(`contracts(customer_id) 조회 실패: ${ccErr.message}`);
+  const customerIdByContractId = new Map<string, string>();
+  for (const r of (contractCustomerRows ?? []) as any[]) {
+    if (r?.id && r?.customer_id) customerIdByContractId.set(String(r.id), String(r.customer_id));
+  }
 
   // 2. 정산 규칙 조회
   const { data: rules, error: rErr } = await db
@@ -143,6 +156,15 @@ async function calculateMonthlySettlement(
       if (!memberIdByCustomerId.has(customerId)) memberIdByCustomerId.set(customerId, m.id as string);
     }
   }
+
+  const normalizedContracts = normalizedContractsBase.map((c) => {
+    const customerId = customerIdByContractId.get(c.id) ?? null;
+    if (customerId) {
+      const mapped = memberIdByCustomerId.get(customerId) ?? null;
+      if (mapped) return { ...c, sales_member_id: mapped };
+    }
+    return c;
+  });
 
   const joinAttributed: AttributedJoinContractRow[] = [];
   for (const row of (joinContractsRes.data ?? []) as any[]) {
