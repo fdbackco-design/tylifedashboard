@@ -167,14 +167,35 @@ async function calculateMonthlySettlement(
     edgesRaw,
   );
 
+  // 승격 전 귀속/유지장려(1회성)/이전 상위 리더 안정화를 위한 이벤트 조회 (threshold 계산에도 사용)
+  const { data: promoEvents } = await db
+    .from('leader_promotion_events')
+    .select('member_id, previous_parent_id, leader_maintenance_bonus_paid_at, leader_maintenance_bonus_paid_year_month');
+  const prevParentByMemberId = new Map<string, string | null>();
+  const leaderMaintBlockByMemberId = new Map<string, boolean>();
+  const prevLeaderByPromotedMemberId = new Map<string, string | null>();
+  const policyPromotedLeaderIds = new Set<string>();
+  for (const r of (promoEvents ?? []) as any[]) {
+    const mid = r.member_id as string;
+    policyPromotedLeaderIds.add(mid);
+    prevParentByMemberId.set(mid, (r.previous_parent_id ?? null) as string | null);
+    prevLeaderByPromotedMemberId.set(mid, (r.previous_parent_id ?? null) as string | null);
+    // 같은 정산월(yearMonth) 재계산에서는 보너스를 계속 포함해야 함 → "다른 월에 이미 지급"만 차단
+    const paidYm = (r.leader_maintenance_bonus_paid_year_month ?? null) as string | null;
+    leaderMaintBlockByMemberId.set(mid, paidYm != null && paidYm !== yearMonth);
+  }
+
   // 승격 threshold 계산은 DB rank 변화에 영향받지 않아야 한다.
-  // (재계산 버튼을 여러 번 눌러도 동일 결과가 나오도록)
-  // 따라서 '리더'도 임시로 '영업사원'으로 취급해 threshold를 다시 계산한다.
-  // (기존 DB 리더도 threshold가 계산될 수 있지만, 정산 계산에서의 적용 여부는 calculator에서 분기한다.)
+  // 단, 모든 '리더'를 영업사원으로 간주하면(기존 리더 포함) 리더에게 잘못 threshold/유지장려가 붙는다.
+  // 따라서 "정책 승격 리더(leader_promotion_events가 있는 리더)"만 임시 영업사원 취급한다.
   const rankById = new Map<string, RankType>();
   for (const m of membersRaw) {
     const r = m.rank as RankType;
-    rankById.set(m.id as string, r === '리더' ? '영업사원' : r);
+    if (r === '리더' && policyPromotedLeaderIds.has(m.id as string)) {
+      rankById.set(m.id as string, '영업사원');
+    } else {
+      rankById.set(m.id as string, r);
+    }
   }
 
   const promotionThresholdByMemberId = computeSalesMemberPromotionThreshold(
@@ -190,22 +211,11 @@ async function calculateMonthlySettlement(
     settlementEndDate: end_date,
   };
 
-  // 4. 승격 전 귀속/유지장려(1회성) 안정화를 위한 이벤트 조회
-  const { data: promoEvents } = await db
-    .from('leader_promotion_events')
-    .select('member_id, previous_parent_id, leader_maintenance_bonus_paid_at');
-  const prevParentByMemberId = new Map<string, string | null>();
-  const leaderMaintPaidByMemberId = new Map<string, boolean>();
-  const prevLeaderByPromotedMemberId = new Map<string, string | null>();
-  for (const r of (promoEvents ?? []) as any[]) {
-    prevParentByMemberId.set(r.member_id as string, (r.previous_parent_id ?? null) as string | null);
-    prevLeaderByPromotedMemberId.set(r.member_id as string, (r.previous_parent_id ?? null) as string | null);
-    leaderMaintPaidByMemberId.set(r.member_id as string, (r.leader_maintenance_bonus_paid_at ?? null) != null);
-  }
-
-  // leaderOpts에 1회성 지급 여부 전달
-  leaderOpts.leaderMaintenanceBonusAlreadyPaidByMemberId = leaderMaintPaidByMemberId;
+  // leaderOpts에 1회성 지급/이전 상위 리더 전달
+  leaderOpts.leaderMaintenanceBonusAlreadyPaidByMemberId = leaderMaintBlockByMemberId;
   leaderOpts.previousLeaderByPromotedMemberId = prevLeaderByPromotedMemberId;
+
+  // 4) "기본수당(직접)" 귀속용 계약 맵은 승격 전/후로 분리해 구성한다.
 
   // 5. 롤업 계산용 계약 맵(원본 담당자 기준)은 유지한다.
   const contractsByMember = new Map<string, Contract[]>();
@@ -249,6 +259,41 @@ async function calculateMonthlySettlement(
     directContractsByMemberForSettlement.set(assignTo, arr);
   }
 
+  // 6-1) 첫 재계산에서도 롤업이 즉시 맞도록, "승격 + 본사 재배치 대상"을 미리 이벤트로 기록한다.
+  // (edges가 이후에 바뀌어도 prevParent가 남아야 재계산이 안정적)
+  {
+    const toRecord: Array<{ member_id: string; previous_parent_id: string; th: any }> = [];
+    for (const m of membersRaw) {
+      if ((m.rank as RankType) !== '영업사원') continue;
+      const th = promotionThresholdByMemberId.get(m.id as string) ?? null;
+      if (!th) continue;
+      const parentId = parentByChild.get(m.id as string) ?? null;
+      const parentRank = parentId ? (rankByIdRaw.get(parentId) ?? null) : null;
+      if (parentId && parentRank === '리더') {
+        toRecord.push({ member_id: m.id as string, previous_parent_id: parentId, th });
+      }
+    }
+    if (toRecord.length > 0) {
+      await db.from('leader_promotion_events').upsert(
+        toRecord.map((r) => ({
+          member_id: r.member_id,
+          previous_parent_id: r.previous_parent_id,
+          threshold_contract_id: r.th.threshold_contract_id,
+          threshold_join_date: r.th.threshold_join_date,
+        })),
+        { onConflict: 'member_id' },
+      );
+
+      // 이번 실행에서 바로 롤업에 반영될 수 있게 leaderOpts 맵도 갱신
+      if (!leaderOpts.previousLeaderByPromotedMemberId) {
+        leaderOpts.previousLeaderByPromotedMemberId = new Map<string, string | null>();
+      }
+      for (const r of toRecord) {
+        leaderOpts.previousLeaderByPromotedMemberId.set(r.member_id, r.previous_parent_id);
+      }
+    }
+  }
+
   // 7. 조직 트리 빌드
   const trees = buildOrgTree(treeRows);
   const nodeById = new Map<string, ReturnType<typeof buildOrgTree>[number]>();
@@ -287,8 +332,8 @@ async function calculateMonthlySettlement(
     }
   }
 
-  // 이번 재계산에서 유지장려(리더) 1회성 보너스를 지급한 멤버는 지급 이력을 기록
-  // (이미 지급된 경우는 calculator에서 0으로 처리됨)
+  // 이번 재계산에서 유지장려(리더) 보너스를 포함한 멤버는 지급 이력을 기록
+  // - 재계산(같은 yearMonth)은 결과가 같아야 하므로, paid_year_month가 해당 월이면 계속 포함되도록 했다.
   const paidNow: string[] = [];
   // settlements를 별도 수집하지 않으므로, monthly_settlements의 calculation_detail을 조회해 지급 여부를 기록한다.
   const { data: paidRows } = await db
@@ -307,6 +352,7 @@ async function calculateMonthlySettlement(
       paidNow.map((id) => ({
         member_id: id,
         leader_maintenance_bonus_paid_at: new Date().toISOString(),
+        leader_maintenance_bonus_paid_year_month: yearMonth,
       })),
       { onConflict: 'member_id' },
     );

@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS leader_promotion_events (
   threshold_join_date      DATE,
   -- 리더 유지장려금(100만원) 1회성 지급 이력
   leader_maintenance_bonus_paid_at TIMESTAMPTZ,
+  -- 지급된 정산월(YYYY-MM). 재계산 시 같은 월은 계속 포함되도록 사용
+  leader_maintenance_bonus_paid_year_month TEXT,
   created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
