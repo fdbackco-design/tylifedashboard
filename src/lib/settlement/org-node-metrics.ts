@@ -168,10 +168,13 @@ function getAncestors(
   parentByChild: Map<string, string | null>,
 ): string[] {
   const out: string[] = [];
+  const visited = new Set<string>();
   let cur: string | null = memberId;
   while (true) {
     const p = parentByChild.get(cur);
     if (!p) break;
+    if (visited.has(p)) break;
+    visited.add(p);
     out.push(p);
     cur = p;
   }
@@ -192,10 +195,14 @@ function getCommissionAncestorsExcludingHq(
   rankById: Map<string, RankType>,
 ): string[] {
   const out: string[] = [];
+  const visited = new Set<string>();
   let cur: string | null = memberId;
   while (true) {
     const p = parentByChild.get(cur);
     if (!p) break;
+    // DB에 parent 체인 순환이 있으면 무한 루프 방지 (예: A↔B)
+    if (visited.has(p)) break;
+    visited.add(p);
     const r = rankById.get(p);
     if (r && r !== '본사') out.push(p);
     cur = p;
