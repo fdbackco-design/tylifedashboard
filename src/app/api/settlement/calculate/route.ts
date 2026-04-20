@@ -201,6 +201,15 @@ async function calculateMonthlySettlement(
   const rankByIdRaw = new Map<string, RankType>();
   for (const m of membersRaw) rankByIdRaw.set(m.id as string, m.rank as RankType);
 
+  // 승격 전 귀속을 안정화하기 위한 이전 parent(리더) 조회
+  const { data: promoEvents } = await db
+    .from('leader_promotion_events')
+    .select('member_id, previous_parent_id');
+  const prevParentByMemberId = new Map<string, string | null>();
+  for (const r of (promoEvents ?? []) as any[]) {
+    prevParentByMemberId.set(r.member_id as string, (r.previous_parent_id ?? null) as string | null);
+  }
+
   for (const c of normalizedContracts as any[]) {
     const origin = (c.sales_member_id ?? null) as string | null;
     if (!origin) continue;
@@ -208,11 +217,10 @@ async function calculateMonthlySettlement(
     let assignTo = origin;
     const th = promotionThresholdByMemberId.get(origin) ?? null;
     if (th && !isContractStrictlyAfterPromotionThreshold(c.join_date, c.id, th)) {
-      const parentId = parentByChild.get(origin) ?? null;
+      const recordedPrev = prevParentByMemberId.get(origin) ?? null;
+      const parentId = recordedPrev ?? (parentByChild.get(origin) ?? null);
       const parentRank = parentId ? (rankByIdRaw.get(parentId) ?? null) : null;
-      if (parentId && parentRank === '리더') {
-        assignTo = parentId;
-      }
+      if (parentId && parentRank === '리더') assignTo = parentId;
     }
 
     const arr = contractsByMember.get(assignTo) ?? [];
@@ -277,7 +285,19 @@ async function calculateMonthlySettlement(
       if (th) {
         const parentId = parentByChild.get(m.id as string) ?? null;
         const parentRank = parentId ? (rankByIdRaw.get(parentId) ?? null) : null;
-        if (parentId && parentRank === '리더') toReparentToHq.push(m.id as string);
+        if (parentId && parentRank === '리더') {
+          toReparentToHq.push(m.id as string);
+          // 이전 parent(리더) 보존: 재계산 시에도 승격 전 귀속을 안정적으로 재현
+          await db.from('leader_promotion_events').upsert(
+            {
+              member_id: m.id as string,
+              previous_parent_id: parentId,
+              threshold_contract_id: th.threshold_contract_id,
+              threshold_join_date: th.threshold_join_date,
+            } as any,
+            { onConflict: 'member_id' },
+          );
+        }
       }
     }
     if (toPromote.length > 0) {
