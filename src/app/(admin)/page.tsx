@@ -10,40 +10,75 @@ export const dynamic = 'force-dynamic';
 function SectionCard(props: { title: string; subtitle?: string; children: ReactNode }) {
   return (
     <section className="bg-white rounded-xl border border-gray-200 shadow-sm">
-      <div className="px-5 py-4 border-b border-gray-100">
+      <div className="px-6 py-4 border-b border-gray-100">
         <div className="flex items-baseline justify-between gap-4">
           <h3 className="text-sm font-semibold text-gray-800">{props.title}</h3>
           {props.subtitle ? <p className="text-xs text-gray-500">{props.subtitle}</p> : null}
         </div>
       </div>
-      <div className="p-5">{props.children}</div>
+      <div className="p-6">{props.children}</div>
     </section>
   );
 }
 
 function DataTable(props: { rows: Array<{ parent_name: string; member_name: string; unit_sum: number }> }) {
+  const maxUnits = props.rows.reduce((m, r) => Math.max(m, r.unit_sum), 0);
+  const badgeForRank = (idx: number) => {
+    if (idx === 0) return '🥇';
+    if (idx === 1) return '🥈';
+    if (idx === 2) return '🥉';
+    return null;
+  };
+
   return (
     <div className="overflow-auto rounded-lg border border-gray-200">
       <table className="min-w-full text-sm">
         <thead className="bg-gray-50 sticky top-0 z-10">
-          <tr className="text-xs text-gray-600">
-            <th className="text-left font-medium px-3 py-2 whitespace-nowrap">상위 조직</th>
-            <th className="text-left font-medium px-3 py-2 whitespace-nowrap">담당자</th>
-            <th className="text-right font-medium px-3 py-2 whitespace-nowrap">구좌 수</th>
+          <tr className="text-xs text-gray-500 uppercase tracking-wide">
+            <th className="text-left font-medium px-4 py-3 whitespace-nowrap">상위 조직</th>
+            <th className="text-left font-medium px-4 py-3 whitespace-nowrap">담당자</th>
+            <th className="text-right font-medium px-4 py-3 whitespace-nowrap">구좌 수</th>
           </tr>
         </thead>
         <tbody>
           {props.rows.length ? (
             props.rows.map((r, idx) => (
               <tr key={`${r.member_name}-${idx}`} className="border-t border-gray-100">
-                <td className="px-3 py-2 text-gray-700 whitespace-nowrap">{r.parent_name}</td>
-                <td className="px-3 py-2 text-gray-900 whitespace-nowrap font-medium">{r.member_name}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-gray-900">{r.unit_sum.toLocaleString()} </td>
+                <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{r.parent_name}</td>
+                <td className="px-4 py-3 text-gray-900 whitespace-nowrap font-medium">
+                  <span className="inline-flex items-center gap-2">
+                    {badgeForRank(idx) ? (
+                      <span className="text-base" aria-label={`rank-${idx + 1}`}>
+                        {badgeForRank(idx)}
+                      </span>
+                    ) : (
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-[11px] text-gray-600 tabular-nums">
+                        {idx + 1}
+                      </span>
+                    )}
+                    <span className="font-medium">{r.member_name}</span>
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums text-gray-900">
+                  <div className="flex items-center justify-end gap-3">
+                    <span className="min-w-[64px] text-right font-medium">{r.unit_sum.toLocaleString()}구좌</span>
+                    <div className="w-28">
+                      <div className="h-2 rounded-full bg-gray-100">
+                        <div
+                          className="h-2 rounded-full bg-blue-600"
+                          style={{
+                            width: `${maxUnits > 0 ? Math.round((r.unit_sum / maxUnits) * 100) : 0}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </td>
               </tr>
             ))
           ) : (
             <tr>
-              <td className="px-3 py-6 text-center text-gray-400" colSpan={3}>
+              <td className="px-4 py-10 text-center text-gray-400" colSpan={3}>
                 데이터 없음
               </td>
             </tr>
@@ -56,9 +91,9 @@ function DataTable(props: { rows: Array<{ parent_name: string; member_name: stri
 
 function SummaryCard(props: { label: string; value: string; hint?: string }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+    <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
       <p className="text-xs text-gray-500">{props.label}</p>
-      <p className="text-3xl font-semibold text-gray-900 mt-2 tracking-tight">{props.value}</p>
+      <p className="text-4xl font-semibold text-blue-600 mt-2 tracking-tight">{props.value}</p>
       {props.hint ? <p className="text-xs text-gray-500 mt-2">{props.hint}</p> : null}
     </div>
   );
@@ -112,14 +147,14 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
       </header>
 
       {/* 1) 상단: 핵심 요약 카드 */}
-      <div className="grid grid-cols-2 xl:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {summaryCards.map((c) => (
           <SummaryCard key={c.label} label={c.label} value={c.value} hint={c.hint} />
         ))}
       </div>
 
       {/* 2) 중단: 상세 데이터 테이블 */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
         <SectionCard
           title={`${agg.year_month} 누적 구좌 수`}
           subtitle={`${agg.month_window.start_date} ~ ${agg.month_window.end_date} (상태 전체 포함)`}

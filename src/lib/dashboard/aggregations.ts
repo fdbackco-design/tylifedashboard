@@ -275,8 +275,6 @@ export async function buildDashboardAggregations(opts: {
   const section1Title = `${toKoreanDateTitle(base_date_ymd)} TY 가입 현황`;
 
   const briefingText = [
-    briefingTitle,
-    '',
     section1Title,
     '',
     `1. 당일 가입자 [${dailyTotalSlots.total_units}구좌]`,
