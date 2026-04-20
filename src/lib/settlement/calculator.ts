@@ -488,18 +488,10 @@ export function calculateMemberSettlement(
   const directUnitCount = eligible.reduce((s, c) => s + c.unit_count, 0);
   const totalUnitCount = directUnitCount + subordinateUnitCount;
 
-  /**
-   * DB settlement_rules 기반 장려(calcIncentive).
-   * - 영업사원: 정책 승격·유지장려(leaderMaintenanceBonus)와 이중 적용 방지 → 0
-   * - 리더이면서 정책 승격(threshold 존재): 동일 20구좌 유지 보상이 규칙장려·유지장려에 중복되므로 규칙장려는 0, 유지장려만 반영
-   * - 리더(기존 DB 리더 등, threshold 없음): 규칙장려만 사용
-   */
-  const ruleIncentiveAmount =
-    leaderOpts && member.rank === '영업사원'
-      ? 0
-      : leaderOpts && member.rank === '리더' && thForMember !== null
-        ? 0
-        : calcIncentive(rule, totalUnitCount);
+  // 규칙장려(calcIncentive)는 UI에서 제거되었고, 유지장려(리더)와 혼동/중복을 유발한다.
+  // 따라서 정산 합계에서는 규칙장려를 사용하지 않는다.
+  // (필요 시 별도 컬럼/규칙으로 다시 설계)
+  const ruleIncentiveAmount = 0;
 
   let leaderMaintenanceBonus = 0;
   if (leaderOpts && (member.rank === '영업사원' || member.rank === '리더')) {
@@ -525,7 +517,7 @@ export function calculateMemberSettlement(
   }
 
   const incentiveAmountCombined = ruleIncentiveAmount + leaderMaintenanceBonus;
-  const totalAmount = baseCommission + rollupCommission + incentiveAmountCombined;
+  const totalAmount = baseCommission + rollupCommission + leaderMaintenanceBonus;
 
   let leaderPromotion: LeaderPromotionSettlementDetail | null = null;
   if (leaderOpts) {
@@ -588,8 +580,8 @@ export function calculateMemberSettlement(
     direct_contracts: directItems,
     rollup_items: rollupItems,
     incentive_applied: incentiveAmountCombined > 0,
-    incentive_threshold: rule.incentive_unit_threshold,
-    incentive_amount: incentiveAmountCombined,
+    incentive_threshold: null,
+    incentive_amount: leaderMaintenanceBonus,
     leader_promotion: leaderPromotion,
   };
 
@@ -603,7 +595,7 @@ export function calculateMemberSettlement(
     total_unit_count: totalUnitCount,
     base_commission: baseCommission,
     rollup_commission: rollupCommission,
-    incentive_amount: incentiveAmountCombined,
+    incentive_amount: leaderMaintenanceBonus,
     total_amount: totalAmount,
     calculation_detail: detail,
     is_finalized: false,
