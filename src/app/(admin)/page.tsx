@@ -1,121 +1,172 @@
 import type { Metadata } from 'next';
+import type { ReactNode } from 'react';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
-import { formatKRW } from '@/lib/settlement/calculator';
-import { calculateSettlementTotalAmountForYearMonth } from '@/lib/settlement/settlement-total';
+import { buildDashboardAggregations } from '@/lib/dashboard/aggregations';
 
 export const metadata: Metadata = { title: '대시보드' };
 
 export const dynamic = 'force-dynamic';
 
-async function getDashboardStats() {
-  const db = createAdminSupabaseClient();
-  const now = new Date();
-  const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-
-  const [contractsRes, syncRes, monthlyTotal] = await Promise.all([
-    db
-      .from('contracts')
-      .select('status, is_cancelled, unit_count', { count: 'exact' }),
-    db
-      .from('sync_runs')
-      .select('*')
-      .order('started_at', { ascending: false })
-      .limit(1)
-      .single(),
-    calculateSettlementTotalAmountForYearMonth(db, yearMonth),
-  ]);
-
-  const contracts = contractsRes.data ?? [];
-  const totalContracts = contractsRes.count ?? 0;
-  const activeContracts = contracts.filter(
-    (c) => !c.is_cancelled && !['취소', '해약'].includes(c.status),
-  ).length;
-  const totalUnits = contracts.reduce(
-    (sum, c) => sum + (c.is_cancelled ? 0 : (c.unit_count as number)),
-    0,
+function SectionCard(props: { title: string; subtitle?: string; children: ReactNode }) {
+  return (
+    <section className="bg-white rounded-xl border border-gray-200 shadow-sm">
+      <div className="px-5 py-4 border-b border-gray-100">
+        <div className="flex items-baseline justify-between gap-4">
+          <h3 className="text-sm font-semibold text-gray-800">{props.title}</h3>
+          {props.subtitle ? <p className="text-xs text-gray-500">{props.subtitle}</p> : null}
+        </div>
+      </div>
+      <div className="p-5">{props.children}</div>
+    </section>
   );
-
-  return {
-    totalContracts,
-    activeContracts,
-    totalUnits,
-    monthlyTotal,
-    yearMonth,
-    lastSync: syncRes.data,
-  };
 }
 
-export default async function DashboardPage() {
-  const stats = await getDashboardStats();
+function DataTable(props: { rows: Array<{ parent_name: string; member_name: string; unit_sum: number }> }) {
+  return (
+    <div className="overflow-auto rounded-lg border border-gray-200">
+      <table className="min-w-full text-sm">
+        <thead className="bg-gray-50 sticky top-0 z-10">
+          <tr className="text-xs text-gray-600">
+            <th className="text-left font-medium px-3 py-2 whitespace-nowrap">상위 조직</th>
+            <th className="text-left font-medium px-3 py-2 whitespace-nowrap">담당자</th>
+            <th className="text-right font-medium px-3 py-2 whitespace-nowrap">구좌 수</th>
+          </tr>
+        </thead>
+        <tbody>
+          {props.rows.length ? (
+            props.rows.map((r, idx) => (
+              <tr key={`${r.member_name}-${idx}`} className="border-t border-gray-100">
+                <td className="px-3 py-2 text-gray-700 whitespace-nowrap">{r.parent_name}</td>
+                <td className="px-3 py-2 text-gray-900 whitespace-nowrap font-medium">{r.member_name}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-gray-900">{r.unit_sum.toLocaleString()} </td>
+              </tr>
+            ))
+          ) : (
+            <tr>
+              <td className="px-3 py-6 text-center text-gray-400" colSpan={3}>
+                데이터 없음
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
-  const cards = [
-    { label: '전체 계약 수', value: `${stats.totalContracts.toLocaleString()}건` },
-    { label: '활성 계약', value: `${stats.activeContracts.toLocaleString()}건` },
-    { label: '총 구좌 수', value: `${stats.totalUnits.toLocaleString()}구좌` },
+function SummaryCard(props: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+      <p className="text-xs text-gray-500">{props.label}</p>
+      <p className="text-3xl font-semibold text-gray-900 mt-2 tracking-tight">{props.value}</p>
+      {props.hint ? <p className="text-xs text-gray-500 mt-2">{props.hint}</p> : null}
+    </div>
+  );
+}
+
+export default async function DashboardPage(props: { searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
+  const db = createAdminSupabaseClient();
+  const sp = (await props.searchParams) ?? {};
+
+  // 요청 스펙: "4월(2026-03-26 ~ 2026-04-25)"를 반드시 지원
+  // 기본값은 2026-04로 두되, 필요 시 year_month=YYYY-MM 쿼리로 바꿀 수 있게 한다.
+  const yearMonthRaw = sp.year_month;
+  const year_month = typeof yearMonthRaw === 'string' ? yearMonthRaw : '2026-04';
+
+  const agg = await buildDashboardAggregations({ db, year_month });
+
+  const summaryCards = [
     {
-      label: `${stats.yearMonth} 정산 합계`,
-      value: formatKRW(stats.monthlyTotal),
+      label: `${agg.year_month} 누적 구좌 수`,
+      value: `${agg.monthlyTotalSlots.total_units.toLocaleString()}구좌`,
+      hint: `${agg.month_window.start_date} ~ ${agg.month_window.end_date} (준비/대기/해약/가입/렌탈 미충족 포함)`,
+    },
+    {
+      label: `전날(${agg.briefing.base_date_ymd}) 구좌 수`,
+      value: `${agg.dailyTotalSlots.total_units.toLocaleString()}구좌`,
+      hint: '준비/대기/해약/가입/렌탈 미충족 포함',
+    },
+    {
+      label: `${agg.year_month} 가입 구좌 수`,
+      value: `${agg.monthlyJoinedSlots.total_units.toLocaleString()}구좌`,
+      hint: `${agg.month_window.start_date} ~ ${agg.month_window.end_date} (가입기준 충족)`,
+    },
+    {
+      label: '총 누적 가입완료 구좌 수',
+      value: `${agg.allTimeJoinedSlots.total_units.toLocaleString()}구좌`,
+      hint: '전체 기간 (가입기준 충족)',
+    },
+    {
+      label: `담당자 당 전날 영업 실적 합계`,
+      value: `${agg.dailyPerformanceByMember.total_units.toLocaleString()}구좌`,
+      hint: '담당자별 합산(= 전날 구좌 수) 기준',
     },
   ];
 
   return (
-    <div className="p-8">
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold text-gray-800">대시보드</h2>
-        <p className="text-sm text-gray-500 mt-1">TY Life 계약 및 정산 현황</p>
-      </div>
+    <div className="p-8 space-y-8">
+      <header className="flex items-end justify-between gap-6">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">대시보드</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            핵심 숫자 → 상세 원인 → 아침 브리핑 순으로 확인하세요. (브리핑 기준: 매일 10시, 전날 데이터)
+          </p>
+        </div>
+        <div className="text-xs text-gray-500 text-right">
+          <div>브리핑 생성일: {agg.briefing.run_date_ymd}</div>
+          <div>브리핑 기준일(전날): {agg.briefing.base_date_ymd}</div>
+        </div>
+      </header>
 
-      {/* 통계 카드 */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        {cards.map((card) => (
-          <div
-            key={card.label}
-            className="bg-white rounded-lg border border-gray-200 p-5 shadow-sm"
-          >
-            <p className="text-sm text-gray-500">{card.label}</p>
-            <p className="text-2xl font-bold text-gray-800 mt-1">{card.value}</p>
-          </div>
+      {/* 1) 상단: 핵심 요약 카드 */}
+      <div className="grid grid-cols-2 xl:grid-cols-5 gap-4">
+        {summaryCards.map((c) => (
+          <SummaryCard key={c.label} label={c.label} value={c.value} hint={c.hint} />
         ))}
       </div>
 
-      {/* 최근 동기화 */}
-      <div className="bg-white rounded-lg border border-gray-200 p-5 shadow-sm max-w-lg">
-        <h3 className="text-sm font-semibold text-gray-700 mb-3">최근 동기화</h3>
-        {stats.lastSync ? (
-          <div className="text-sm space-y-1">
-            <div className="flex justify-between">
-              <span className="text-gray-500">상태</span>
-              <span
-                className={
-                  stats.lastSync.status === 'completed'
-                    ? 'text-green-600 font-medium'
-                    : stats.lastSync.status === 'failed'
-                      ? 'text-red-600 font-medium'
-                      : 'text-yellow-600 font-medium'
-                }
-              >
-                {stats.lastSync.status}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">시작</span>
-              <span className="text-gray-700">
-                {new Date(stats.lastSync.started_at as string).toLocaleString('ko-KR', {
-                  timeZone: 'Asia/Seoul',
-                })}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">수집/생성/수정/오류</span>
-              <span className="text-gray-700">
-                {stats.lastSync.total_fetched} / {stats.lastSync.total_created} / {stats.lastSync.total_updated} / {stats.lastSync.total_errors}
-              </span>
-            </div>
-          </div>
-        ) : (
-          <p className="text-sm text-gray-400">동기화 이력 없음</p>
-        )}
+      {/* 2) 중단: 상세 데이터 테이블 */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <SectionCard
+          title={`${agg.year_month} 누적 구좌 수`}
+          subtitle={`${agg.month_window.start_date} ~ ${agg.month_window.end_date} (상태 전체 포함)`}
+        >
+          <DataTable rows={agg.monthlyTotalSlots.rows} />
+        </SectionCard>
+
+        <SectionCard title={`전날(${agg.briefing.base_date_ymd}) 구좌 수`} subtitle="상태 전체 포함">
+          <DataTable rows={agg.dailyTotalSlots.rows} />
+        </SectionCard>
+
+        <SectionCard
+          title={`${agg.year_month} 가입 구좌 수`}
+          subtitle={`${agg.month_window.start_date} ~ ${agg.month_window.end_date} (가입기준 충족)`}
+        >
+          <DataTable rows={agg.monthlyJoinedSlots.rows} />
+        </SectionCard>
+
+        <SectionCard title="총 누적 가입완료 구좌 수" subtitle="전체 기간 (가입기준 충족)">
+          <DataTable rows={agg.allTimeJoinedSlots.rows} />
+        </SectionCard>
+
+        <SectionCard title="담당자별 전날 영업 실적" subtitle={`기준일: ${agg.briefing.base_date_ymd}`}>
+          <DataTable rows={agg.dailyPerformanceByMember.rows} />
+        </SectionCard>
       </div>
+
+      {/* 3) 하단: 텍스트 브리핑 박스 */}
+      <SectionCard title="아침 브리핑 (복붙용)" subtitle="그대로 복사해서 공유할 수 있는 텍스트">
+        <div className="grid grid-cols-1 gap-3">
+          <textarea
+            className="w-full min-h-[320px] resize-y rounded-lg border border-gray-200 bg-gray-50 p-4 font-mono text-xs leading-5 text-gray-900"
+            readOnly
+            value={agg.briefing.text}
+          />
+          <p className="text-xs text-gray-500">
+            브리핑은 “오늘(서울) 10시 기준 전날 데이터” 형태로 작성됩니다. (현재 기준일: {agg.briefing.base_date_ymd})
+          </p>
+        </div>
+      </SectionCard>
     </div>
   );
 }
