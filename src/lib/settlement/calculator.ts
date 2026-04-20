@@ -10,6 +10,7 @@ import type { RankType, OrgTreeNode, OrgTreeRow } from '../types/organization';
 import type { AttributedJoinContractRow, SalesMemberPromotionThreshold } from './leader-promotion';
 import {
   isContractAtOrAfterPromotionThreshold,
+  isContractStrictlyAfterPromotionThreshold,
   isLeaderMaintenanceBonusEligible,
   subtreeJoinUnitsJoinOnlyAsOf,
 } from './leader-promotion';
@@ -228,7 +229,7 @@ function commissionPerUnitForDirectContract(
     return getActiveRuleOrFallback(rules, dbRank, refDate).commission_per_unit;
   }
   const th = promotionThresholdByMemberId.get(memberId) ?? null;
-  if (!th || !isContractAtOrAfterPromotionThreshold(contract.join_date, contract.id, th)) {
+  if (!th || !isContractStrictlyAfterPromotionThreshold(contract.join_date, contract.id, th)) {
     return getActiveRuleOrFallback(rules, '영업사원', refDate).commission_per_unit;
   }
   return getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;

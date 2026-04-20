@@ -41,6 +41,23 @@ export function isContractAtOrAfterPromotionThreshold(
 }
 
 /**
+ * 계약 c가 승격 계약 "다음" 계약부터(엄밀히 after) 리더 단가를 적용해야 하는 경우에 사용.
+ * - 승격 계약 자체(threshold_contract_id)는 승격 전(영업사원 단가)으로 본다.
+ */
+export function isContractStrictlyAfterPromotionThreshold(
+  contractJoinDate: string,
+  contractId: string,
+  threshold: SalesMemberPromotionThreshold | null,
+): boolean {
+  if (!threshold) return false;
+  const aj = contractJoinDate.slice(0, 10);
+  const tj = threshold.threshold_join_date;
+  if (aj > tj) return true;
+  if (aj < tj) return false;
+  return contractId.localeCompare(threshold.threshold_contract_id) > 0;
+}
+
+/**
  * 영업사원별: 본인 산하 '가입' 누적 구좌가 20 이상이 되는 순간의 **승격 계약**(날짜만이 아니라 계약 단위).
  */
 export function computeSalesMemberPromotionThreshold(
