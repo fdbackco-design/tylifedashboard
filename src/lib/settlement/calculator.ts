@@ -171,8 +171,20 @@ function calcRollupItems(
   const refDate = monthEndDate(yearMonth);
   const items: RollupItem[] = [];
 
+  const collectSubtreeContracts = (n: OrgTreeNode): Contract[] => {
+    const out: Contract[] = [];
+    const stack: OrgTreeNode[] = [n];
+    while (stack.length) {
+      const cur = stack.pop()!;
+      out.push(...(contractsByMember.get(cur.id) ?? []));
+      for (const ch of cur.children ?? []) stack.push(ch);
+    }
+    return out;
+  };
+
   for (const child of node.children) {
-    const childContracts = contractsByMember.get(child.id) ?? [];
+    // 롤업은 하위 라인 전체(subtree) 계약에 대해 발생한다.
+    const childContracts = collectSubtreeContracts(child);
     const childUnits = childContracts.reduce((s, c) => s + c.unit_count, 0);
 
     if (childUnits === 0) continue;
@@ -278,8 +290,20 @@ function calcRollupItemsWithLeaderPromotion(
   const refDate = monthEndDate(yearMonth);
   const items: RollupItem[] = [];
 
+  const collectSubtreeContracts = (n: OrgTreeNode): Contract[] => {
+    const out: Contract[] = [];
+    const stack: OrgTreeNode[] = [n];
+    while (stack.length) {
+      const cur = stack.pop()!;
+      out.push(...(contractsByMember.get(cur.id) ?? []));
+      for (const ch of cur.children ?? []) stack.push(ch);
+    }
+    return out;
+  };
+
   for (const child of node.children) {
-    const childContracts = contractsByMember.get(child.id) ?? [];
+    // 롤업은 자식 subtree 전체 계약에 대해 계산해야 한다.
+    const childContracts = collectSubtreeContracts(child);
     const childUnits = childContracts.reduce((s, c) => s + c.unit_count, 0);
     if (childUnits === 0) continue;
 
