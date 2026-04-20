@@ -225,11 +225,31 @@ export function calculateOrgNodeMetrics(params: {
    * 화면 트리와 달라 E2 직속 상위가 A2로 잡혀 인정수당이 과대될 수 있다.
    */
   treeRows?: OrgTreeRow[];
+  /** 정책 승격자의 이전 상위(리더). 승격 전/후 귀속 분기에 사용 */
+  previousLeaderByPromotedMemberId?: Map<string, string | null>;
+  /** 본사 id (승격 후 상위로 간주). */
+  hqId?: string | null;
+  /** 유지장려(리더) 1회성 차단 여부 (true면 0). */
+  leaderMaintenanceBonusBlockedByMemberId?: Map<string, boolean>;
+  /** 정책 승격 이벤트가 기록된 멤버 id set (리더를 승격 threshold 계산에 포함시키기 위함) */
+  policyPromotedMemberIdSet?: Set<string>;
   contracts: EligibleContract[]; // KPI 가입 인정 계약(선필터)
   rules: SettlementRule[];
   settlementWindow: { start_date: string; end_date: string; label_year_month: string };
 }): Record<string, OrgNodeMetrics> {
-  const { roots, members, edges, treeRows: treeRowsParam, contracts, rules, settlementWindow } = params;
+  const {
+    roots,
+    members,
+    edges,
+    treeRows: treeRowsParam,
+    contracts,
+    rules,
+    settlementWindow,
+    previousLeaderByPromotedMemberId,
+    hqId,
+    leaderMaintenanceBonusBlockedByMemberId,
+    policyPromotedMemberIdSet,
+  } = params;
   const parentByChild = treeRowsParam?.length
     ? buildParentMapFromTreeRows(treeRowsParam)
     : buildParentMap(edges as { parent_id: string | null; child_id: string }[]);
@@ -244,10 +264,10 @@ export function calculateOrgNodeMetrics(params: {
     : buildTreeRowsForPromotionThreshold({ members, edges });
   const rankByIdForThreshold = new Map<string, RankType>();
   for (const m of members) {
-    // 리더도 threshold 계산 대상에 포함시키기 위해(정책 승격으로 올라간 경우),
-    // 임시로 영업사원으로 취급해 threshold를 계산한다.
-    // (센터장 이상은 정책 승격 범위 밖이므로 그대로 둔다.)
-    rankByIdForThreshold.set(m.id, m.rank === '리더' ? '영업사원' : m.rank);
+    // 기존 DB 리더까지 영업사원으로 바꾸면 잘못 승격/유지장려가 붙을 수 있다.
+    // 따라서 "정책 승격 이벤트가 있는 리더"만 임시로 영업사원 취급한다.
+    const isPolicyPromoted = policyPromotedMemberIdSet?.has(m.id) ?? false;
+    rankByIdForThreshold.set(m.id, m.rank === '리더' && isPolicyPromoted ? '영업사원' : m.rank);
   }
   const joinAttributed: AttributedJoinContractRow[] = (contracts ?? [])
     .filter((c) => (c.status ?? '').trim() === '가입')
@@ -264,141 +284,168 @@ export function calculateOrgNodeMetrics(params: {
     rankByIdForThreshold,
   );
 
-  const metrics = new Map<string, OrgNodeMetrics>();
+  return calculateOrgNodeMetricsAlignedToSettlement({
+    roots,
+    members,
+    contracts: contracts ?? [],
+    rules,
+    settlementWindow,
+    rankById,
+    parentByChild,
+    promotionThresholdByMemberId,
+    treeRowsForThreshold,
+    joinAttributed,
+    previousLeaderByPromotedMemberId,
+    hqId,
+    leaderMaintenanceBonusBlockedByMemberId,
+  });
+}
+
+function calculateOrgNodeMetricsAlignedToSettlement(params: {
+  roots: any[];
+  members: Pick<OrganizationMember, 'id' | 'rank'>[];
+  contracts: EligibleContract[];
+  rules: SettlementRule[];
+  settlementWindow: { start_date: string; end_date: string; label_year_month: string };
+  rankById: Map<string, RankType>;
+  parentByChild: Map<string, string | null>;
+  promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>;
+  treeRowsForThreshold: OrgTreeRow[];
+  joinAttributed: AttributedJoinContractRow[];
+  previousLeaderByPromotedMemberId?: Map<string, string | null>;
+  hqId?: string | null;
+  leaderMaintenanceBonusBlockedByMemberId?: Map<string, boolean>;
+}): Record<string, OrgNodeMetrics> {
+  const {
+    roots,
+    members,
+    contracts,
+    rules,
+    settlementWindow,
+    rankById,
+    parentByChild,
+    promotionThresholdByMemberId,
+    treeRowsForThreshold,
+    joinAttributed,
+    previousLeaderByPromotedMemberId,
+    hqId,
+    leaderMaintenanceBonusBlockedByMemberId,
+  } = params;
+
+  const refDate = `${settlementWindow.label_year_month}-01`;
+  const endInclusive = settlementWindow.end_date.slice(0, 10);
+
+  const hasDownlineById = new Map<string, boolean>();
+  (function indexDownline(nodes: any[]) {
+    for (const n of nodes ?? []) {
+      hasDownlineById.set(n.id as string, ((n.children ?? []).length ?? 0) > 0);
+      indexDownline(n.children ?? []);
+    }
+  })(roots as any[]);
+
+  const getRate = (memberId: string, contract: { id: string; join_date: string }): number => {
+    const dbRank = rankById.get(memberId);
+    if (!dbRank) return 0;
+    const eff = effectiveRankForContract({ memberId, dbRank, contract, promotionThresholdByMemberId });
+    return getCommissionPerUnit(rules, eff, refDate);
+  };
+
+  const effectiveParent = (childId: string, contract: { id: string; join_date: string }): string | null => {
+    const prev = previousLeaderByPromotedMemberId?.get(childId) ?? null;
+    if (prev) {
+      const th = promotionThresholdByMemberId.get(childId) ?? null;
+      if (th && !isContractStrictlyAfterPromotionThreshold(contract.join_date, contract.id, th)) return prev;
+      return hqId ?? null;
+    }
+    return parentByChild.get(childId) ?? null;
+  };
+
+  const cumUnits = new Map<string, number>();
+  const monUnits = new Map<string, number>();
+  const baseById = new Map<string, number>();
+  const rollupById = new Map<string, number>();
+  const bonusById = new Map<string, number>();
+
   for (const m of members) {
-    metrics.set(m.id, { cumulativeUnitCount: 0, monthlyUnitCount: 0, recognizedCommissionWon: 0, paidCommissionWon: 0 });
+    cumUnits.set(m.id, 0);
+    monUnits.set(m.id, 0);
+    baseById.set(m.id, 0);
+    rollupById.set(m.id, 0);
+    bonusById.set(m.id, 0);
   }
 
-  const { directAll, directMonthly, monthlyContracts } = computeDirectUnits(
-    contracts,
-    settlementWindow.start_date,
-    settlementWindow.end_date,
-  );
-
-  // 1) 구좌(누적/월) = 본인 direct + 하위 subtree 합산
-  postOrderAggregateUnits(roots as any[], directAll, directMonthly, metrics);
-
-  // 2) 인정수당/실지급액(월 기준) — 계약 단위로 경로를 따라 배분
-  const refDate = `${settlementWindow.label_year_month}-01`;
-
-  for (const c of monthlyContracts) {
+  // 1) 구좌(누적/월): 계약 단위로 effective 체인을 따라 상위에도 누적
+  for (const c of contracts) {
     const origin = c.sales_member_id;
     if (!origin) continue;
     const unit = c.unit_count ?? 0;
     if (unit <= 0) continue;
-    const hasItemPenalty = (c.item_name ?? '').trim() === COMMISSION_PENALTY_ITEM_NAME;
+    const jd = c.join_date.slice(0, 10);
+    if (!jd || jd > endInclusive) continue;
 
-    const originRank = rankById.get(origin);
-    if (!originRank) continue;
+    const inMonth = inWindow(jd, settlementWindow.start_date, settlementWindow.end_date);
+    cumUnits.set(origin, (cumUnits.get(origin) ?? 0) + unit);
+    if (inMonth) monUnits.set(origin, (monUnits.get(origin) ?? 0) + unit);
 
-    // 수당 계산은 “본사 제외 체인”으로 수행
-    const ancestors = getCommissionAncestorsExcludingHq(origin, parentByChild, rankById);
-
-    // 2-1) 인정수당
-    // - direct upper(본사 제외)이 있으면 그 노드가 인정수당 대상
-    // - 없으면(즉 본사 직속/루트라인) 본인이 최상위 사원으로 간주되어 인정수당을 받는다
-    const directUplineId = ancestors[0] ?? null;
-    const recognizedRecipientId = directUplineId ?? origin;
-    const recognizedDbRank = directUplineId ? rankById.get(directUplineId) : originRank;
-    if (recognizedDbRank) {
-      const recognizedEffectiveRank = effectiveRankForContract({
-        memberId: recognizedRecipientId,
-        dbRank: recognizedDbRank,
-        contract: { id: c.contract_id, join_date: c.join_date },
-        promotionThresholdByMemberId,
-      });
-      const rate = getCommissionPerUnit(rules, recognizedEffectiveRank, refDate);
-      if (rate > 0) {
-        const prev = metrics.get(recognizedRecipientId)!;
-        prev.recognizedCommissionWon += rate * unit;
-      }
-    }
-    if (hasItemPenalty) {
-      const prev = metrics.get(recognizedRecipientId);
-      if (prev) prev.recognizedCommissionWon -= COMMISSION_PENALTY_WON;
-    }
-
-    // 2-2) 실지급액
-    // - 리더 이상이 있으면 “가장 높은(루트에 가까운) 리더 이상”에게 귀속
-    // - 리더 이상이 없으면 “본사 제외 체인에서의 최상위 사원(영업사원)”에게 귀속
-    let highestLeaderId: string | null = null;
-    let topSalespersonId: string | null = null;
-    for (const id of ancestors) {
-      const r = rankById.get(id);
-      if (!r) continue;
-      if (r === '영업사원') topSalespersonId = id;
-      if (isLeaderOrAbove(r)) highestLeaderId = id;
-    }
-    // 본사 직속/루트라인 예외:
-    // - 상위 경로(본사 제외)에 리더 이상/영업사원이 전혀 없으면,
-    //   본인(리더/센터장/본부장/영업사원)이 “최상위 라인”이므로 실지급 귀속 대상이 된다.
-    if (!topSalespersonId && originRank === '영업사원') topSalespersonId = origin;
-
-    const payRecipientId =
-      highestLeaderId ??
-      topSalespersonId ??
-      (originRank !== '본사' ? origin : null);
-    if (payRecipientId) {
-      const payDbRank = rankById.get(payRecipientId);
-      if (payDbRank) {
-        const payEffectiveRank = effectiveRankForContract({
-          memberId: payRecipientId,
-          dbRank: payDbRank,
-          contract: { id: c.contract_id, join_date: c.join_date },
-          promotionThresholdByMemberId,
-        });
-        const payRate = getCommissionPerUnit(rules, payEffectiveRank, refDate);
-        if (payRate > 0) {
-          const prev = metrics.get(payRecipientId)!;
-          prev.paidCommissionWon += payRate * unit;
-        }
-      }
-    }
-    if (hasItemPenalty && payRecipientId) {
-      const prev = metrics.get(payRecipientId);
-      if (prev) prev.paidCommissionWon -= COMMISSION_PENALTY_WON;
-    }
-
-    // 2-3) 차액 인정(override)
-    // 실지급 귀속 대상이 리더 이상이면, (실지급 대상 수당 - direct upper 수당)만큼 인정수당을 추가로 기록
-    // (본사 직속/루트라인처럼 direct upper가 없으면 차액 개념이 없으므로 스킵)
-    if (payRecipientId && directUplineId) {
-      const payDbRank = rankById.get(payRecipientId);
-      const directDbRank = rankById.get(directUplineId);
-      if (payDbRank && directDbRank) {
-        const payEffectiveRank = effectiveRankForContract({
-          memberId: payRecipientId,
-          dbRank: payDbRank,
-          contract: { id: c.contract_id, join_date: c.join_date },
-          promotionThresholdByMemberId,
-        });
-        const directEffectiveRank = effectiveRankForContract({
-          memberId: directUplineId,
-          dbRank: directDbRank,
-          contract: { id: c.contract_id, join_date: c.join_date },
-          promotionThresholdByMemberId,
-        });
-        if (!isLeaderOrAbove(payEffectiveRank)) continue;
-
-        const payRate = getCommissionPerUnit(rules, payEffectiveRank, refDate);
-        const directRate = getCommissionPerUnit(rules, directEffectiveRank, refDate);
-        const diff = Math.max(0, payRate - directRate);
-        if (diff > 0) {
-          const prev = metrics.get(payRecipientId)!;
-          prev.recognizedCommissionWon += diff * unit;
-        }
-      }
+    const contractKey = { id: c.contract_id, join_date: jd };
+    const visited = new Set<string>();
+    let cur = origin;
+    while (true) {
+      const p = effectiveParent(cur, contractKey);
+      if (!p) break;
+      if (visited.has(p)) break;
+      visited.add(p);
+      cumUnits.set(p, (cumUnits.get(p) ?? 0) + unit);
+      if (inMonth) monUnits.set(p, (monUnits.get(p) ?? 0) + unit);
+      cur = p;
     }
   }
 
-  // 3) 리더 유지 장려금(정산월 말일까지 산하 가입 누적 20구좌 유지) — 조직도 KPI에도 반영
-  // - 요구 기대값(예: +100만원)을 맞추기 위해 인정/실지급 모두에 1회성으로 더한다.
-  // - 대상: 정책 승격(threshold 존재)한 영업사원(또는 리더로 승격된 경우 포함)
+  // 2) 금액(월): 기본수당/롤업수당 (정산 재계산과 동일 규칙)
+  for (const c of contracts) {
+    const origin = c.sales_member_id;
+    if (!origin) continue;
+    const unit = c.unit_count ?? 0;
+    if (unit <= 0) continue;
+    const jd = c.join_date.slice(0, 10);
+    if (!inWindow(jd, settlementWindow.start_date, settlementWindow.end_date)) continue;
+
+    const contractKey = { id: c.contract_id, join_date: jd };
+    const originRate = getRate(origin, contractKey);
+
+    // 기본수당 귀속: 승격 전(승격 계약 포함)은 이전 리더에게 귀속(단가=영업사원), 승격 후만 본인
+    let baseRecipient = origin;
+    const prev = previousLeaderByPromotedMemberId?.get(origin) ?? null;
+    const th = promotionThresholdByMemberId.get(origin) ?? null;
+    if (prev && th && !isContractStrictlyAfterPromotionThreshold(jd, c.contract_id, th)) {
+      const prevRank = rankById.get(prev) ?? null;
+      if (prevRank === '리더') baseRecipient = prev;
+    }
+    baseById.set(baseRecipient, (baseById.get(baseRecipient) ?? 0) + originRate * unit);
+
+    // 롤업: effective parent 체인을 따라 (상위-하위) 차액을 상위에 적립
+    const visited = new Set<string>();
+    let childId = origin;
+    let childRate = originRate;
+    while (true) {
+      const parentId = effectiveParent(childId, contractKey);
+      if (!parentId) break;
+      if (visited.has(parentId)) break;
+      visited.add(parentId);
+      const parentDbRank = rankById.get(parentId);
+      if (!parentDbRank) break;
+      if (parentDbRank === '본사') break;
+      const parentRate = getRate(parentId, contractKey);
+      const diff = Math.max(0, parentRate - childRate);
+      if (diff > 0) rollupById.set(parentId, (rollupById.get(parentId) ?? 0) + diff * unit);
+      childId = parentId;
+      childRate = parentRate;
+    }
+  }
+
+  // 3) 유지장려(리더) — 정책 승격(threshold 존재) + 25일까지 20구좌 유지
   {
     const childrenByParent = buildChildrenByParentFromRows(treeRowsForThreshold);
-    const endInclusive = settlementWindow.end_date.slice(0, 10);
-
-    // 가입 계약 누적(정산월 말까지) 합산
     const joinUnitsBySalesMember = new Map<string, number>();
     for (const c of joinAttributed) {
       const jd = c.join_date.slice(0, 10);
@@ -412,23 +459,33 @@ export function calculateOrgNodeMetrics(params: {
     for (const m of members) {
       const th = promotionThresholdByMemberId.get(m.id) ?? null;
       if (!th) continue;
-
-      // 유지 장려금은 원칙적으로 "영업사원→리더 승격" 케이스에 해당하므로,
-      // DB가 리더여도 정책 승격으로 올라간 것으로 간주하여 포함한다.
       if (m.rank !== '영업사원' && m.rank !== '리더') continue;
+      const blocked = leaderMaintenanceBonusBlockedByMemberId?.get(m.id) ?? false;
+      if (blocked) continue;
 
       const subtree = collectSubtreeMemberIdsDownstream(m.id, childrenByParent);
       let sum = 0;
       for (const sid of subtree) sum += joinUnitsBySalesMember.get(sid) ?? 0;
       if (sum < 20) continue;
-
-      const prev = metrics.get(m.id);
-      if (!prev) continue;
-      prev.recognizedCommissionWon += LEADER_MAINTENANCE_BONUS_WON;
-      prev.paidCommissionWon += LEADER_MAINTENANCE_BONUS_WON;
+      bonusById.set(m.id, LEADER_MAINTENANCE_BONUS_WON);
     }
   }
 
-  return Object.fromEntries(metrics.entries());
+  const out = new Map<string, OrgNodeMetrics>();
+  for (const m of members) {
+    const base = baseById.get(m.id) ?? 0;
+    const roll = rollupById.get(m.id) ?? 0;
+    const bonus = bonusById.get(m.id) ?? 0;
+    const totalPaid = base + roll + bonus;
+    const recognized = (hasDownlineById.get(m.id) ?? false) ? roll : totalPaid;
+    out.set(m.id, {
+      cumulativeUnitCount: cumUnits.get(m.id) ?? 0,
+      monthlyUnitCount: monUnits.get(m.id) ?? 0,
+      recognizedCommissionWon: recognized,
+      paidCommissionWon: totalPaid,
+    });
+  }
+
+  return Object.fromEntries(out.entries());
 }
 

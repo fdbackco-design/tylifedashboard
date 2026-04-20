@@ -55,7 +55,7 @@ export default async function OrganizationPage({
 
   const { start_date, end_date, label_year_month } = getSettlementWindowSeoul();
 
-  const [membersRes, edgesRes, contractCountRes, lastSyncRes, contractsRes, kpiRes, rulesRes] =
+  const [membersRes, edgesRes, contractCountRes, lastSyncRes, contractsRes, kpiRes, rulesRes, promoEventsRes] =
     await Promise.all([
     db
       .from('organization_members')
@@ -80,6 +80,9 @@ export default async function OrganizationPage({
       .limit(20000),
     db.rpc('get_organization_kpis', { p_start_date: start_date, p_end_date: end_date }),
     db.from('settlement_rules').select('*'),
+    db
+      .from('leader_promotion_events')
+      .select('member_id, previous_parent_id, leader_maintenance_bonus_paid_year_month'),
   ]);
 
   // 안성준은 TY Life 시스템상 영업사원이지만 실제로는 본사(최상위)로 취급
@@ -509,11 +512,26 @@ export default async function OrganizationPage({
   // 수당(인정/실지급) parent 체인은 트리와 동일한 단일 parent(child_id UNIQUE)를 써야 한다.
   // 원본 edges 배열을 그대로 쓰면 동일 child에 대한 중복 행 때문에 마지막 행만 남아
   // (예: E2가 C2 산하인데 A2 직속으로 잘못 잡힘) 인정수당이 과대 계산될 수 있다.
+  const prevLeaderByPromotedMemberId = new Map<string, string | null>();
+  const leaderMaintBlockByMemberId = new Map<string, boolean>();
+  const policyPromotedMemberIdSet = new Set<string>();
+  for (const r of ((promoEventsRes.data ?? []) as any[])) {
+    const mid = r.member_id as string;
+    policyPromotedMemberIdSet.add(mid);
+    prevLeaderByPromotedMemberId.set(mid, (r.previous_parent_id ?? null) as string | null);
+    const paidYm = (r.leader_maintenance_bonus_paid_year_month ?? null) as string | null;
+    leaderMaintBlockByMemberId.set(mid, paidYm != null && paidYm !== label_year_month);
+  }
+
   const orgMetricsById = calculateOrgNodeMetrics({
     roots: tree,
     members,
     edges: dedupedEdges as { parent_id: string | null; child_id: string }[],
     treeRows,
+    previousLeaderByPromotedMemberId: prevLeaderByPromotedMemberId,
+    hqId: hqIdForTree,
+    leaderMaintenanceBonusBlockedByMemberId: leaderMaintBlockByMemberId,
+    policyPromotedMemberIdSet,
     contracts: kpiEligibleForMetrics,
     rules: (rulesRes.data ?? []) as any[],
     settlementWindow: { start_date, end_date, label_year_month },
