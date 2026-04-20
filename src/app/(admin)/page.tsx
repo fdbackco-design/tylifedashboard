@@ -77,29 +77,24 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
 
   const summaryCards = [
     {
-      label: `${agg.year_month} 누적 구좌 수`,
+      label: `${agg.year_month} 누적 신청 구좌 수`,
       value: `${agg.monthlyTotalSlots.total_units.toLocaleString()}구좌`,
-      hint: `${agg.month_window.start_date} ~ ${agg.month_window.end_date} (준비/대기/해약/가입/렌탈 미충족 포함)`,
+      hint: ``,
     },
     {
-      label: `전날(${agg.briefing.base_date_ymd}) 구좌 수`,
+      label: `전날(${agg.briefing.base_date_ymd}) 신청 구좌 수`,
       value: `${agg.dailyTotalSlots.total_units.toLocaleString()}구좌`,
-      hint: '준비/대기/해약/가입/렌탈 미충족 포함',
+      hint: '',
     },
     {
-      label: `${agg.year_month} 가입 구좌 수`,
+      label: `${agg.year_month} 가입완료 구좌 수`,
       value: `${agg.monthlyJoinedSlots.total_units.toLocaleString()}구좌`,
-      hint: `${agg.month_window.start_date} ~ ${agg.month_window.end_date} (가입기준 충족)`,
+      hint: ``,
     },
     {
       label: '총 누적 가입완료 구좌 수',
       value: `${agg.allTimeJoinedSlots.total_units.toLocaleString()}구좌`,
-      hint: '전체 기간 (가입기준 충족)',
-    },
-    {
-      label: `담당자 당 전날 영업 실적 합계`,
-      value: `${agg.dailyPerformanceByMember.total_units.toLocaleString()}구좌`,
-      hint: '담당자별 합산(= 전날 구좌 수) 기준',
+      hint: '',
     },
   ];
 
@@ -108,9 +103,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
       <header className="flex items-end justify-between gap-6">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">대시보드</h2>
-          <p className="text-sm text-gray-500 mt-1">
-            핵심 숫자 → 상세 원인 → 아침 브리핑 순으로 확인하세요. (브리핑 기준: 매일 10시, 전날 데이터)
-          </p>
+          
         </div>
         <div className="text-xs text-gray-500 text-right">
           <div>브리핑 생성일: {agg.briefing.run_date_ymd}</div>
@@ -155,7 +148,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
       </div>
 
       {/* 3) 하단: 텍스트 브리핑 박스 */}
-      <SectionCard title="아침 브리핑 (복붙용)" subtitle="그대로 복사해서 공유할 수 있는 텍스트">
+      <SectionCard title="아침 브리핑 (복붙용)" subtitle="그대로 복사해서 공유">
         <div className="grid grid-cols-1 gap-3">
           <textarea
             className="w-full min-h-[320px] resize-y rounded-lg border border-gray-200 bg-gray-50 p-4 font-mono text-xs leading-5 text-gray-900"
@@ -163,7 +156,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
             value={agg.briefing.text}
           />
           <p className="text-xs text-gray-500">
-            브리핑은 “오늘(서울) 10시 기준 전날 데이터” 형태로 작성됩니다. (현재 기준일: {agg.briefing.base_date_ymd})
+            브리핑은 {agg.briefing.base_date_ymd} 기준입니다.
           </p>
         </div>
       </SectionCard>
