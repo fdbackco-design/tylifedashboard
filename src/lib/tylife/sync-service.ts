@@ -38,6 +38,12 @@ import type { ContractInsert } from '../types/contract';
 import { buildPerformancePath } from '../organization/performance-path';
 import { resolveSalesMemberByNameOnly } from './sales-resolution';
 import { resolveContractorByNameOnly } from './contractor-resolution';
+import { buildSettlementTreeRows } from '../settlement/settlement-org-tree';
+import {
+  computeSalesMemberPromotionThreshold,
+  type AttributedJoinContractRow,
+} from '../settlement/leader-promotion';
+import type { RankType } from '../types/organization';
 
 function shouldExcludeRecruitmentName(name: string, relationship: string): boolean {
   const n = name.trim();
@@ -912,6 +918,107 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
 
       if (!pageResult.hasMore) break;
       page++;
+    }
+
+    // 승격 반영: 산하 '가입' 누적 20구좌 달성한 영업사원 → 리더 (DB rank 업데이트)
+    // - 승격 기준은 날짜가 아니라 "누적 20이 되는 승격 계약" 단위로 계산됨.
+    // - 여기서는 UI/조직도에서도 일관되게 보이도록 DB rank를 올린다(요구사항).
+    if (!dryRun) {
+      try {
+        const [membersRes, edgesRes, joinContractsRes] = await Promise.all([
+          db
+            .from('organization_members')
+            .select('id, name, rank, external_id, source_customer_id')
+            .eq('is_active', true),
+          db.from('organization_edges').select('parent_id, child_id'),
+          db
+            .from('contracts')
+            .select('id, join_date, unit_count, sales_member_id, customer_id, sales_link_status, status, is_cancelled')
+            .eq('status', '가입')
+            .eq('is_cancelled', false),
+        ]);
+
+        if (membersRes.error) throw new Error(`조직원 조회 실패: ${membersRes.error.message}`);
+        if (joinContractsRes.error) throw new Error(`가입 계약 조회 실패: ${joinContractsRes.error.message}`);
+
+        const membersRaw = ((membersRes.data ?? []) as any[]).map((m) =>
+          m.name === '안성준' ? { ...m, rank: '본사' as const } : m,
+        ) as Array<{
+          id: string;
+          name: string;
+          rank: RankType;
+          external_id?: string | null;
+          source_customer_id?: string | null;
+        }>;
+
+        const edgesRaw = (edgesRes.data ?? []) as Array<{ parent_id: string | null; child_id: string }>;
+
+        // customer_id → 조직원 id 매핑(정산 계산과 동일)
+        const memberIdByCustomerId = new Map<string, string>();
+        for (const m of membersRaw as any[]) {
+          const sid = (m.source_customer_id ?? null) as string | null;
+          if (sid && m.rank !== '본사') {
+            memberIdByCustomerId.set(sid, m.id as string);
+            continue;
+          }
+          const ext = (m.external_id ?? null) as string | null;
+          if (ext && ext.startsWith('customer:') && m.rank !== '본사') {
+            const customerId = ext.slice('customer:'.length);
+            if (!memberIdByCustomerId.has(customerId)) memberIdByCustomerId.set(customerId, m.id as string);
+          }
+        }
+
+        const joinAttributed: AttributedJoinContractRow[] = [];
+        for (const row of (joinContractsRes.data ?? []) as any[]) {
+          if ((row.sales_link_status ?? 'linked') !== 'linked') continue;
+          if (!row.sales_member_id) continue;
+          let sid = row.sales_member_id as string;
+          const cid = row.customer_id as string | null;
+          if (cid) {
+            const mapped = memberIdByCustomerId.get(cid);
+            if (mapped) sid = mapped;
+          }
+          joinAttributed.push({
+            id: row.id,
+            join_date: String(row.join_date ?? '').slice(0, 10),
+            unit_count: row.unit_count ?? 0,
+            sales_member_id: sid,
+          });
+        }
+
+        const treeRows = buildSettlementTreeRows(
+          membersRaw as Array<{ id: string; name: string; rank: RankType; source_customer_id?: string | null }>,
+          edgesRaw,
+        );
+
+        const rankById = new Map<string, RankType>();
+        for (const m of membersRaw) rankById.set(m.id as string, m.rank as RankType);
+
+        const promotionThresholdByMemberId = computeSalesMemberPromotionThreshold(
+          treeRows,
+          joinAttributed,
+          rankById,
+        );
+
+        const toPromote: string[] = [];
+        for (const m of membersRaw) {
+          if (m.rank !== '영업사원') continue;
+          const th = promotionThresholdByMemberId.get(m.id) ?? null;
+          if (th) toPromote.push(m.id);
+        }
+
+        if (toPromote.length > 0) {
+          const { error: upErr } = await db
+            .from('organization_members')
+            .update({ rank: '리더' })
+            .in('id', toPromote)
+            .eq('rank', '영업사원'); // 안전장치: 상위직급 덮어쓰기 방지
+          if (upErr) throw new Error(`승격 반영 실패: ${upErr.message}`);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        await log(db, runId, 'warn', `승격 반영 단계 실패(동기화는 완료 처리): ${message}`);
+      }
     }
 
     await db
