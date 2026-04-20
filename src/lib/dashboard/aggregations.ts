@@ -285,10 +285,6 @@ export async function buildDashboardAggregations(opts: {
     `2. ${year_month} 누적 가입 완료자 [${monthlyJoinedSlots.total_units}구좌]`,
     monthlyJoinedSlots.rows.length ? formatBriefingLines(monthlyJoinedSlots.rows) : '(데이터 없음)',
     '',
-    '설명:',
-    '- "당일 가입자"는 전날 하루 동안의 계약 상태가 준비, 대기, 해약, 가입, 렌탈 미충족 모두 포함된 구좌',
-    `- "${year_month} 누적 가입 완료자"는 당월(${month_window.start_date} ~ ${month_window.end_date}) 중 가입기준을 만족한 누적 구좌`,
-    '- 각 줄 형식: (상위조직명) 담당자명 [n구좌]',
   ].join('\n');
 
   return {
