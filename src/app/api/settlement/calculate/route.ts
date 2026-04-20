@@ -80,6 +80,18 @@ async function calculateMonthlySettlement(
 
   if (cErr) throw new Error(`계약 조회 실패: ${cErr.message}`);
 
+  // v_contract_settlement_base는 contract_id 컬럼을 사용한다.
+  // 정산 계산 로직은 Contract.id를 사용하므로, 런타임에서 id가 undefined가 되지 않도록 정규화한다.
+  const normalizedContracts = ((contracts ?? []) as any[]).map((r) => ({
+    id: String(r.contract_id ?? ''),
+    contract_code: String(r.contract_code ?? ''),
+    join_date: String(r.join_date ?? '').slice(0, 10),
+    unit_count: Number(r.unit_count ?? 0),
+    status: String(r.status ?? ''),
+    is_cancelled: Boolean(r.is_cancelled ?? false),
+    sales_member_id: (r.sales_member_id ?? null) as string | null,
+  }));
+
   // 2. 정산 규칙 조회
   const { data: rules, error: rErr } = await db
     .from('settlement_rules')
@@ -175,7 +187,7 @@ async function calculateMonthlySettlement(
 
   // 4. 멤버별 계약 맵 구성
   const contractsByMember = new Map<string, Contract[]>();
-  for (const c of (contracts ?? []) as Contract[]) {
+  for (const c of normalizedContracts as any[]) {
     if (!c.sales_member_id) continue;
     const arr = contractsByMember.get(c.sales_member_id) ?? [];
     arr.push(c);
