@@ -156,24 +156,24 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
       {/* 2) 중단: 상세 데이터 테이블 */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
         <SectionCard
-          title={`${agg.year_month} 누적 구좌 수`}
+          title={`${agg.year_month} 누적 신청 구좌 수`}
           subtitle={`${agg.month_window.start_date} ~ ${agg.month_window.end_date} (상태 전체 포함)`}
         >
           <DataTable rows={agg.monthlyTotalSlots.rows} />
         </SectionCard>
 
-        <SectionCard title={`전날(${agg.briefing.base_date_ymd}) 구좌 수`} subtitle="상태 전체 포함">
+        <SectionCard title={`전날(${agg.briefing.base_date_ymd}) 신청 구좌 수`} subtitle="상태 전체 포함">
           <DataTable rows={agg.dailyTotalSlots.rows} />
         </SectionCard>
 
         <SectionCard
-          title={`${agg.year_month} 가입 구좌 수`}
+          title={`${agg.year_month} 가입완료 구좌 수`}
           subtitle={`${agg.month_window.start_date} ~ ${agg.month_window.end_date} (가입기준 충족)`}
         >
           <DataTable rows={agg.monthlyJoinedSlots.rows} />
         </SectionCard>
 
-        <SectionCard title="총 누적 가입완료 구좌 수" subtitle="전체 기간 (가입기준 충족)">
+        <SectionCard title="전체 누적 가입완료 구좌 수" subtitle="전체 기간 (가입기준 충족)">
           <DataTable rows={agg.allTimeJoinedSlots.rows} />
         </SectionCard>
 
