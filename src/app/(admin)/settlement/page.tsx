@@ -282,7 +282,6 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       const lp = detail?.leader_promotion ?? null;
       const base = zeroOut ? 0 : (s.base_commission as number) ?? 0;
       const rollup = zeroOut ? 0 : (s.rollup_commission as number) ?? 0;
-      const ruleIncentive = zeroOut ? 0 : lp?.rule_incentive_amount ?? 0;
       const leaderMaint = zeroOut ? 0 : lp?.leader_maintenance_bonus_amount ?? 0;
       const total = zeroOut ? 0 : (s.total_amount as number) ?? 0;
       return {
@@ -292,7 +291,6 @@ export default async function SettlementPage({ searchParams }: PageProps) {
         zeroOut,
         base,
         rollup,
-        ruleIncentive,
         leaderMaint,
         total,
         direct,
@@ -316,7 +314,6 @@ export default async function SettlementPage({ searchParams }: PageProps) {
           topRank: rankByIdForTree.get(topLineId) ?? (r.s.rank as RankType),
           base: 0,
           rollup: 0,
-          ruleIncentive: 0,
           leaderMaint: 0,
           total: 0,
           direct_contract_ids: new Set<string>(),
@@ -325,7 +322,6 @@ export default async function SettlementPage({ searchParams }: PageProps) {
 
         prev.base += r.base;
         prev.rollup += r.rollup;
-        prev.ruleIncentive += r.ruleIncentive;
         prev.leaderMaint += r.leaderMaint;
         prev.total += r.total;
 
@@ -343,7 +339,6 @@ export default async function SettlementPage({ searchParams }: PageProps) {
           topRank: RankType;
           base: number;
           rollup: number;
-          ruleIncentive: number;
           leaderMaint: number;
           total: number;
           direct_contract_ids: Set<string>;
@@ -493,7 +488,6 @@ export default async function SettlementPage({ searchParams }: PageProps) {
                   '산하구좌',
                   '기본수당',
                   '롤업수당',
-                  '규칙장려금',
                   '유지장려(리더)',
                   '합계',
                   '확정',
@@ -510,7 +504,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
             <tbody className="divide-y divide-gray-100">
               {(settlements ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={13} className="px-6 py-10 text-center">
+                  <td colSpan={12} className="px-6 py-10 text-center">
                     <p className="text-gray-500 font-medium mb-2">{yearMonth} 정산 데이터가 없습니다.</p>
                     {allContractsCount === 0 ? (
                       <p className="text-xs text-gray-400">
@@ -564,9 +558,6 @@ export default async function SettlementPage({ searchParams }: PageProps) {
                     <td className="px-4 py-3 tabular-nums text-right text-gray-700">
                       {formatKRW(r.rollup)}
                     </td>
-                    <td className="px-4 py-3 tabular-nums text-right text-indigo-700">
-                      {formatKRW(r.ruleIncentive)}
-                    </td>
                     <td className="px-4 py-3 tabular-nums text-right text-violet-700">
                       {formatKRW(r.leaderMaint)}
                     </td>
@@ -601,16 +592,6 @@ export default async function SettlementPage({ searchParams }: PageProps) {
                         if (isHiddenMember(r)) return sum;
                         if (isZeroOutMember(r)) return sum;
                         return sum + ((r.rollup_commission as number) ?? 0);
-                      }, 0),
-                    )}
-                  </td>
-                  <td className="px-4 py-3 tabular-nums text-right font-semibold text-indigo-700">
-                    {formatKRW(
-                      (settlements ?? []).reduce((sum, r) => {
-                        if (isHiddenMember(r)) return sum;
-                        if (isZeroOutMember(r)) return sum;
-                        const d = r.calculation_detail as SettlementCalculationDetail | null;
-                        return sum + (d?.leader_promotion?.rule_incentive_amount ?? 0);
                       }, 0),
                     )}
                   </td>
