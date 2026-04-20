@@ -2,6 +2,13 @@ import type { RankType, OrganizationMember, OrganizationEdge } from '@/lib/types
 import type { SettlementRule } from '@/lib/types/settlement';
 import { findActiveRule } from '@/lib/settlement/calculator';
 import { DEFAULT_COMMISSION_BY_RANK } from '@/lib/settlement/constants';
+import type { OrgTreeRow } from '@/lib/types';
+import {
+  computeSalesMemberPromotionThreshold,
+  isContractAtOrAfterPromotionThreshold,
+  type AttributedJoinContractRow,
+  type SalesMemberPromotionThreshold,
+} from '@/lib/settlement/leader-promotion';
 
 export type OrgNodeMetrics = {
   cumulativeUnitCount: number;
@@ -50,6 +57,43 @@ function buildParentMap(edges: { parent_id: string | null; child_id: string }[])
   const m = new Map<string, string | null>();
   for (const e of edges) m.set(e.child_id, e.parent_id);
   return m;
+}
+
+function buildTreeRowsForPromotionThreshold(params: {
+  members: Pick<OrganizationMember, 'id' | 'rank'>[];
+  edges: Pick<OrganizationEdge, 'parent_id' | 'child_id'>[];
+}): OrgTreeRow[] {
+  const parentByChild = buildParentMap(params.edges as any);
+  return params.members.map((m) => ({
+    id: m.id,
+    name: m.id, // threshold 계산에는 name이 필요 없음
+    rank: m.rank,
+    parent_id: parentByChild.get(m.id) ?? null,
+    depth: 0,
+  }));
+}
+
+function effectiveRankForContract(params: {
+  memberId: string;
+  dbRank: RankType;
+  contract: { id: string; join_date: string };
+  promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>;
+}): RankType {
+  // 본사는 수당 대상이 아님(상위 로직에서 0 처리)
+  if (params.dbRank === '본사') return '본사';
+
+  // 정책 승격/유지 로직은 영업사원 ↔ 리더 범위에서만 의미가 있다.
+  if (params.dbRank !== '영업사원' && params.dbRank !== '리더') return params.dbRank;
+
+  const th = params.promotionThresholdByMemberId.get(params.memberId) ?? null;
+  if (!th) {
+    // DB가 리더여도 threshold가 없으면(예: 기존 리더/다른 사유) 리더로 취급한다.
+    return params.dbRank;
+  }
+
+  // threshold가 존재하면, 계약 단위로 승격 전/후를 구분한다.
+  const atOrAfter = isContractAtOrAfterPromotionThreshold(params.contract.join_date, params.contract.id, th);
+  return atOrAfter ? '리더' : '영업사원';
 }
 
 function computeDirectUnits(
@@ -150,6 +194,32 @@ export function calculateOrgNodeMetrics(params: {
   const rankById = new Map<string, RankType>();
   for (const m of members) rankById.set(m.id, m.rank);
 
+  // 정책 승격(산하 가입 누적 20구좌) 기준을 조직도 KPI에도 동일 적용:
+  // - DB rank가 리더로 올라가 있어도, 승격 계약 이전 계약은 영업사원 단가로 계산되어야 한다.
+  // - threshold 계산에는 "가입 인정 계약" 전체를 사용(월 구간 외 과거 누적 포함)
+  const treeRowsForThreshold = buildTreeRowsForPromotionThreshold({ members, edges });
+  const rankByIdForThreshold = new Map<string, RankType>();
+  for (const m of members) {
+    // 리더도 threshold 계산 대상에 포함시키기 위해(정책 승격으로 올라간 경우),
+    // 임시로 영업사원으로 취급해 threshold를 계산한다.
+    // (센터장 이상은 정책 승격 범위 밖이므로 그대로 둔다.)
+    rankByIdForThreshold.set(m.id, m.rank === '리더' ? '영업사원' : m.rank);
+  }
+  const joinAttributed: AttributedJoinContractRow[] = (contracts ?? [])
+    .filter((c) => (c.status ?? '').trim() === '가입')
+    .filter((c) => !!c.sales_member_id)
+    .map((c) => ({
+      id: c.contract_id,
+      join_date: c.join_date.slice(0, 10),
+      unit_count: c.unit_count ?? 0,
+      sales_member_id: c.sales_member_id as string,
+    }));
+  const promotionThresholdByMemberId = computeSalesMemberPromotionThreshold(
+    treeRowsForThreshold,
+    joinAttributed,
+    rankByIdForThreshold,
+  );
+
   const metrics = new Map<string, OrgNodeMetrics>();
   for (const m of members) {
     metrics.set(m.id, { cumulativeUnitCount: 0, monthlyUnitCount: 0, recognizedCommissionWon: 0, paidCommissionWon: 0 });
@@ -185,9 +255,15 @@ export function calculateOrgNodeMetrics(params: {
     // - 없으면(즉 본사 직속/루트라인) 본인이 최상위 사원으로 간주되어 인정수당을 받는다
     const directUplineId = ancestors[0] ?? null;
     const recognizedRecipientId = directUplineId ?? origin;
-    const recognizedRank = directUplineId ? rankById.get(directUplineId) : originRank;
-    if (recognizedRank) {
-      const rate = getCommissionPerUnit(rules, recognizedRank, refDate);
+    const recognizedDbRank = directUplineId ? rankById.get(directUplineId) : originRank;
+    if (recognizedDbRank) {
+      const recognizedEffectiveRank = effectiveRankForContract({
+        memberId: recognizedRecipientId,
+        dbRank: recognizedDbRank,
+        contract: { id: c.contract_id, join_date: c.join_date },
+        promotionThresholdByMemberId,
+      });
+      const rate = getCommissionPerUnit(rules, recognizedEffectiveRank, refDate);
       if (rate > 0) {
         const prev = metrics.get(recognizedRecipientId)!;
         prev.recognizedCommissionWon += rate * unit;
@@ -219,9 +295,15 @@ export function calculateOrgNodeMetrics(params: {
       topSalespersonId ??
       (originRank !== '본사' ? origin : null);
     if (payRecipientId) {
-      const payRank = rankById.get(payRecipientId);
-      if (payRank) {
-        const payRate = getCommissionPerUnit(rules, payRank, refDate);
+      const payDbRank = rankById.get(payRecipientId);
+      if (payDbRank) {
+        const payEffectiveRank = effectiveRankForContract({
+          memberId: payRecipientId,
+          dbRank: payDbRank,
+          contract: { id: c.contract_id, join_date: c.join_date },
+          promotionThresholdByMemberId,
+        });
+        const payRate = getCommissionPerUnit(rules, payEffectiveRank, refDate);
         if (payRate > 0) {
           const prev = metrics.get(payRecipientId)!;
           prev.paidCommissionWon += payRate * unit;
@@ -237,11 +319,25 @@ export function calculateOrgNodeMetrics(params: {
     // 실지급 귀속 대상이 리더 이상이면, (실지급 대상 수당 - direct upper 수당)만큼 인정수당을 추가로 기록
     // (본사 직속/루트라인처럼 direct upper가 없으면 차액 개념이 없으므로 스킵)
     if (payRecipientId && directUplineId) {
-      const payRank = rankById.get(payRecipientId);
-      const directRank = rankById.get(directUplineId);
-      if (payRank && directRank && isLeaderOrAbove(payRank)) {
-        const payRate = getCommissionPerUnit(rules, payRank, refDate);
-        const directRate = getCommissionPerUnit(rules, directRank, refDate);
+      const payDbRank = rankById.get(payRecipientId);
+      const directDbRank = rankById.get(directUplineId);
+      if (payDbRank && directDbRank) {
+        const payEffectiveRank = effectiveRankForContract({
+          memberId: payRecipientId,
+          dbRank: payDbRank,
+          contract: { id: c.contract_id, join_date: c.join_date },
+          promotionThresholdByMemberId,
+        });
+        const directEffectiveRank = effectiveRankForContract({
+          memberId: directUplineId,
+          dbRank: directDbRank,
+          contract: { id: c.contract_id, join_date: c.join_date },
+          promotionThresholdByMemberId,
+        });
+        if (!isLeaderOrAbove(payEffectiveRank)) continue;
+
+        const payRate = getCommissionPerUnit(rules, payEffectiveRank, refDate);
+        const directRate = getCommissionPerUnit(rules, directEffectiveRank, refDate);
         const diff = Math.max(0, payRate - directRate);
         if (diff > 0) {
           const prev = metrics.get(payRecipientId)!;
