@@ -124,6 +124,10 @@ async function calculateMonthlySettlement(
   const hqIdsRaw = new Set(
     membersRaw.filter((m) => m.name === '안성준' || m.rank === '본사').map((m) => m.id as string),
   );
+  const hqIdForReparent =
+    membersRaw.find((m) => m.name === '안성준')?.id ??
+    membersRaw.find((m) => (m.rank as RankType) === '본사')?.id ??
+    null;
 
   const memberIdByCustomerId = new Map<string, string>();
   for (const m of membersRaw as any[]) {
@@ -236,10 +240,23 @@ async function calculateMonthlySettlement(
   // DB rank를 리더로 올려 화면/조직도에서도 일관되게 보이도록 한다.
   {
     const toPromote: string[] = [];
+    const toReparentToHq: string[] = [];
+    const parentByChild = new Map<string, string | null>();
+    for (const e of edgesRaw) parentByChild.set(e.child_id, e.parent_id ?? null);
+    const rankByIdRaw = new Map<string, RankType>();
+    for (const m of membersRaw) rankByIdRaw.set(m.id as string, m.rank as RankType);
+
     for (const m of membersRaw) {
       if ((m.rank as RankType) !== '영업사원') continue;
       const th = promotionThresholdByMemberId.get(m.id as string) ?? null;
       if (th) toPromote.push(m.id as string);
+
+      // 추가 규칙: 기존 상위가 리더인 영업사원이 정책 승격하면 본사 직속으로 재배치
+      if (th) {
+        const parentId = parentByChild.get(m.id as string) ?? null;
+        const parentRank = parentId ? (rankByIdRaw.get(parentId) ?? null) : null;
+        if (parentId && parentRank === '리더') toReparentToHq.push(m.id as string);
+      }
     }
     if (toPromote.length > 0) {
       const { error: upErr } = await db
@@ -248,6 +265,16 @@ async function calculateMonthlySettlement(
         .in('id', toPromote)
         .eq('rank', '영업사원'); // 안전장치: 상위직급 덮어쓰기 방지
       if (upErr) throw new Error(`승격 반영 실패: ${upErr.message}`);
+    }
+
+    if (hqIdForReparent && toReparentToHq.length > 0) {
+      const { error: eErr } = await db
+        .from('organization_edges')
+        .upsert(
+          toReparentToHq.map((id) => ({ parent_id: hqIdForReparent, child_id: id })),
+          { onConflict: 'child_id' },
+        );
+      if (eErr) throw new Error(`승격자 본사 재배치 실패: ${eErr.message}`);
     }
   }
 

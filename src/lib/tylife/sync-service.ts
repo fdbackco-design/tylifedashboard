@@ -1001,10 +1001,27 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
         );
 
         const toPromote: string[] = [];
+        const toReparentToHq: string[] = [];
+        const parentByChild = new Map<string, string | null>();
+        for (const e of edgesRaw) parentByChild.set(e.child_id, e.parent_id ?? null);
+
+        const rankByIdRaw = new Map<string, RankType>();
+        for (const m of membersRaw) rankByIdRaw.set(m.id, m.rank);
+
         for (const m of membersRaw) {
           if (m.rank !== '영업사원') continue;
           const th = promotionThresholdByMemberId.get(m.id) ?? null;
           if (th) toPromote.push(m.id);
+
+          // 추가 규칙: 기존 상위가 리더인 상태에서 정책 승격되면 본사 직속으로 재배치
+          // (organization_edges: 기존 리더 -> 승격자 관계를 끊고, 본사 -> 승격자로 재연결)
+          if (th) {
+            const parentId = parentByChild.get(m.id) ?? null;
+            const parentRank = parentId ? (rankByIdRaw.get(parentId) ?? null) : null;
+            if (parentId && parentRank === '리더') {
+              toReparentToHq.push(m.id);
+            }
+          }
         }
 
         if (toPromote.length > 0) {
@@ -1014,6 +1031,20 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
             .in('id', toPromote)
             .eq('rank', '영업사원'); // 안전장치: 상위직급 덮어쓰기 방지
           if (upErr) throw new Error(`승격 반영 실패: ${upErr.message}`);
+        }
+
+        // 본사 직속 재배치 (추가 규칙)
+        if (toReparentToHq.length > 0) {
+          const hqId = await getHqMemberId(db);
+          if (hqId) {
+            const { error: eErr } = await db
+              .from('organization_edges')
+              .upsert(
+                toReparentToHq.map((id) => ({ parent_id: hqId, child_id: id })),
+                { onConflict: 'child_id' },
+              );
+            if (eErr) throw new Error(`승격자 본사 재배치 실패: ${eErr.message}`);
+          }
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

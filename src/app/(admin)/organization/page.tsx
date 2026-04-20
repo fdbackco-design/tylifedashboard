@@ -14,6 +14,10 @@ import {
 import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
 import type { ContractItem } from '@/components/org-tree/OrgTreeNode';
 import type { OrgTreeRow, OrganizationMember } from '@/lib/types';
+import {
+  computeSalesMemberPromotionThreshold,
+  type AttributedJoinContractRow,
+} from '@/lib/settlement/leader-promotion';
 import SyncButton from './SyncButton';
 
 export const metadata: Metadata = { title: '조직도' };
@@ -220,7 +224,7 @@ export default async function OrganizationPage({
   const hqIdForTree =
     members.find((m: any) => m.name === '안성준')?.id ?? (hqIdsRaw.values().next().value ?? null);
 
-  const treeRows: OrgTreeRow[] = members.map((m: any) => ({
+  const treeRowsBase: OrgTreeRow[] = members.map((m: any) => ({
     id: m.id,
     name: m.name,
     rank: m.rank,
@@ -256,6 +260,70 @@ export default async function OrganizationPage({
     sales_link_status?: string | null;
     customers: { name: string; phone: string | null } | null;
   }>;
+
+  // ── 정책 승격(산하 가입 누적 20구좌)으로 "본사 직속 재배치"를 조직도 UI에도 즉시 반영 ──
+  // - 동기화/정산 재계산을 안 돌려도, 조직도 페이지에서 승격 조건을 만족하면 본사 직속으로 보이게 한다.
+  // - 단, DB organization_edges는 여기서 변경하지 않고(페이지 렌더는 읽기 전용 유지),
+  //   트리 구성 시에만 parent를 오버라이드한다.
+  const rankByIdForThreshold = new Map<string, any>();
+  for (const m of members as any[]) {
+    // threshold 계산은 영업사원만 대상으로 하므로, '리더'도 임시로 영업사원 취급(정책 승격 후 rank가 올라간 경우 대비)
+    rankByIdForThreshold.set(m.id as string, (m.rank === '리더' ? '영업사원' : m.rank) as any);
+  }
+  const joinAttributedForThreshold: AttributedJoinContractRow[] = rawContractRows
+    .filter((c) => (c.sales_link_status ?? 'linked') === 'linked')
+    .filter((c) => !c.is_cancelled)
+    .filter((c) =>
+      isContractJoinCompleted({
+        status: c.status,
+        rental_request_no: c.rental_request_no ?? null,
+        invoice_no: c.invoice_no ?? null,
+        memo: c.memo ?? null,
+      }),
+    )
+    .map((c) => ({
+      id: c.id,
+      join_date: String(c.join_date ?? '').slice(0, 10),
+      unit_count: c.unit_count ?? 0,
+      // 조직도와 동일한 귀속 정책(고객 노드 치환/HQ 치환 등) 반영
+      sales_member_id: remapMemberId(
+        mapSalesMemberForOrg({
+          sales_member_id: c.sales_member_id,
+          customer_id: c.customer_id,
+          status: c.status,
+          rental_request_no: c.rental_request_no ?? null,
+          invoice_no: c.invoice_no ?? null,
+          memo: c.memo ?? null,
+          customer_phone: c.customers?.phone ?? null,
+          contract_code: c.contract_code,
+          customer_name: c.customers?.name ?? '',
+        }),
+      ),
+    }));
+
+  const promotionThresholdByMemberId = computeSalesMemberPromotionThreshold(
+    treeRowsBase,
+    joinAttributedForThreshold,
+    rankByIdForThreshold as any,
+  );
+
+  const rankByIdRaw = new Map<string, string>();
+  for (const m of members as any[]) rankByIdRaw.set(m.id as string, String(m.rank));
+
+  const treeRows: OrgTreeRow[] = treeRowsBase.map((r) => {
+    if (r.rank === '본사') return r;
+    const th = promotionThresholdByMemberId.get(r.id) ?? null;
+    if (!th || !hqIdForTree) return r;
+
+    // 추가 규칙(UI 반영): 현재 parent가 리더이면, 정책 승격 시 본사 직속으로 보이게 한다.
+    const curParent = r.parent_id ?? null;
+    const curParentRank = curParent ? (rankByIdRaw.get(curParent) ?? null) : null;
+    if (curParent && curParentRank === '리더') {
+      return { ...r, parent_id: hqIdForTree, rank: '리더' as any };
+    }
+    // 승격자는 조직도 배지/정렬에서도 리더로 보이게(요구: 원본 rank가 아니라 effective rank 반영)
+    return { ...r, rank: '리더' as any };
+  });
 
   // 예외 규칙(최종):
   // "안성준(본사) 담당 + 가입 인정 기준" 계약은 동기화 단계에서
