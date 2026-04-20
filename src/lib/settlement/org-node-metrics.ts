@@ -5,10 +5,13 @@ import { DEFAULT_COMMISSION_BY_RANK } from '@/lib/settlement/constants';
 import type { OrgTreeRow } from '@/lib/types';
 import {
   computeSalesMemberPromotionThreshold,
-  isContractAtOrAfterPromotionThreshold,
   type AttributedJoinContractRow,
   type SalesMemberPromotionThreshold,
 } from '@/lib/settlement/leader-promotion';
+import {
+  buildChildrenByParentFromRows,
+  collectSubtreeMemberIdsDownstream,
+} from '@/lib/settlement/settlement-org-tree';
 
 export type OrgNodeMetrics = {
   cumulativeUnitCount: number;
@@ -30,6 +33,7 @@ type EligibleContract = {
 const LEADER_OR_ABOVE: readonly RankType[] = ['리더', '센터장', '사업본부장'];
 const COMMISSION_PENALTY_ITEM_NAME = '아이클레보 V1000 펫버틀러';
 const COMMISSION_PENALTY_WON = 50_000;
+const LEADER_MAINTENANCE_BONUS_WON = 1_000_000;
 
 function isLeaderOrAbove(rank: RankType): boolean {
   return (LEADER_OR_ABOVE as readonly string[]).includes(rank);
@@ -73,6 +77,20 @@ function buildTreeRowsForPromotionThreshold(params: {
   }));
 }
 
+function isContractStrictlyAfterPromotionThreshold(
+  contractJoinDate: string,
+  contractId: string,
+  threshold: SalesMemberPromotionThreshold | null,
+): boolean {
+  if (!threshold) return false;
+  const aj = contractJoinDate.slice(0, 10);
+  const tj = threshold.threshold_join_date;
+  if (aj > tj) return true;
+  if (aj < tj) return false;
+  // 같은 날짜면 "승격 계약 다음 계약"부터 적용 (승격 계약 자체는 승격 전으로 본다)
+  return contractId.localeCompare(threshold.threshold_contract_id) > 0;
+}
+
 function effectiveRankForContract(params: {
   memberId: string;
   dbRank: RankType;
@@ -92,8 +110,12 @@ function effectiveRankForContract(params: {
   }
 
   // threshold가 존재하면, 계약 단위로 승격 전/후를 구분한다.
-  const atOrAfter = isContractAtOrAfterPromotionThreshold(params.contract.join_date, params.contract.id, th);
-  return atOrAfter ? '리더' : '영업사원';
+  const after = isContractStrictlyAfterPromotionThreshold(
+    params.contract.join_date,
+    params.contract.id,
+    th,
+  );
+  return after ? '리더' : '영업사원';
 }
 
 function computeDirectUnits(
@@ -344,6 +366,44 @@ export function calculateOrgNodeMetrics(params: {
           prev.recognizedCommissionWon += diff * unit;
         }
       }
+    }
+  }
+
+  // 3) 리더 유지 장려금(정산월 말일까지 산하 가입 누적 20구좌 유지) — 조직도 KPI에도 반영
+  // - 요구 기대값(예: +100만원)을 맞추기 위해 인정/실지급 모두에 1회성으로 더한다.
+  // - 대상: 정책 승격(threshold 존재)한 영업사원(또는 리더로 승격된 경우 포함)
+  {
+    const childrenByParent = buildChildrenByParentFromRows(treeRowsForThreshold);
+    const endInclusive = settlementWindow.end_date.slice(0, 10);
+
+    // 가입 계약 누적(정산월 말까지) 합산
+    const joinUnitsBySalesMember = new Map<string, number>();
+    for (const c of joinAttributed) {
+      const jd = c.join_date.slice(0, 10);
+      if (jd > endInclusive) continue;
+      joinUnitsBySalesMember.set(
+        c.sales_member_id,
+        (joinUnitsBySalesMember.get(c.sales_member_id) ?? 0) + Math.max(0, c.unit_count ?? 0),
+      );
+    }
+
+    for (const m of members) {
+      const th = promotionThresholdByMemberId.get(m.id) ?? null;
+      if (!th) continue;
+
+      // 유지 장려금은 원칙적으로 "영업사원→리더 승격" 케이스에 해당하므로,
+      // DB가 리더여도 정책 승격으로 올라간 것으로 간주하여 포함한다.
+      if (m.rank !== '영업사원' && m.rank !== '리더') continue;
+
+      const subtree = collectSubtreeMemberIdsDownstream(m.id, childrenByParent);
+      let sum = 0;
+      for (const sid of subtree) sum += joinUnitsBySalesMember.get(sid) ?? 0;
+      if (sum < 20) continue;
+
+      const prev = metrics.get(m.id);
+      if (!prev) continue;
+      prev.recognizedCommissionWon += LEADER_MAINTENANCE_BONUS_WON;
+      prev.paidCommissionWon += LEADER_MAINTENANCE_BONUS_WON;
     }
   }
 
