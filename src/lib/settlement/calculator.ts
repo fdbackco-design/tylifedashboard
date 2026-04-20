@@ -394,11 +394,18 @@ export function calculateMemberSettlement(
   const directUnitCount = eligible.reduce((s, c) => s + c.unit_count, 0);
   const totalUnitCount = directUnitCount + subordinateUnitCount;
 
-  /** DB 규칙 기반 유지 장려금(리더·센터장 등). 영업사원+leaderOpts 시 리더 유지 보너스와 이중 적용 방지 위해 0 처리 */
+  /**
+   * DB settlement_rules 기반 장려(calcIncentive).
+   * - 영업사원: 정책 승격·유지장려(leaderMaintenanceBonus)와 이중 적용 방지 → 0
+   * - 리더이면서 정책 승격(threshold 존재): 동일 20구좌 유지 보상이 규칙장려·유지장려에 중복되므로 규칙장려는 0, 유지장려만 반영
+   * - 리더(기존 DB 리더 등, threshold 없음): 규칙장려만 사용
+   */
   const ruleIncentiveAmount =
     leaderOpts && member.rank === '영업사원'
       ? 0
-      : calcIncentive(rule, totalUnitCount);
+      : leaderOpts && member.rank === '리더' && thForMember !== null
+        ? 0
+        : calcIncentive(rule, totalUnitCount);
 
   let leaderMaintenanceBonus = 0;
   if (leaderOpts && (member.rank === '영업사원' || member.rank === '리더')) {
