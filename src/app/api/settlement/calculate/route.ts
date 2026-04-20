@@ -207,13 +207,16 @@ async function calculateMonthlySettlement(
     .select('member_id, previous_parent_id, leader_maintenance_bonus_paid_at');
   const prevParentByMemberId = new Map<string, string | null>();
   const leaderMaintPaidByMemberId = new Map<string, boolean>();
+  const prevLeaderByPromotedMemberId = new Map<string, string | null>();
   for (const r of (promoEvents ?? []) as any[]) {
     prevParentByMemberId.set(r.member_id as string, (r.previous_parent_id ?? null) as string | null);
+    prevLeaderByPromotedMemberId.set(r.member_id as string, (r.previous_parent_id ?? null) as string | null);
     leaderMaintPaidByMemberId.set(r.member_id as string, (r.leader_maintenance_bonus_paid_at ?? null) != null);
   }
 
   // leaderOpts에 1회성 지급 여부 전달
   leaderOpts.leaderMaintenanceBonusAlreadyPaidByMemberId = leaderMaintPaidByMemberId;
+  leaderOpts.previousLeaderByPromotedMemberId = prevLeaderByPromotedMemberId;
 
   for (const c of normalizedContracts as any[]) {
     const origin = (c.sales_member_id ?? null) as string | null;

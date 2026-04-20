@@ -226,6 +226,8 @@ export interface LeaderSettlementOpts {
   settlementEndDate: string;
   /** 리더 유지장려금(1회성) 지급 여부: 지급된 멤버는 해당 보너스를 다시 받지 않음 */
   leaderMaintenanceBonusAlreadyPaidByMemberId?: Map<string, boolean>;
+  /** 정책 승격자의 '승격 전 상위 리더' (재계산 안정화용) */
+  previousLeaderByPromotedMemberId?: Map<string, string | null>;
 }
 
 const LEADER_MAINTENANCE_BONUS_WON = 1_000_000;
@@ -288,6 +290,7 @@ function calcRollupItemsWithLeaderPromotion(
   rules: SettlementRule[],
   yearMonth: string,
   promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>,
+  previousLeaderByPromotedMemberId?: Map<string, string | null>,
 ): { items: RollupItem[]; total: number } {
   const refDate = monthEndDate(yearMonth);
   const items: RollupItem[] = [];
@@ -354,6 +357,53 @@ function calcRollupItemsWithLeaderPromotion(
     }
   }
 
+  // 승격 후 본사 직속으로 재배치된 멤버도, 승격 전 계약에 대해서는 "이전 리더"에게 롤업이 발생해야 한다.
+  // organization_edges는 현재 parent만 가지므로, 재계산을 여러 번 눌러도 결과가 변하지 않게
+  // previousLeaderByPromotedMemberId(이력)을 기반으로 추가 롤업 항목을 만든다.
+  if (previousLeaderByPromotedMemberId) {
+    for (const [promotedId, leaderId] of previousLeaderByPromotedMemberId) {
+      if (!leaderId || leaderId !== node.id) continue;
+      const th = promotionThresholdByMemberId.get(promotedId) ?? null;
+      if (!th) continue;
+      const all = contractsByMember.get(promotedId) ?? [];
+      const pre = all.filter((c) => !isContractStrictlyAfterPromotionThreshold(c.join_date, c.id, th));
+      const units = pre.reduce((s, c) => s + c.unit_count, 0);
+      if (units === 0) continue;
+
+      let subtotal = 0;
+      for (const c of pre) {
+        const upper = commissionPerUnitForDirectContract(
+          node.id,
+          node.rank,
+          { id: c.id, join_date: c.join_date },
+          rules,
+          refDate,
+          promotionThresholdByMemberId,
+        );
+        const lower = commissionPerUnitForDirectContract(
+          promotedId,
+          // 현재 DB rank가 리더로 바뀌었어도 threshold가 있으면 계약 단위로 30/40이 분기됨
+          '리더',
+          { id: c.id, join_date: c.join_date },
+          rules,
+          refDate,
+          promotionThresholdByMemberId,
+        );
+        subtotal += Math.max(0, upper - lower) * c.unit_count;
+      }
+      if (subtotal > 0) {
+        items.push({
+          from_member_id: promotedId,
+          from_member_name: '(승격자)',
+          from_rank: '영업사원',
+          unit_count: units,
+          rollup_amount_per_unit: units ? subtotal / units : 0,
+          subtotal,
+        });
+      }
+    }
+  }
+
   const total = items.reduce((s, i) => s + i.subtotal, 0);
   return { items, total };
 }
@@ -416,6 +466,7 @@ export function calculateMemberSettlement(
       rules,
       yearMonth,
       thresholdMap,
+      leaderOpts?.previousLeaderByPromotedMemberId,
     ));
   } else {
     ({ items: directItems, total: baseCommission } = calcDirectContracts(eligible, rule));
