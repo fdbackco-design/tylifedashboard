@@ -4,8 +4,15 @@ import type {
   ContractSettlementItem,
   RollupItem,
   SettlementCalculationDetail,
+  LeaderPromotionSettlementDetail,
 } from '../types/settlement';
-import type { RankType, OrgTreeNode } from '../types/organization';
+import type { RankType, OrgTreeNode, OrgTreeRow } from '../types/organization';
+import type { AttributedJoinContractRow, SalesMemberPromotionThreshold } from './leader-promotion';
+import {
+  isContractAtOrAfterPromotionThreshold,
+  isLeaderMaintenanceBonusEligible,
+  subtreeJoinUnitsJoinOnlyAsOf,
+} from './leader-promotion';
 import type { Contract } from '../types/contract';
 import { RANK_ORDER } from '../types/organization';
 import { BASE_AMOUNT_PER_UNIT, DEFAULT_COMMISSION_BY_RANK, DEFAULT_INCENTIVE_CONFIG } from './constants';
@@ -193,6 +200,122 @@ function calcRollupItems(
 }
 
 // ─────────────────────────────────────────────
+// 리더 승격(산하 가입 20구좌) — 영업사원 직접/롤업 단가 분기
+// ─────────────────────────────────────────────
+
+/** 정산 API에서 한 번 구성해 전달(산하 가입 계약·트리·승격 계약 맵) */
+export interface LeaderSettlementOpts {
+  treeRows: OrgTreeRow[];
+  /** 영업사원별: 산하 가입 누적 20구좌를 채운 '승격 계약'(가입일+id). 날짜만으로는 같은 일자 계약을 구분할 수 없음 */
+  promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>;
+  joinOnlyAttributed: AttributedJoinContractRow[];
+  /** 정산 기준월의 종료일(보통 25일, YYYY-MM-DD) */
+  settlementEndDate: string;
+}
+
+const LEADER_MAINTENANCE_BONUS_WON = 1_000_000;
+
+function commissionPerUnitForDirectContract(
+  memberId: string,
+  dbRank: RankType,
+  contract: { id: string; join_date: string },
+  rules: SettlementRule[],
+  refDate: string,
+  promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>,
+): number {
+  if (dbRank === '본사') return 0;
+  if (dbRank !== '영업사원') {
+    return getActiveRuleOrFallback(rules, dbRank, refDate).commission_per_unit;
+  }
+  const th = promotionThresholdByMemberId.get(memberId) ?? null;
+  if (!th || !isContractAtOrAfterPromotionThreshold(contract.join_date, contract.id, th)) {
+    return getActiveRuleOrFallback(rules, '영업사원', refDate).commission_per_unit;
+  }
+  return getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
+}
+
+function calcDirectContractsWithLeaderPromotion(
+  eligible: Contract[],
+  member: { id: string; rank: RankType },
+  rules: SettlementRule[],
+  refDate: string,
+  promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>,
+): { items: ContractSettlementItem[]; total: number } {
+  const items: ContractSettlementItem[] = eligible.map((c) => {
+    const rate = commissionPerUnitForDirectContract(
+      member.id,
+      member.rank,
+      { id: c.id, join_date: c.join_date },
+      rules,
+      refDate,
+      promotionThresholdByMemberId,
+    );
+    return {
+      contract_id: c.id,
+      contract_code: c.contract_code,
+      unit_count: c.unit_count,
+      commission_per_unit: rate,
+      subtotal: c.unit_count * rate,
+    };
+  });
+  const total = items.reduce((s, i) => s + i.subtotal, 0);
+  return { items, total };
+}
+
+function calcRollupItemsWithLeaderPromotion(
+  node: OrgTreeNode,
+  contractsByMember: Map<string, Contract[]>,
+  rules: SettlementRule[],
+  yearMonth: string,
+  promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>,
+): { items: RollupItem[]; total: number } {
+  const refDate = monthEndDate(yearMonth);
+  const items: RollupItem[] = [];
+
+  for (const child of node.children) {
+    const childContracts = contractsByMember.get(child.id) ?? [];
+    const childUnits = childContracts.reduce((s, c) => s + c.unit_count, 0);
+    if (childUnits === 0) continue;
+
+    let subtotal = 0;
+    for (const c of childContracts) {
+      const upper = commissionPerUnitForDirectContract(
+        node.id,
+        node.rank,
+        { id: c.id, join_date: c.join_date },
+        rules,
+        refDate,
+        promotionThresholdByMemberId,
+      );
+      const lower = commissionPerUnitForDirectContract(
+        child.id,
+        child.rank,
+        { id: c.id, join_date: c.join_date },
+        rules,
+        refDate,
+        promotionThresholdByMemberId,
+      );
+      subtotal += Math.max(0, upper - lower) * c.unit_count;
+    }
+
+    if (subtotal > 0) {
+      const avg = childUnits ? subtotal / childUnits : 0;
+      items.push({
+        from_member_id: child.id,
+        from_member_name: child.name,
+        from_rank: child.rank,
+        unit_count: childUnits,
+        rollup_amount_per_unit: avg,
+        subtotal,
+      });
+    }
+  }
+
+  const total = items.reduce((s, i) => s + i.subtotal, 0);
+  return { items, total };
+}
+
+// ─────────────────────────────────────────────
 // 월별 정산 메인 계산
 // ─────────────────────────────────────────────
 
@@ -210,6 +333,7 @@ export interface MemberContractMap {
  * @param contractsByMember - 전체 멤버 ID → 계약 목록 맵 (트리 순회용)
  * @param rules - 현재 적용 중인 정산 규칙 목록
  * @param yearMonth - 'YYYY-MM'
+ * @param leaderOpts - 전달 시: 영업사원 리더 승격(산하 가입 20구좌)·25일 유지 장려금 반영
  */
 export function calculateMemberSettlement(
   member: { id: string; name: string; rank: RankType },
@@ -218,40 +342,127 @@ export function calculateMemberSettlement(
   contractsByMember: Map<string, Contract[]>,
   rules: SettlementRule[],
   yearMonth: string,
+  leaderOpts?: LeaderSettlementOpts,
 ): MonthlySettlementInsert {
-  // 규칙 effective_from이 월 중간(예: 2026-04-13)이어도 해당 월 정산에 적용되도록 말일 기준으로 매칭
   const refDate = monthEndDate(yearMonth);
-
-  // 정산 규칙 조회
   const rule = getActiveRuleOrFallback(rules, member.rank, refDate);
-
-  // 직접 계약 정산
-  // directContracts는 v_contract_settlement_base(가입 인정 기준)에서 이미 필터링된 결과를 받는다.
   const eligible = directContracts;
-  const { items: directItems, total: baseCommission } = calcDirectContracts(
-    eligible,
-    rule,
-  );
 
-  // 롤업 계산
-  const { items: rollupItems, total: rollupCommission } = calcRollupItems(
-    orgNode,
-    contractsByMember,
-    rules,
-    yearMonth,
-  );
+  let directItems: ContractSettlementItem[];
+  let baseCommission: number;
+  let rollupItems: RollupItem[];
+  let rollupCommission: number;
 
-  // 산하 전체 구좌 합산 (유지 장려금 판단용)
-  const subordinateUnitCount = collectSubordinateUnits(
-    orgNode,
-    contractsByMember,
-  );
+  const useLeaderRates =
+    !!leaderOpts && member.rank === '영업사원';
+  const thresholdMap =
+    leaderOpts?.promotionThresholdByMemberId ?? new Map<string, SalesMemberPromotionThreshold | null>();
+
+  if (useLeaderRates) {
+    ({ items: directItems, total: baseCommission } = calcDirectContractsWithLeaderPromotion(
+      eligible,
+      member,
+      rules,
+      refDate,
+      thresholdMap,
+    ));
+    ({ items: rollupItems, total: rollupCommission } = calcRollupItemsWithLeaderPromotion(
+      orgNode,
+      contractsByMember,
+      rules,
+      yearMonth,
+      thresholdMap,
+    ));
+  } else {
+    ({ items: directItems, total: baseCommission } = calcDirectContracts(eligible, rule));
+    ({ items: rollupItems, total: rollupCommission } = calcRollupItems(
+      orgNode,
+      contractsByMember,
+      rules,
+      yearMonth,
+    ));
+  }
+
+  const subordinateUnitCount = collectSubordinateUnits(orgNode, contractsByMember);
   const directUnitCount = eligible.reduce((s, c) => s + c.unit_count, 0);
   const totalUnitCount = directUnitCount + subordinateUnitCount;
 
-  // 유지 장려금
-  const incentiveAmount = calcIncentive(rule, totalUnitCount);
-  const totalAmount = baseCommission + rollupCommission + incentiveAmount;
+  /** DB 규칙 기반 유지 장려금(리더·센터장 등). 영업사원+leaderOpts 시 리더 유지 보너스와 이중 적용 방지 위해 0 처리 */
+  const ruleIncentiveAmount =
+    leaderOpts && member.rank === '영업사원'
+      ? 0
+      : calcIncentive(rule, totalUnitCount);
+
+  let leaderMaintenanceBonus = 0;
+  if (leaderOpts && member.rank === '영업사원') {
+    const th = leaderOpts.promotionThresholdByMemberId.get(member.id) ?? null;
+    const u25 = subtreeJoinUnitsJoinOnlyAsOf(
+      member.id,
+      leaderOpts.treeRows,
+      leaderOpts.joinOnlyAttributed,
+      leaderOpts.settlementEndDate.slice(0, 10),
+    );
+    leaderMaintenanceBonus = isLeaderMaintenanceBonusEligible({
+      memberDbRank: member.rank,
+      promotionThreshold: th,
+      subtreeJoinUnitsAsOf25: u25,
+    })
+      ? LEADER_MAINTENANCE_BONUS_WON
+      : 0;
+  }
+
+  const incentiveAmountCombined = ruleIncentiveAmount + leaderMaintenanceBonus;
+  const totalAmount = baseCommission + rollupCommission + incentiveAmountCombined;
+
+  let leaderPromotion: LeaderPromotionSettlementDetail | null = null;
+  if (leaderOpts) {
+    const th = leaderOpts.promotionThresholdByMemberId.get(member.id) ?? null;
+    const subtreeJoinEnd = subtreeJoinUnitsJoinOnlyAsOf(
+      member.id,
+      leaderOpts.treeRows,
+      leaderOpts.joinOnlyAttributed,
+      leaderOpts.settlementEndDate.slice(0, 10),
+    );
+    const ruSales = getActiveRuleOrFallback(rules, '영업사원', refDate).commission_per_unit;
+    const ruLeader = getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
+    let label = `${member.rank} 기준`;
+    let applied: number | null = getActiveRuleOrFallback(rules, member.rank, refDate).commission_per_unit;
+    if (member.rank === '영업사원') {
+      if (!th) {
+        label = `${(ruSales / 10_000).toFixed(0)}만원/구좌(영업사원)`;
+        applied = ruSales;
+      } else {
+        const hasBefore = eligible.some(
+          (c) => !isContractAtOrAfterPromotionThreshold(c.join_date, c.id, th),
+        );
+        const hasAfter = eligible.some((c) =>
+          isContractAtOrAfterPromotionThreshold(c.join_date, c.id, th),
+        );
+        if (hasBefore && hasAfter) {
+          label = `${(ruSales / 10_000).toFixed(0)}만/${(ruLeader / 10_000).toFixed(0)}만 혼합(승격 계약 전후)`;
+          applied = null;
+        } else if (hasAfter && !hasBefore) {
+          label = `${(ruLeader / 10_000).toFixed(0)}만원/구좌(리더)`;
+          applied = ruLeader;
+        } else {
+          label = `${(ruSales / 10_000).toFixed(0)}만원/구좌(영업사원)`;
+          applied = ruSales;
+        }
+      }
+    }
+    leaderPromotion = {
+      db_rank: member.rank,
+      effective_is_leader: member.rank === '리더' || (member.rank === '영업사원' && th !== null),
+      leader_promotion_first_join_date: member.rank === '영업사원' ? th?.threshold_join_date ?? null : null,
+      leader_promotion_threshold_contract_id: member.rank === '영업사원' ? th?.threshold_contract_id ?? null : null,
+      subtree_join_units_join_status_as_of_end: subtreeJoinEnd,
+      commission_rate_label: label,
+      applied_commission_per_unit: applied,
+      rule_incentive_amount: ruleIncentiveAmount,
+      leader_maintenance_bonus_amount: leaderMaintenanceBonus,
+      leader_maintenance_bonus_eligible: leaderMaintenanceBonus > 0,
+    };
+  }
 
   const detail: SettlementCalculationDetail = {
     year_month: yearMonth,
@@ -261,9 +472,10 @@ export function calculateMemberSettlement(
     rule_id: rule.id,
     direct_contracts: directItems,
     rollup_items: rollupItems,
-    incentive_applied: incentiveAmount > 0,
+    incentive_applied: incentiveAmountCombined > 0,
     incentive_threshold: rule.incentive_unit_threshold,
-    incentive_amount: incentiveAmount,
+    incentive_amount: incentiveAmountCombined,
+    leader_promotion: leaderPromotion,
   };
 
   return {
@@ -276,7 +488,7 @@ export function calculateMemberSettlement(
     total_unit_count: totalUnitCount,
     base_commission: baseCommission,
     rollup_commission: rollupCommission,
-    incentive_amount: incentiveAmount,
+    incentive_amount: incentiveAmountCombined,
     total_amount: totalAmount,
     calculation_detail: detail,
     is_finalized: false,
@@ -286,8 +498,6 @@ export function calculateMemberSettlement(
 // ─────────────────────────────────────────────
 // 조직 트리 빌더 (flat rows → 재귀 트리)
 // ─────────────────────────────────────────────
-
-import type { OrgTreeRow } from '../types/organization';
 
 export function buildOrgTree(rows: OrgTreeRow[]): OrgTreeNode[] {
   const nodeMap = new Map<string, OrgTreeNode>();

@@ -5,8 +5,19 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
-import { calculateMemberSettlement, buildOrgTree } from '@/lib/settlement/calculator';
-import type { Contract, OrganizationMember, SettlementRule, OrgTreeRow } from '@/lib/types';
+import {
+  calculateMemberSettlement,
+  buildOrgTree,
+  type LeaderSettlementOpts,
+} from '@/lib/settlement/calculator';
+import { getSettlementWindowForYearMonth } from '@/lib/settlement/settlement-window';
+import { buildSettlementTreeRows } from '@/lib/settlement/settlement-org-tree';
+import {
+  computeSalesMemberPromotionThreshold,
+  type AttributedJoinContractRow,
+} from '@/lib/settlement/leader-promotion';
+import type { Contract, OrganizationMember, SettlementRule } from '@/lib/types';
+import type { RankType } from '@/lib/types/organization';
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   // TODO: 인증 추가 필요 (현재 서버 내부 호출 가정)
@@ -59,10 +70,7 @@ async function calculateMonthlySettlement(
   yearMonth: string,
   db: ReturnType<typeof createAdminSupabaseClient>,
 ): Promise<{ updated_count: number }> {
-  // 규칙 effective_from이 월 중간이어도 해당 월 정산에 적용되도록 말일 기준으로 매칭
-  const [y, m] = yearMonth.split('-').map(Number);
-  const end = new Date(y, m, 0);
-  const refDate = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
+  const { end_date } = getSettlementWindowForYearMonth(yearMonth);
 
   // 1. 정산 대상 계약 조회 (v_contract_settlement_base가 SSOT 기준으로 필터링)
   const { data: contracts, error: cErr } = await db
@@ -79,13 +87,84 @@ async function calculateMonthlySettlement(
 
   if (rErr) throw new Error(`정산 규칙 조회 실패: ${rErr.message}`);
 
-  // 3. 조직원 전체 + edges 조회
-  const [membersRes, edgesRes] = await Promise.all([
-    db.from('organization_members').select('id, name, rank').eq('is_active', true),
+  // 3. 조직원 전체 + edges 조회 (/settlement 페이지와 동일 트리)
+  const [membersRes, edgesRes, joinContractsRes] = await Promise.all([
+    db
+      .from('organization_members')
+      .select('id, name, rank, external_id, phone, source_customer_id')
+      .eq('is_active', true),
     db.from('organization_edges').select('parent_id, child_id'),
+    db
+      .from('contracts')
+      .select('id, join_date, unit_count, sales_member_id, customer_id, sales_link_status, status, is_cancelled')
+      .eq('status', '가입')
+      .eq('is_cancelled', false),
   ]);
 
   if (membersRes.error) throw new Error(`조직원 조회 실패: ${membersRes.error.message}`);
+  if (joinContractsRes.error) throw new Error(`가입 계약 조회 실패: ${joinContractsRes.error.message}`);
+
+  const membersRaw = ((membersRes.data ?? []) as unknown as OrganizationMember[]).map((m) =>
+    m.name === '안성준' ? { ...m, rank: '본사' as const } : m,
+  );
+  const edgesRaw = (edgesRes.data ?? []) as Array<{ parent_id: string | null; child_id: string }>;
+
+  const hqIdsRaw = new Set(
+    membersRaw.filter((m) => m.name === '안성준' || m.rank === '본사').map((m) => m.id as string),
+  );
+
+  const memberIdByCustomerId = new Map<string, string>();
+  for (const m of membersRaw as any[]) {
+    const sid = (m.source_customer_id ?? null) as string | null;
+    if (sid && m.rank !== '본사') {
+      memberIdByCustomerId.set(sid, m.id as string);
+      continue;
+    }
+    const ext = (m.external_id ?? null) as string | null;
+    if (ext && ext.startsWith('customer:') && m.rank !== '본사') {
+      const customerId = ext.slice('customer:'.length);
+      if (!memberIdByCustomerId.has(customerId)) memberIdByCustomerId.set(customerId, m.id as string);
+    }
+  }
+
+  const joinAttributed: AttributedJoinContractRow[] = [];
+  for (const row of (joinContractsRes.data ?? []) as any[]) {
+    if ((row.sales_link_status ?? 'linked') !== 'linked') continue;
+    if (!row.sales_member_id) continue;
+    let sid = row.sales_member_id as string;
+    const cid = row.customer_id as string | null;
+    if (cid) {
+      const mapped = memberIdByCustomerId.get(cid);
+      if (mapped) sid = mapped;
+    }
+    joinAttributed.push({
+      id: row.id,
+      join_date: String(row.join_date ?? '').slice(0, 10),
+      unit_count: row.unit_count ?? 0,
+      sales_member_id: sid,
+    });
+  }
+
+  const treeRows = buildSettlementTreeRows(
+    membersRaw as Array<{ id: string; name: string; rank: RankType; source_customer_id?: string | null }>,
+    edgesRaw,
+  );
+
+  const rankById = new Map<string, RankType>();
+  for (const m of membersRaw) rankById.set(m.id as string, m.rank as RankType);
+
+  const promotionThresholdByMemberId = computeSalesMemberPromotionThreshold(
+    treeRows,
+    joinAttributed,
+    rankById,
+  );
+
+  const leaderOpts: LeaderSettlementOpts = {
+    treeRows,
+    promotionThresholdByMemberId,
+    joinOnlyAttributed: joinAttributed,
+    settlementEndDate: end_date,
+  };
 
   // 4. 멤버별 계약 맵 구성
   const contractsByMember = new Map<string, Contract[]>();
@@ -97,22 +176,6 @@ async function calculateMonthlySettlement(
   }
 
   // 5. 조직 트리 빌드
-  const edgeMap = new Map<string, string | null>();
-  for (const e of edgesRes.data ?? []) {
-    edgeMap.set(
-      (e as { child_id: string }).child_id,
-      (e as { parent_id: string | null }).parent_id,
-    );
-  }
-
-  const treeRows: OrgTreeRow[] = (membersRes.data ?? []).map((m) => ({
-    id: (m as OrganizationMember).id,
-    name: (m as OrganizationMember).name,
-    rank: (m as OrganizationMember).rank,
-    parent_id: edgeMap.get((m as OrganizationMember).id) ?? null,
-    depth: 0,
-  }));
-
   const trees = buildOrgTree(treeRows);
   const nodeById = new Map<string, ReturnType<typeof buildOrgTree>[number]>();
   (function indexNodes(nodes: ReturnType<typeof buildOrgTree>) {
@@ -125,7 +188,7 @@ async function calculateMonthlySettlement(
   // 6. 각 멤버 정산 계산 및 upsert
   let updatedCount = 0;
 
-  for (const member of (membersRes.data ?? []) as OrganizationMember[]) {
+  for (const member of membersRaw as OrganizationMember[]) {
     const orgNode = nodeById.get(member.id) ?? null;
     if (!orgNode) continue;
 
@@ -136,6 +199,7 @@ async function calculateMonthlySettlement(
       contractsByMember,
       rules as SettlementRule[],
       yearMonth,
+      leaderOpts,
     );
 
     const { error: uErr } = await db

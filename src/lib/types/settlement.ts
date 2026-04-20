@@ -35,6 +35,29 @@ export interface RollupItem {
   subtotal: number;
 }
 
+/** 리더 승격(영업사원 → 산하 가입 20구좌) 및 유지 장려금 UI용 */
+export interface LeaderPromotionSettlementDetail {
+  /** DB 저장 직급 */
+  db_rank: RankType;
+  /** 승격 규칙 반영 후 리더로 볼지(영업사원이 산하 가입 20구좌 달성한 경우 등) */
+  effective_is_leader: boolean;
+  /** 산하 '가입' 누적 20구좌를 채운 계약의 가입일(없으면 null) */
+  leader_promotion_first_join_date: string | null;
+  /** 위와 동일한 '승격 계약' 식별자(같은 가입일 구분용) */
+  leader_promotion_threshold_contract_id: string | null;
+  /** 정산월 말(25일) 기준 산하 '가입' 구좌 합 */
+  subtree_join_units_join_status_as_of_end: number;
+  /** 표시용: 적용 단가 설명 */
+  commission_rate_label: string;
+  /** 적용 단가(대표값): 혼합 월은 null */
+  applied_commission_per_unit: number | null;
+  /** DB 규칙 기반 유지 장려금(기존 incentive_amount에 들어가는 부분) */
+  rule_incentive_amount: number;
+  /** 리더 유지(당월 25일까지 20구좌 이상) 1회성 장려금 */
+  leader_maintenance_bonus_amount: number;
+  leader_maintenance_bonus_eligible: boolean;
+}
+
 export interface SettlementCalculationDetail {
   year_month: string;
   member_id: string;
@@ -46,6 +69,7 @@ export interface SettlementCalculationDetail {
   incentive_applied: boolean;
   incentive_threshold: number | null;
   incentive_amount: number;
+  leader_promotion?: LeaderPromotionSettlementDetail | null;
 }
 
 export interface MonthlySettlement {
