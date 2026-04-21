@@ -3,6 +3,10 @@ import { getSettlementWindowForYearMonth } from '@/lib/settlement/settlement-win
 import type { OrgTreeRow } from '@/lib/types';
 import type { RankType } from '@/lib/types/organization';
 import { buildSettlementTreeRows } from '@/lib/settlement/settlement-org-tree';
+import {
+  formatDashboardParentLabel,
+  stripCustomerMemberNamePrefix,
+} from '@/lib/dashboard/display-format';
 
 export type DashboardAggRow = {
   parent_name: string; // 누구 산하인지 (표시용)
@@ -142,6 +146,8 @@ function aggregateByMember(
   contracts: Array<ContractRow & { __attributed_member_id: string | null }>,
   memberNameById: Map<string, string>,
   parentNameById: Map<string, string>,
+  parentIdByMemberId: Map<string, string | null>,
+  hqMemberId: string | null,
 ): DashboardAggResult {
   const unitByMember = new Map<string, number>();
   for (const c of contracts) {
@@ -155,9 +161,15 @@ function aggregateByMember(
   let total_units = 0;
   for (const [mid, unit_sum] of unitByMember.entries()) {
     total_units += unit_sum;
+    const rawParent = parentNameById.get(mid) ?? '-';
+    const pid = parentIdByMemberId.get(mid) ?? null;
+    const rawName = memberNameById.get(mid);
     rows.push({
-      parent_name: parentNameById.get(mid) ?? '-',
-      member_name: memberNameById.get(mid) ?? '(알수없음)',
+      parent_name: formatDashboardParentLabel(pid, rawParent, hqMemberId),
+      member_name:
+        rawName !== undefined && rawName !== null
+          ? stripCustomerMemberNamePrefix(rawName) || '(알수없음)'
+          : '(알수없음)',
       unit_sum,
     });
   }
@@ -217,6 +229,14 @@ export async function buildDashboardAggregations(opts: {
     edgesRaw,
   );
 
+  const hqMemberId =
+    membersRaw.find((m) => m.name === '안성준')?.id ??
+    membersRaw.find((m) => m.rank === '본사')?.id ??
+    null;
+
+  const parentIdByMemberId = new Map<string, string | null>();
+  for (const r of treeRows) parentIdByMemberId.set(r.id, r.parent_id ?? null);
+
   const memberNameById = new Map<string, string>();
   for (const m of membersRaw) memberNameById.set(m.id, m.name);
   const parentNameById = buildParentNameByMemberId(treeRows);
@@ -256,10 +276,34 @@ export async function buildDashboardAggregations(opts: {
     }),
   );
 
-  const monthlyTotalSlots = aggregateByMember(monthlyAll, memberNameById, parentNameById);
-  const dailyTotalSlots = aggregateByMember(dailyAll, memberNameById, parentNameById);
-  const monthlyJoinedSlots = aggregateByMember(monthlyJoined, memberNameById, parentNameById);
-  const allTimeJoinedSlots = aggregateByMember(allTimeJoined, memberNameById, parentNameById);
+  const monthlyTotalSlots = aggregateByMember(
+    monthlyAll,
+    memberNameById,
+    parentNameById,
+    parentIdByMemberId,
+    hqMemberId,
+  );
+  const dailyTotalSlots = aggregateByMember(
+    dailyAll,
+    memberNameById,
+    parentNameById,
+    parentIdByMemberId,
+    hqMemberId,
+  );
+  const monthlyJoinedSlots = aggregateByMember(
+    monthlyJoined,
+    memberNameById,
+    parentNameById,
+    parentIdByMemberId,
+    hqMemberId,
+  );
+  const allTimeJoinedSlots = aggregateByMember(
+    allTimeJoined,
+    memberNameById,
+    parentNameById,
+    parentIdByMemberId,
+    hqMemberId,
+  );
 
   // 담당자별 당일 영업 실적: dailyAll을 담당자별로 합산한 것(= dailyTotalSlots와 동일하지만, 카드/표 의미를 분리)
   const dailyPerformanceByMember = {
