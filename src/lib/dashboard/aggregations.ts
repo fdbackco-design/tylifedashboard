@@ -165,7 +165,7 @@ function aggregateByMember(
     const pid = parentIdByMemberId.get(mid) ?? null;
     const rawName = memberNameById.get(mid);
     rows.push({
-      parent_name: formatDashboardParentLabel(pid, rawParent, hqMemberId),
+      parent_name: formatDashboardParentLabel(mid, pid, rawParent, hqMemberId),
       member_name:
         rawName !== undefined && rawName !== null
           ? stripCustomerMemberNamePrefix(rawName) || '(알수없음)'

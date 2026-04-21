@@ -16,11 +16,17 @@ export function stripCustomerMemberNamePrefix(name: string | null | undefined): 
  * - 그 외 부모명은 고객 접두어 제거 후 표시
  */
 export function formatDashboardParentLabel(
+  memberId: string,
   parentId: string | null | undefined,
   rawParentName: string,
   hqMemberId: string | null,
 ): string {
-  if (rawParentName === '-' || !parentId) return rawParentName;
+  // parent가 없으면(=루트로 들어온 멤버) 표시만 본사 산하로 통일한다.
+  // 단, 본사(안성준) 자기 자신은 상위 조직이 없으므로 '-' 유지.
+  if (rawParentName === '-' || !parentId) {
+    if (hqMemberId && memberId === hqMemberId) return '-';
+    return '안성준';
+  }
   if (hqMemberId && parentId === hqMemberId) return '안성준';
   const base = stripCustomerMemberNamePrefix(rawParentName);
   if (base === '안성준') return '안성준';
