@@ -1,5 +1,13 @@
 import type { OrgTreeNode } from '@/lib/types';
 import { isOrgDisplayHiddenMemberName } from './org-display-hidden';
+import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
+
+type ContractItemLike = {
+  status: string;
+  rental_request_no?: string | null;
+  invoice_no?: string | null;
+  memo?: string | null;
+};
 
 function isStrippedForDisplay(n: OrgTreeNode): boolean {
   const normalizedName = (n.name ?? '').replace(/^\[고객\]\s*/, '');
@@ -36,6 +44,52 @@ export function stripOrgTreeNodesForDisplay(nodes: OrgTreeNode[]): OrgTreeNode[]
       ...n,
       children: stripOrgTreeNodesForDisplay((n.children ?? []) as OrgTreeNode[]),
     });
+  }
+  return out;
+}
+
+function shouldHideLeafSalesMemberByContracts(params: {
+  node: OrgTreeNode;
+  contractsByMember: Record<string, ContractItemLike[]>;
+}): boolean {
+  const { node, contractsByMember } = params;
+  if (node.rank !== '영업사원') return false;
+  if ((node.children ?? []).length > 0) return false; // leaf only
+  const contracts = contractsByMember[node.id] ?? [];
+  if (contracts.length === 0) return false;
+  // leaf 노드의 계약이 해약/렌탈 미충족만 존재하면 숨김
+  const allBad = contracts.every((c) => {
+    const display = getContractDisplayStatus({
+      status: c.status,
+      rental_request_no: c.rental_request_no ?? null,
+      invoice_no: c.invoice_no ?? null,
+      memo: c.memo ?? null,
+    });
+    return display === '해약' || display === '렌탈 미충족';
+  });
+  return allBad;
+}
+
+/**
+ * 조직도 전용: leaf 영업사원 노드 중, 계약이 해약/렌탈 미충족만 있는 노드를 숨긴다.
+ * - DB/edge는 건드리지 않고 표시만 조정
+ */
+export function stripOrgTreeLeafSalesMembersByContracts(params: {
+  nodes: OrgTreeNode[];
+  contractsByMember: Record<string, ContractItemLike[]>;
+}): OrgTreeNode[] {
+  const { nodes, contractsByMember } = params;
+  const out: OrgTreeNode[] = [];
+  for (const n of nodes) {
+    const children = stripOrgTreeLeafSalesMembersByContracts({
+      nodes: (n.children ?? []) as OrgTreeNode[],
+      contractsByMember,
+    });
+    const next: OrgTreeNode = { ...n, children };
+    if (shouldHideLeafSalesMemberByContracts({ node: next, contractsByMember })) {
+      continue;
+    }
+    out.push(next);
   }
   return out;
 }
