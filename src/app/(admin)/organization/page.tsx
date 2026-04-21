@@ -117,6 +117,8 @@ export default async function OrganizationPage({
       .filter((m) => (m as any).name === '안성준' || (m as any).rank === '본사')
       .map((m) => (m as any).id as string),
   );
+  const hqIdForTree =
+    membersRaw.find((m: any) => m.name === '안성준')?.id ?? (hqIdsRaw.values().next().value ?? null);
 
   // debug(서버): 병합/트리 단계별 카운트
   let dbg_customerNodes_raw = 0;
@@ -222,11 +224,6 @@ export default async function OrganizationPage({
     );
   }
 
-  // source_customer_id가 있는 노드(=고객 식별이 붙은 노드)는 본사 직속으로 트리에 표시한다.
-  // DB에 순환/충돌 edge가 있더라도, /organization 트리에서는 "본사 직계약 고객 노드가 보이는 것"을 우선한다.
-  const hqIdForTree =
-    members.find((m: any) => m.name === '안성준')?.id ?? (hqIdsRaw.values().next().value ?? null);
-
   const treeRowsBase: OrgTreeRow[] = members.map((m: any) => ({
     id: m.id,
     name: m.name,
@@ -235,11 +232,6 @@ export default async function OrganizationPage({
       // 트리 최상단 본사 노드는 언제나 루트로 고정
       m.rank === '본사'
         ? null
-        :
-      hqIdForTree &&
-      m.rank !== '본사' &&
-      (m.source_customer_id ?? null) != null
-        ? hqIdForTree
         : (edgeMap.get(m.id) ?? null),
     depth: 0,
   }));

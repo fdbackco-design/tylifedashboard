@@ -376,6 +376,11 @@ async function ensureOrgEdgeWithSource(
   sourceContractId: string,
 ): Promise<void> {
   // child_id UNIQUE 제약: 이미 parent가 있으면 건드리지 않는다.
+  // 동기화는 병렬로 동작할 수 있어(또는 같은 child를 여러 계약에서 처리할 수 있어)
+  // read-then-insert 레이스가 발생한다. 따라서:
+  // - 먼저 existing을 확인(의도)
+  // - insert는 ignoreDuplicates로 시도(레이스 안전)
+  // - 최종적으로 select로 edge id를 확보한다.
   const { data: existing, error: exErr } = await db
     .from('organization_edges')
     .select('id, parent_id')
@@ -386,22 +391,26 @@ async function ensureOrgEdgeWithSource(
   if (existing) {
     const ex = existing as { id: string; parent_id: string | null };
     if (ex.parent_id && ex.parent_id !== parentId) return;
-    // parent가 null이거나 동일하면 그대로 사용
-    const edgeId = ex.id;
     await db.from('organization_edge_sources').upsert(
-      { edge_id: edgeId, source_contract_id: sourceContractId, created_by: 'sync-service' },
+      { edge_id: ex.id, source_contract_id: sourceContractId, created_by: 'sync-service' },
       { onConflict: 'edge_id,source_contract_id' },
     );
     return;
   }
 
-  const { data: ins, error: insErr } = await db
+  // ignoreDuplicates: true면 child_id unique 충돌 시 에러 대신 no-op
+  const { error: insErr } = await db
     .from('organization_edges')
-    .insert({ parent_id: parentId, child_id: childId })
-    .select('id')
-    .single();
+    .upsert({ parent_id: parentId, child_id: childId }, { onConflict: 'child_id', ignoreDuplicates: true });
   if (insErr) throw new Error(`organization_edges 생성 실패: ${insErr.message}`);
-  const edgeId = (ins as { id: string }).id;
+
+  const { data: picked, error: pickErr } = await db
+    .from('organization_edges')
+    .select('id')
+    .eq('child_id', childId)
+    .maybeSingle();
+  if (pickErr || !picked) throw new Error(`organization_edges 재조회 실패: ${pickErr?.message ?? 'unknown'}`);
+  const edgeId = (picked as { id: string }).id;
   await db.from('organization_edge_sources').upsert(
     { edge_id: edgeId, source_contract_id: sourceContractId, created_by: 'sync-service' },
     { onConflict: 'edge_id,source_contract_id' },
