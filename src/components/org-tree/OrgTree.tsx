@@ -14,7 +14,7 @@ import {
   flattenOrgTreeNodes,
   collectStrippedNodeIdsForDisplay,
   stripOrgTreeNodesForDisplay,
-  stripOrgTreeLeafSalesMembersByContracts,
+  isHiddenLeafSalesMemberByContracts,
 } from '@/lib/organization/org-tree-display';
 
 // ── 유틸 ─────────────────────────────────────────────────
@@ -265,10 +265,7 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
 
     // "본사" 개인 노드(예: 안성준)가 중복으로 존재할 수 있으므로,
     // UI에서는 본사(person) 노드를 모두 제거하고 자식만 승격한다. (서버 직급 배지와 동일 로직)
-    const cleanedRoots = stripOrgTreeLeafSalesMembersByContracts({
-      nodes: stripOrgTreeNodesForDisplay(roots as OrgTreeNodeType[]),
-      contractsByMember,
-    }) as OrgTreeNodeType[];
+    const cleanedRoots = stripOrgTreeNodesForDisplay(roots as OrgTreeNodeType[]);
 
     const hqRoot: OrgTreeNodeType = {
       id: '__hq_root__',
@@ -340,25 +337,33 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
     const children = node.children ?? [];
     const hasChildren = children.length > 0;
     const isHqRoot = node.id === '__hq_root__';
+    const hideCard = isHiddenLeafSalesMemberByContracts({
+      node: node as any,
+      contractsByMember: contractsByMember as any,
+    });
 
     return (
       <div className="flex flex-col items-center">
         {/* 노드 카드 */}
-        <OrgTreeNode
-          node={node}
-          contractsByMember={contractsByMember}
-          extraSubtreeIds={isHqRoot ? strippedNodeIds : undefined}
-          nodeMetrics={metricsById?.[node.id] ?? null}
-          selectedId={selectedId}
-          onSelect={handleSelect}
-        />
+        {hideCard ? null : (
+          <OrgTreeNode
+            node={node}
+            contractsByMember={contractsByMember}
+            extraSubtreeIds={isHqRoot ? strippedNodeIds : undefined}
+            nodeMetrics={metricsById?.[node.id] ?? null}
+            selectedId={selectedId}
+            onSelect={handleSelect}
+          />
+        )}
 
         {/* 자식 서브트리 */}
         {hasChildren && (
           <div className={`mt-6 pt-6 w-full ${isHqRoot ? 'overflow-x-auto' : ''}`}>
             <div className="relative w-full">
               {/* 부모 -> 자식들 수직 라인 */}
-              <div className="absolute left-1/2 top-0 -translate-x-1/2 h-6 w-px bg-gray-300" />
+              {hideCard ? null : (
+                <div className="absolute left-1/2 top-0 -translate-x-1/2 h-6 w-px bg-gray-300" />
+              )}
 
               {isHqRoot ? (
                 // 본사 직속은 한 줄(가로 스크롤)로 고정

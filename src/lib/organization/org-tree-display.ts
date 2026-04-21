@@ -71,27 +71,14 @@ function shouldHideLeafSalesMemberByContracts(params: {
 }
 
 /**
- * 조직도 전용: leaf 영업사원 노드 중, 계약이 해약/렌탈 미충족만 있는 노드를 숨긴다.
- * - DB/edge는 건드리지 않고 표시만 조정
+ * 조직도 전용: leaf 영업사원 노드 중, 계약이 해약/렌탈 미충족만 있는 노드를 판정한다.
+ * - 트리 구조(산하 집계/상세)는 유지하고, UI 렌더링에서만 숨기는 용도로 사용
  */
-export function stripOrgTreeLeafSalesMembersByContracts(params: {
-  nodes: OrgTreeNode[];
+export function isHiddenLeafSalesMemberByContracts(params: {
+  node: OrgTreeNode;
   contractsByMember: Record<string, ContractItemLike[]>;
-}): OrgTreeNode[] {
-  const { nodes, contractsByMember } = params;
-  const out: OrgTreeNode[] = [];
-  for (const n of nodes) {
-    const children = stripOrgTreeLeafSalesMembersByContracts({
-      nodes: (n.children ?? []) as OrgTreeNode[],
-      contractsByMember,
-    });
-    const next: OrgTreeNode = { ...n, children };
-    if (shouldHideLeafSalesMemberByContracts({ node: next, contractsByMember })) {
-      continue;
-    }
-    out.push(next);
-  }
-  return out;
+}): boolean {
+  return shouldHideLeafSalesMemberByContracts(params);
 }
 
 export function flattenOrgTreeNodes(nodes: OrgTreeNode[]): OrgTreeNode[] {
