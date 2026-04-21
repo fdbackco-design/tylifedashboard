@@ -98,12 +98,16 @@ async function calculateMonthlySettlement(
   const contractIds = normalizedContractsBase.map((c) => c.id).filter(Boolean);
   const { data: contractCustomerRows, error: ccErr } = await db
     .from('contracts')
-    .select('id, customer_id')
+    .select('id, customer_id, item_name')
     .in('id', contractIds);
-  if (ccErr) throw new Error(`contracts(customer_id) 조회 실패: ${ccErr.message}`);
+  if (ccErr) throw new Error(`contracts(customer_id, item_name) 조회 실패: ${ccErr.message}`);
   const customerIdByContractId = new Map<string, string>();
+  const itemNameByContractId = new Map<string, string | null>();
   for (const r of (contractCustomerRows ?? []) as any[]) {
-    if (r?.id && r?.customer_id) customerIdByContractId.set(String(r.id), String(r.customer_id));
+    if (!r?.id) continue;
+    const id = String(r.id);
+    itemNameByContractId.set(id, (r.item_name ?? null) as string | null);
+    if (r.customer_id) customerIdByContractId.set(id, String(r.customer_id));
   }
 
   // 2. 정산 규칙 조회
@@ -158,12 +162,14 @@ async function calculateMonthlySettlement(
   }
 
   const normalizedContracts = normalizedContractsBase.map((c) => {
+    const item_name = itemNameByContractId.get(c.id) ?? null;
+    const withMeta = { ...c, item_name };
     const customerId = customerIdByContractId.get(c.id) ?? null;
     if (customerId) {
       const mapped = memberIdByCustomerId.get(customerId) ?? null;
-      if (mapped) return { ...c, sales_member_id: mapped };
+      if (mapped) return { ...withMeta, sales_member_id: mapped };
     }
-    return c;
+    return withMeta;
   });
 
   const joinAttributed: AttributedJoinContractRow[] = [];

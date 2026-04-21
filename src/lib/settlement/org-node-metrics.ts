@@ -1,7 +1,10 @@
 import type { RankType, OrganizationMember, OrganizationEdge } from '@/lib/types';
 import type { SettlementRule } from '@/lib/types/settlement';
 import { findActiveRule } from '@/lib/settlement/calculator';
-import { DEFAULT_COMMISSION_BY_RANK } from '@/lib/settlement/constants';
+import {
+  DEFAULT_COMMISSION_BY_RANK,
+  commissionPenaltyWonForItemName,
+} from '@/lib/settlement/constants';
 import type { OrgTreeRow } from '@/lib/types';
 import {
   computeSalesMemberPromotionThreshold,
@@ -31,8 +34,6 @@ type EligibleContract = {
 };
 
 const LEADER_OR_ABOVE: readonly RankType[] = ['리더', '센터장', '사업본부장'];
-const COMMISSION_PENALTY_ITEM_NAME = '아이클레보 V1000 펫버틀러';
-const COMMISSION_PENALTY_WON = 50_000;
 const LEADER_MAINTENANCE_BONUS_WON = 1_000_000;
 
 function isLeaderOrAbove(rank: RankType): boolean {
@@ -422,6 +423,10 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
       if (prevRank === '리더') baseRecipient = prev;
     }
     baseById.set(baseRecipient, (baseById.get(baseRecipient) ?? 0) + originRate * unit);
+    const penalty = commissionPenaltyWonForItemName(c.item_name);
+    if (penalty > 0) {
+      baseById.set(baseRecipient, (baseById.get(baseRecipient) ?? 0) - penalty);
+    }
 
     // 롤업: effective parent 체인을 따라 (상위-하위) 차액을 상위에 적립
     const visited = new Set<string>();

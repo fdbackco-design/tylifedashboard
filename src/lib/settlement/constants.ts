@@ -33,3 +33,16 @@ export const SETTLEMENT_EXCLUDED_STATUSES: readonly ContractStatus[] = [
   '취소',
   '해약',
 ] as const;
+
+/** 특정 물품 계약 건당 직접 수당에서 차감 (원) */
+export const COMMISSION_PENALTY_ITEM_NAME = '아이클레보 V1000 펫버틀러';
+export const COMMISSION_PENALTY_WON = 50_000;
+
+/** 물품명이 펫버틀러 패널티 대상이면 건당 차감액(양수), 아니면 0 */
+export function commissionPenaltyWonForItemName(
+  itemName: string | null | undefined,
+): number {
+  const t = (itemName ?? '').trim();
+  if (!t) return 0;
+  return t === COMMISSION_PENALTY_ITEM_NAME ? COMMISSION_PENALTY_WON : 0;
+}

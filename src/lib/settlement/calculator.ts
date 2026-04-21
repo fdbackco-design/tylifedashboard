@@ -16,7 +16,12 @@ import {
 } from './leader-promotion';
 import type { Contract } from '../types/contract';
 import { RANK_ORDER } from '../types/organization';
-import { BASE_AMOUNT_PER_UNIT, DEFAULT_COMMISSION_BY_RANK, DEFAULT_INCENTIVE_CONFIG } from './constants';
+import {
+  BASE_AMOUNT_PER_UNIT,
+  DEFAULT_COMMISSION_BY_RANK,
+  DEFAULT_INCENTIVE_CONFIG,
+  commissionPenaltyWonForItemName,
+} from './constants';
 
 function monthEndDate(yearMonth: string): string {
   // 'YYYY-MM' -> 'YYYY-MM-DD' (해당 월 말일)
@@ -103,13 +108,17 @@ function calcDirectContracts(
   contracts: Contract[],
   rule: SettlementRule,
 ): { items: ContractSettlementItem[]; total: number } {
-  const items: ContractSettlementItem[] = contracts.map((c) => ({
-    contract_id: c.id,
-    contract_code: c.contract_code,
-    unit_count: c.unit_count,
-    commission_per_unit: rule.commission_per_unit,
-    subtotal: c.unit_count * rule.commission_per_unit,
-  }));
+  const items: ContractSettlementItem[] = contracts.map((c) => {
+    const base = c.unit_count * rule.commission_per_unit;
+    const penalty = commissionPenaltyWonForItemName((c as { item_name?: string }).item_name);
+    return {
+      contract_id: c.id,
+      contract_code: c.contract_code,
+      unit_count: c.unit_count,
+      commission_per_unit: rule.commission_per_unit,
+      subtotal: base - penalty,
+    };
+  });
 
   const total = items.reduce((sum, i) => sum + i.subtotal, 0);
   return { items, total };
@@ -274,12 +283,14 @@ function calcDirectContractsWithLeaderPromotion(
       refDate,
       promotionThresholdByMemberId,
     );
+    const base = c.unit_count * rate;
+    const penalty = commissionPenaltyWonForItemName((c as { item_name?: string }).item_name);
     return {
       contract_id: c.id,
       contract_code: c.contract_code,
       unit_count: c.unit_count,
       commission_per_unit: rate,
-      subtotal: c.unit_count * rate,
+      subtotal: base - penalty,
     };
   });
   const total = items.reduce((s, i) => s + i.subtotal, 0);
