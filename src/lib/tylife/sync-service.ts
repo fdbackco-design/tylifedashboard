@@ -434,6 +434,36 @@ async function processItem(
       throw new Error(`SSN 파싱 실패 (ssn_masked: "${item.ssn_masked}")`);
     }
     const customerId = await upsertCustomer(db, customerData);
+    const customerNameNormalized = (item.customer_name ?? '').trim();
+    const customerPhone = ((customerData as any).phone ?? null) as string | null;
+
+    const ensureCustomerMemberId = async (): Promise<string | null> => {
+      if (!customerNameNormalized) return null;
+      // 본사(안성준)가 "고객"으로 찍힌 데이터는 고객 노드 생성/재사용을 하지 않는다.
+      // (본사 노드에 customer 식별자가 붙거나, 본사<->고객 노드가 순환/중복되는 문제 방지)
+      if (customerNameNormalized.replace(/^\[고객\]\s*/, '') === '안성준') return null;
+
+      // 요구사항(최종): DB에도 1개 노드만 유지
+      // - 동일 이름의 "직원 노드(external_id NULL)"가 1개면 그 노드를 고객 노드로 재사용한다.
+      // - 없으면 customer:* 노드를 생성하되 source_customer_id를 기록한다.
+      const existingEmployeeId = await findSingleEmployeeMemberIdByName(db, customerNameNormalized);
+      if (existingEmployeeId) {
+        await attachCustomerIdentityToMember(db, existingEmployeeId, { id: customerId, phone: customerPhone });
+        return existingEmployeeId;
+      }
+
+      const displayName = customerNameNormalized.startsWith('[고객] ')
+        ? customerNameNormalized
+        : `[고객] ${customerNameNormalized}`;
+      return await upsertSalesMember(db, {
+        name: displayName,
+        rank: '영업사원',
+        external_id: `customer:${customerId}`,
+        phone: customerPhone,
+        is_active: true,
+        source_customer_id: customerId,
+      } as any);
+    };
 
     // ── 2. 담당자:
     // - 이름이 DB에 1명 → 자동 연결
@@ -643,7 +673,27 @@ async function processItem(
       }
     }
 
-    // ── 4.6. 본사(안성준) 담당 + 가입 인정 고객을 "본사 직속" 노드로 보장 ──
+    // ── 4.6. 조직 엣지 적재 (고객 → 담당자, 담당자 → 본사 폴백) ──
+    // 목표:
+    // - 조회 시점에 contract.sales_member_id로 임시 보정하지 않고, 실제 organization_edges에 저장
+    // - customer(organization_members.source_customer_id) → latest linked contract의 sales_member_id
+    // - sales member 상위가 비어 있으면 본사(안성준) 직속으로 폴백
+    if (salesLinkStatus === 'linked') {
+      const hqId = await getHqMemberId(db);
+      // (1) 담당자 → 본사 폴백 (없을 때만)
+      if (hqId && finalSalesMemberId && finalSalesMemberId !== hqId) {
+        await ensureOrgEdgeWithSource(db, hqId, finalSalesMemberId, contractId);
+      }
+      // (2) 고객 → 담당자 (linked만). 기존 parent가 있더라도 “최신 계약 담당자”로 갱신 가능하게 force.
+      if (finalSalesMemberId) {
+        const customerMemberId = await ensureCustomerMemberId();
+        if (customerMemberId) {
+          await ensureOrgEdgeForceParentWithSource(db, finalSalesMemberId, customerMemberId, contractId);
+        }
+      }
+    }
+
+    // ── 4.7. 본사(안성준) 담당 + 가입 인정 고객을 "본사 직속" 노드로 보장 ──
     // 요구사항:
     // - sales_member_id가 안성준(본사)이고, 가입 인정 기준을 만족하면
     //   고객을 organization_members(영업사원)로 생성/재사용하고,
@@ -658,42 +708,9 @@ async function processItem(
         invoice_no: contractFinal.invoice_no,
       });
       if (isHqSales && eligible) {
-        const customerNodeName = (item.customer_name ?? '').trim();
-        if (customerNodeName) {
-          // 본사(안성준)가 "고객"으로 찍힌 데이터는 고객 노드 생성/재사용을 하지 않는다.
-          // (본사 노드에 customer 식별자가 붙거나, 본사<->고객 노드가 순환/중복되는 문제 방지)
-          if (customerNodeName.replace(/^\[고객\]\s*/, '') === '안성준') {
-            // 계약/상태 upsert는 이미 완료됐으므로, 여기서는 스킵만 한다.
-            return isNew ? 'created' : 'updated';
-          }
-
-          // 요구사항(최종): DB에도 1개 노드만 유지
-          // - 동일 이름의 "직원 노드(external_id NULL)"가 1개면 그 노드를 고객 노드로 재사용한다.
-          // - 없으면 customer:* 노드를 생성하되 source_customer_id를 기록한다.
-          const existingEmployeeId = await findSingleEmployeeMemberIdByName(db, customerNodeName);
-          const customerPhone = ((customerData as any).phone ?? null) as string | null;
-          let customerSalesMemberId: string | null = null;
-
-          if (existingEmployeeId) {
-            customerSalesMemberId = existingEmployeeId;
-            await attachCustomerIdentityToMember(db, existingEmployeeId, { id: customerId, phone: customerPhone });
-          } else {
-            const displayName = customerNodeName.startsWith('[고객] ')
-              ? customerNodeName
-              : `[고객] ${customerNodeName}`;
-            customerSalesMemberId = await upsertSalesMember(db, {
-              name: displayName,
-              rank: '영업사원',
-              external_id: `customer:${customerId}`,
-              phone: customerPhone,
-              is_active: true,
-              source_customer_id: customerId,
-            } as any);
-          }
-
-          if (customerSalesMemberId) {
-            await ensureOrgEdgeForceParentWithSource(db, hqId, customerSalesMemberId, contractId);
-          }
+        const customerSalesMemberId = await ensureCustomerMemberId();
+        if (customerSalesMemberId) {
+          await ensureOrgEdgeForceParentWithSource(db, hqId, customerSalesMemberId, contractId);
         }
       }
     }
