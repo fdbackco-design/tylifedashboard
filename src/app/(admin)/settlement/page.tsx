@@ -115,9 +115,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     parent_id:
       m.rank === '본사'
         ? null
-        : hqIdForTree && (m.source_customer_id ?? null) != null
-          ? hqIdForTree
-          : (edgeMap.get(m.id as string) ?? null),
+        : (edgeMap.get(m.id as string) ?? null),
     depth: 0,
   }));
 
