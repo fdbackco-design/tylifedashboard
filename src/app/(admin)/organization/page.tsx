@@ -524,6 +524,7 @@ export default async function OrganizationPage({
     hqId: hqIdForTree,
     leaderMaintenanceBonusBlockedByMemberId: leaderMaintBlockByMemberId,
     policyPromotedMemberIdSet,
+    attributeCommissionToTopLineUnderHq: true,
     contracts: kpiEligibleForMetrics,
     rules: (rulesRes.data ?? []) as any[],
     settlementWindow: { start_date, end_date, label_year_month },

@@ -234,6 +234,13 @@ export function calculateOrgNodeMetrics(params: {
   leaderMaintenanceBonusBlockedByMemberId?: Map<string, boolean>;
   /** 정책 승격 이벤트가 기록된 멤버 id set (리더를 승격 threshold 계산에 포함시키기 위함) */
   policyPromotedMemberIdSet?: Set<string>;
+  /**
+   * true면 인정수당/실지급액을 \"본사(HQ) 직속 최상위 라인\"으로 귀속(집계)한다.
+   * - 본사(HQ) 노드 자체는 0 유지
+   * - HQ 직속 라인장(=parent가 HQ인 노드)에게 라인 전체 금액을 몰아준다
+   * - 라인 하위 노드의 금액은 0으로 내려(이중 집계 방지), 구좌는 기존대로 유지
+   */
+  attributeCommissionToTopLineUnderHq?: boolean;
   contracts: EligibleContract[]; // KPI 가입 인정 계약(선필터)
   rules: SettlementRule[];
   settlementWindow: { start_date: string; end_date: string; label_year_month: string };
@@ -250,6 +257,7 @@ export function calculateOrgNodeMetrics(params: {
     hqId,
     leaderMaintenanceBonusBlockedByMemberId,
     policyPromotedMemberIdSet,
+    attributeCommissionToTopLineUnderHq = false,
   } = params;
   const parentByChild = treeRowsParam?.length
     ? buildParentMapFromTreeRows(treeRowsParam)
@@ -299,6 +307,7 @@ export function calculateOrgNodeMetrics(params: {
     previousLeaderByPromotedMemberId,
     hqId,
     leaderMaintenanceBonusBlockedByMemberId,
+    attributeCommissionToTopLineUnderHq,
   });
 }
 
@@ -316,6 +325,7 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
   previousLeaderByPromotedMemberId?: Map<string, string | null>;
   hqId?: string | null;
   leaderMaintenanceBonusBlockedByMemberId?: Map<string, boolean>;
+  attributeCommissionToTopLineUnderHq?: boolean;
 }): Record<string, OrgNodeMetrics> {
   const {
     roots,
@@ -331,6 +341,7 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
     previousLeaderByPromotedMemberId,
     hqId,
     leaderMaintenanceBonusBlockedByMemberId,
+    attributeCommissionToTopLineUnderHq = false,
   } = params;
 
   const refDate = `${settlementWindow.label_year_month}-01`;
@@ -489,6 +500,65 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
       recognizedCommissionWon: recognized,
       paidCommissionWon: totalPaid,
     });
+  }
+
+  // 표시/집계 정책: 본사(HQ) 직속 최상위 라인으로 금액 귀속
+  if (attributeCommissionToTopLineUnderHq && hqId) {
+    const topLineByMemberId = new Map<string, string>();
+    const isHq = (id: string) => id === hqId || (rankById.get(id) ?? null) === '본사';
+
+    const getTopLine = (memberId: string): string => {
+      const cached = topLineByMemberId.get(memberId);
+      if (cached) return cached;
+      if (isHq(memberId)) {
+        topLineByMemberId.set(memberId, memberId);
+        return memberId;
+      }
+      let cur = memberId;
+      const visited = new Set<string>();
+      for (let i = 0; i < 128; i++) {
+        const p = parentByChild.get(cur) ?? null;
+        if (!p) break;
+        if (visited.has(p)) break;
+        visited.add(p);
+        if (isHq(p)) break; // cur가 HQ 직속 라인장
+        cur = p;
+      }
+      topLineByMemberId.set(memberId, cur);
+      return cur;
+    };
+
+    const aggRecognizedByTop = new Map<string, number>();
+    const aggPaidByTop = new Map<string, number>();
+
+    for (const m of members) {
+      if (isHq(m.id)) continue; // HQ 자체는 0 유지
+      const top = getTopLine(m.id);
+      const v = out.get(m.id);
+      if (!v) continue;
+      aggRecognizedByTop.set(top, (aggRecognizedByTop.get(top) ?? 0) + (v.recognizedCommissionWon ?? 0));
+      aggPaidByTop.set(top, (aggPaidByTop.get(top) ?? 0) + (v.paidCommissionWon ?? 0));
+    }
+
+    for (const m of members) {
+      const v = out.get(m.id);
+      if (!v) continue;
+      if (isHq(m.id)) {
+        out.set(m.id, { ...v, recognizedCommissionWon: 0, paidCommissionWon: 0 });
+        continue;
+      }
+      const top = getTopLine(m.id);
+      if (top === m.id) {
+        out.set(m.id, {
+          ...v,
+          recognizedCommissionWon: aggRecognizedByTop.get(m.id) ?? 0,
+          paidCommissionWon: aggPaidByTop.get(m.id) ?? 0,
+        });
+      } else {
+        // 라인 하위는 금액 0(라인장에 귀속)
+        out.set(m.id, { ...v, recognizedCommissionWon: 0, paidCommissionWon: 0 });
+      }
+    }
   }
 
   return Object.fromEntries(out.entries());
