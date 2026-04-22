@@ -539,8 +539,10 @@ export function calculateMemberSettlement(
   // 예외 규칙: '[고객] 김동건'은 가입 이후 정산에서 합계 수당을 60만원 차감한다.
   // (아직 가입이 없어도, 향후 가입으로 정산에 포함되는 순간부터 자동 적용됨)
   const manualAdjustment =
-    member.name.trim() === '[고객] 김동건' ? -600_000 : 0;
+    member.name.trim() === '[고객] 김동건' && totalUnitCount > 0 ? -600_000 : 0;
   if (manualAdjustment !== 0) totalAmount += manualAdjustment;
+  // 가입 구좌가 0이면 합계는 항상 0원으로 고정(음수 방지)
+  if (totalUnitCount === 0) totalAmount = 0;
 
   let leaderPromotion: LeaderPromotionSettlementDetail | null = null;
   if (leaderOpts) {
