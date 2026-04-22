@@ -70,6 +70,9 @@ export interface SettlementCalculationDetail {
   incentive_threshold: number | null;
   incentive_amount: number;
   leader_promotion?: LeaderPromotionSettlementDetail | null;
+  /** 특정 멤버 예외/수동 조정(합계 수당에 가감) */
+  manual_adjustment_won?: number;
+  manual_adjustment_reason?: string | null;
 }
 
 export interface MonthlySettlement {

@@ -534,7 +534,13 @@ export function calculateMemberSettlement(
   }
 
   const incentiveAmountCombined = ruleIncentiveAmount + leaderMaintenanceBonus;
-  const totalAmount = baseCommission + rollupCommission + leaderMaintenanceBonus;
+  let totalAmount = baseCommission + rollupCommission + leaderMaintenanceBonus;
+
+  // 예외 규칙: '[고객] 김동건'은 가입 이후 정산에서 합계 수당을 60만원 차감한다.
+  // (아직 가입이 없어도, 향후 가입으로 정산에 포함되는 순간부터 자동 적용됨)
+  const manualAdjustment =
+    member.name.trim() === '[고객] 김동건' ? -600_000 : 0;
+  if (manualAdjustment !== 0) totalAmount += manualAdjustment;
 
   let leaderPromotion: LeaderPromotionSettlementDetail | null = null;
   if (leaderOpts) {
@@ -600,6 +606,8 @@ export function calculateMemberSettlement(
     incentive_threshold: null,
     incentive_amount: leaderMaintenanceBonus,
     leader_promotion: leaderPromotion,
+    manual_adjustment_won: manualAdjustment !== 0 ? manualAdjustment : undefined,
+    manual_adjustment_reason: manualAdjustment !== 0 ? '고객 김동건 정산 예외(-60만원)' : undefined,
   };
 
   return {
