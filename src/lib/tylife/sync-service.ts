@@ -294,13 +294,78 @@ async function attachCustomerIdentityToMember(
   if (!cur) return;
   if ((cur as any).rank === '본사') return; // 본사 노드에 고객 식별자 부여 금지
 
+  // 동일 source_customer_id를 가진 다른 멤버가 이미 있으면 unique 충돌이 난다.
+  // 일반적으로는 이전에 생성된 customer:* 노드가 원인이라서, 해당 노드를 "직원 노드(memberId)"로 병합한다.
+  const { data: dupRows, error: dupErr } = await db
+    .from('organization_members')
+    .select('id, external_id, rank')
+    .eq('source_customer_id', customer.id)
+    .neq('id', memberId)
+    .limit(2);
+  if (dupErr) throw new Error(`organization_members 중복 조회 실패: ${dupErr.message}`);
+  const dup = ((dupRows ?? []) as Array<{ id: string; external_id: string | null; rank: string }>)[0] ?? null;
+
+  if (dup) {
+    const ext = dup.external_id ?? null;
+    const isCustomerNode = ext != null && ext.startsWith('customer:');
+    if (isCustomerNode) {
+      // FK들을 memberId로 옮긴 뒤 customer:* 노드를 제거해 unique를 회복한다.
+      await db.from('contracts').update({ sales_member_id: memberId }).eq('sales_member_id', dup.id);
+      await db.from('contracts').update({ contractor_member_id: memberId }).eq('contractor_member_id', dup.id);
+      await db.from('monthly_settlements').update({ member_id: memberId }).eq('member_id', dup.id);
+
+      // parent_id는 다중 참조 가능, child_id는 UNIQUE라서 "기존 customer leaf edge"는 삭제하는 쪽이 안전
+      await db.from('organization_edges').update({ parent_id: memberId }).eq('parent_id', dup.id);
+      await db.from('organization_edges').delete().eq('child_id', dup.id);
+
+      // 마지막으로 customer:* 멤버 삭제 (이미 참조가 남아있으면 FK로 실패 → 그 경우는 그냥 남겨둔다)
+      const { error: delErr } = await db.from('organization_members').delete().eq('id', dup.id);
+      if (delErr) {
+        // 삭제가 불가하면 최소한 unique 충돌을 피하기 위해 해당 노드의 source_customer_id를 비운다.
+        await db.from('organization_members').update({ source_customer_id: null }).eq('id', dup.id);
+      }
+    } else {
+      // customer:* 가 아닌데 이미 같은 customer_id를 가진 노드가 있으면,
+      // 여기서 강제로 병합하면 조직 구조를 망칠 수 있어 현재 노드는 건드리지 않는다.
+      return;
+    }
+  }
+
   const next: Record<string, unknown> = {};
   if ((cur as any).source_customer_id == null) next.source_customer_id = customer.id;
   if (((cur as any).phone == null || String((cur as any).phone).trim() === '') && customer.phone) next.phone = customer.phone;
   if (Object.keys(next).length === 0) return;
 
   const { error: upErr } = await db.from('organization_members').update(next).eq('id', memberId);
-  if (upErr) throw new Error(`organization_members 업데이트 실패: ${upErr.message}`);
+  if (!upErr) return;
+
+  // 병렬 동기화 레이스 등으로 unique 충돌이 남아있을 수 있다. 이 경우 한번 더 병합을 시도한다.
+  if (upErr.message.includes('uniq_org_members_source_customer_id')) {
+    const { data: owner } = await db
+      .from('organization_members')
+      .select('id, external_id')
+      .eq('source_customer_id', customer.id)
+      .limit(1)
+      .maybeSingle();
+
+    const ownerId = (owner as any)?.id as string | undefined;
+    const ownerExt = ((owner as any)?.external_id ?? null) as string | null;
+    if (ownerId && ownerId !== memberId && ownerExt?.startsWith('customer:')) {
+      await db.from('contracts').update({ sales_member_id: memberId }).eq('sales_member_id', ownerId);
+      await db.from('contracts').update({ contractor_member_id: memberId }).eq('contractor_member_id', ownerId);
+      await db.from('monthly_settlements').update({ member_id: memberId }).eq('member_id', ownerId);
+      await db.from('organization_edges').update({ parent_id: memberId }).eq('parent_id', ownerId);
+      await db.from('organization_edges').delete().eq('child_id', ownerId);
+      const { error: delErr } = await db.from('organization_members').delete().eq('id', ownerId);
+      if (delErr) await db.from('organization_members').update({ source_customer_id: null }).eq('id', ownerId);
+
+      const { error: retryErr } = await db.from('organization_members').update(next).eq('id', memberId);
+      if (retryErr) throw new Error(`organization_members 업데이트 실패: ${retryErr.message}`);
+      return;
+    }
+  }
+
+  throw new Error(`organization_members 업데이트 실패: ${upErr.message}`);
 }
 
 async function findSingleEmployeeMemberIdByName(
