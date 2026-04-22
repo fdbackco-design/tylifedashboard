@@ -142,6 +142,22 @@ async function ensureOrgEdgeForceParentWithSource(
 ): Promise<void> {
   if (parentId === childId) return;
 
+  // 수동 수정된 edge는 동기화가 덮어쓰지 않는다.
+  const { data: existingEdge } = await db
+    .from('organization_edges')
+    .select('id, parent_id, is_manual')
+    .eq('child_id', childId)
+    .maybeSingle();
+  if (existingEdge && (existingEdge as any).is_manual) {
+    // 수동 parent를 유지하되, 소스(contract) 연결만 남긴다.
+    const edgeId = (existingEdge as { id: string }).id;
+    await db.from('organization_edge_sources').upsert(
+      { edge_id: edgeId, source_contract_id: sourceContractId, created_by: 'sync-service' },
+      { onConflict: 'edge_id,source_contract_id' },
+    );
+    return;
+  }
+
   // cycle 방지: parentId가 childId의 하위(자손)라면 parent 변경은 순환을 만든다.
   // DB 전체를 재귀로 조회하는 대신, 최소한 "parent 체인"에서 childId가 등장하는지 확인한다.
   // (organization_edges는 child_id 기준으로 사실상 단일 parent를 가정한다)
@@ -448,13 +464,21 @@ async function ensureOrgEdgeWithSource(
   // - 최종적으로 select로 edge id를 확보한다.
   const { data: existing, error: exErr } = await db
     .from('organization_edges')
-    .select('id, parent_id')
+    .select('id, parent_id, is_manual')
     .eq('child_id', childId)
     .maybeSingle();
   if (exErr) throw new Error(`organization_edges 조회 실패: ${exErr.message}`);
 
   if (existing) {
-    const ex = existing as { id: string; parent_id: string | null };
+    const ex = existing as { id: string; parent_id: string | null; is_manual?: boolean | null };
+    if (ex.is_manual) {
+      // 수동 수정된 parent는 유지하고, source만 남긴다.
+      await db.from('organization_edge_sources').upsert(
+        { edge_id: ex.id, source_contract_id: sourceContractId, created_by: 'sync-service' },
+        { onConflict: 'edge_id,source_contract_id' },
+      );
+      return;
+    }
     if (ex.parent_id && ex.parent_id !== parentId) return;
     await db.from('organization_edge_sources').upsert(
       { edge_id: ex.id, source_contract_id: sourceContractId, created_by: 'sync-service' },

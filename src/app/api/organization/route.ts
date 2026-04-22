@@ -155,7 +155,10 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
   // edge upsert
   const { error: upErr } = await db
     .from('organization_edges')
-    .upsert({ child_id: childId, parent_id: parentId }, { onConflict: 'child_id' });
+    .upsert(
+      { child_id: childId, parent_id: parentId, is_manual: true, manual_updated_at: new Date().toISOString() } as any,
+      { onConflict: 'child_id' },
+    );
   if (upErr) return NextResponse.json({ error: `organization_edges 업데이트 실패: ${upErr.message}` }, { status: 500 });
 
   // 적용 시작월 규칙(Seoul): 26일~말일 => 다음달, 1일~25일 => 이번달
