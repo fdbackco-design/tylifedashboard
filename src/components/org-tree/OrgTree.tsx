@@ -240,6 +240,10 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
   const [scale, setScale] = useState(1);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [editMode, setEditMode] = useState(false);
+  const [editMessage, setEditMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [dragChildId, setDragChildId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
   const dragRef = useRef<{ active: boolean; startX: number; startY: number; baseX: number; baseY: number }>({
     active: false,
     startX: 0,
@@ -281,6 +285,39 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
   function handleSelect(id: string) {
     setSelectedId((prev) => (prev === id ? null : id));
   }
+
+  async function handleMoveNode(params: { childId: string; parentId: string | null }) {
+    setEditMessage(null);
+    try {
+      const res = await fetch('/api/organization', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ child_id: params.childId, parent_id: params.parentId }),
+      });
+      const json = (await res.json()) as any;
+      if (!res.ok || !json?.success) {
+        setEditMessage({ ok: false, text: json?.error ?? '관계 변경 실패' });
+        return;
+      }
+      const ym = String(json?.year_month ?? '');
+      const st = json?.settlement ?? null;
+      const settlementMsg =
+        st?.recalculated
+          ? `${ym} 정산 ${st.updated_count ?? 0}명 재계산`
+          : (st?.skipped_reason ? `정산 재계산 스킵: ${st.skipped_reason}` : '정산 재계산 스킵');
+      setEditMessage({ ok: true, text: `관계 변경 완료 · ${settlementMsg}` });
+    } catch {
+      setEditMessage({ ok: false, text: '네트워크 오류' });
+    }
+  }
+
+  useEffect(() => {
+    // 편집 모드를 끄면 하이라이트 상태도 초기화
+    if (!editMode) {
+      setDragChildId(null);
+      setDragOverId(null);
+    }
+  }, [editMode]);
 
   useEffect(() => {
     if (!debug?.enabled) return;
@@ -341,19 +378,75 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
       node: node as any,
       contractsByMember: contractsByMember as any,
     });
+    const isDropTarget = editMode && !hideCard && dragOverId === node.id;
+    const isInvalidDrop = editMode && !!dragChildId && (dragChildId === node.id);
 
     return (
       <div className="flex flex-col items-center">
         {/* 노드 카드 */}
         {hideCard ? null : (
-          <OrgTreeNode
-            node={node}
-            contractsByMember={contractsByMember}
-            extraSubtreeIds={isHqRoot ? strippedNodeIds : undefined}
-            nodeMetrics={metricsById?.[node.id] ?? null}
-            selectedId={selectedId}
-            onSelect={handleSelect}
-          />
+          <div
+            draggable={editMode && node.id !== '__hq_root__'}
+            onDragStart={(e) => {
+              if (!editMode) return;
+              e.dataTransfer.setData('text/org-child-id', node.id);
+              e.dataTransfer.effectAllowed = 'move';
+              setDragChildId(node.id);
+              setDragOverId(null);
+            }}
+            onDragEnd={() => {
+              setDragChildId(null);
+              setDragOverId(null);
+            }}
+            onDragOver={(e) => {
+              if (!editMode) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              setDragOverId(node.id);
+            }}
+            onDragEnter={() => {
+              if (!editMode) return;
+              setDragOverId(node.id);
+            }}
+            onDragLeave={() => {
+              if (!editMode) return;
+              // 자식 요소로 이동하면서 dragleave가 튀는 경우가 있어서, "현재 타겟"만 정리
+              setDragOverId((prev) => (prev === node.id ? null : prev));
+            }}
+            onDrop={(e) => {
+              if (!editMode) return;
+              e.preventDefault();
+              const childId = e.dataTransfer.getData('text/org-child-id');
+              const parentId = node.id === '__hq_root__' ? null : node.id;
+              if (!childId) return;
+              if (childId === parentId) return;
+              setDragChildId(null);
+              setDragOverId(null);
+              handleMoveNode({ childId, parentId });
+            }}
+            className={
+              editMode
+                ? [
+                    'rounded-xl transition-all',
+                    isDropTarget
+                      ? (isInvalidDrop
+                          ? 'ring-2 ring-red-400 ring-offset-2 bg-red-50/40'
+                          : 'ring-2 ring-emerald-400 ring-offset-2 bg-emerald-50/40')
+                      : 'outline outline-1 outline-transparent hover:outline-slate-300',
+                  ].join(' ')
+                : undefined
+            }
+            title={editMode ? '드롭: 이 노드 산하로 이동' : undefined}
+          >
+            <OrgTreeNode
+              node={node}
+              contractsByMember={contractsByMember}
+              extraSubtreeIds={isHqRoot ? strippedNodeIds : undefined}
+              nodeMetrics={metricsById?.[node.id] ?? null}
+              selectedId={selectedId}
+              onSelect={handleSelect}
+            />
+          </div>
         )}
 
         {/* 자식 서브트리 */}
@@ -452,6 +545,31 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
 
   return (
     <div>
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-xs text-gray-500">
+          {editMode ? '편집 모드: 노드를 드래그해서 부모 노드 위에 놓으면 소속이 변경됩니다.' : '보기 모드'}
+        </div>
+        <div className="flex items-center gap-2">
+          {editMessage && (
+            <span className={`text-xs ${editMessage.ok ? 'text-green-700' : 'text-red-600'}`}>
+              {editMessage.text}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              setEditMode((v) => !v);
+              setEditMessage(null);
+            }}
+            className={`px-3 py-1.5 text-xs rounded border ${
+              editMode ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-700 border-gray-300'
+            }`}
+          >
+            {editMode ? '편집 종료' : '조직 수정'}
+          </button>
+        </div>
+      </div>
+
       {/* 줌 가능한 뷰포트 */}
       <div
         ref={viewportRef}
@@ -460,6 +578,7 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
         onPointerDown={(e) => {
           // 캔버스처럼 패닝: pointer capture로 영역 밖으로 나가도 드래그 유지
           if (e.button !== 0) return;
+          if (editMode) return;
           // 노드 카드 위에서 시작한 포인터는 "클릭 선택"을 우선 (패닝은 카드 밖 드래그)
           const target = e.target as HTMLElement | null;
           const isOnCard = !!target?.closest?.('[data-org-node-card="1"]');
