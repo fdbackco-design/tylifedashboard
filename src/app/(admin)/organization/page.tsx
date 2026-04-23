@@ -89,6 +89,14 @@ export default async function OrganizationPage({
   const membersRaw = ((membersRes.data ?? []) as unknown as OrganizationMember[]).map((m) =>
     m.name === '안성준' ? { ...m, rank: '본사' as const } : m,
   );
+  const membersRawById = new Map<string, { rank: string; name: string; external_id?: string | null }>();
+  for (const m of membersRaw as any[]) {
+    membersRawById.set((m as any).id as string, {
+      rank: String((m as any).rank ?? ''),
+      name: String((m as any).name ?? ''),
+      external_id: ((m as any).external_id ?? null) as string | null,
+    });
+  }
   const edgesRaw = edgesRes.data ?? [];
   const contractCount = contractCountRes.count ?? 0;
   const lastSync = lastSyncRes.data as {
@@ -321,10 +329,16 @@ export default async function OrganizationPage({
     contract_code?: string | null;
     customer_name?: string | null;
   }): string => {
-    // 정책: customer 노드(본사 직계약 고객/가상 영업사원)는 "본인이 고객인 계약"을 본인에게 귀속해 보여준다.
-    // (담당자가 누구든 customer_id가 매핑되면 해당 customer 노드의 직접 계약으로 간주)
     const customerMemberId = customerMemberIdByCustomerId.get(c.customer_id) ?? null;
-    if (customerMemberId) return customerMemberId;
+    if (customerMemberId) {
+      // 요구사항: "안성준 직속으로 연결된 영업사원"만 본인이 고객인 계약을 본인 인정수당에 포함
+      const parentId = edgeMap.get(customerMemberId) ?? null;
+      const raw = membersRawById.get(customerMemberId) ?? null;
+      const isCustomerNode = ((raw?.external_id ?? '') as string).startsWith('customer:');
+      const isDirectUnderAhn = parentId != null && hqIdsRaw.has(parentId);
+      const isSalesMember = (raw?.rank ?? '') === '영업사원';
+      if (!isCustomerNode && isDirectUnderAhn && isSalesMember) return customerMemberId;
+    }
 
     // 동기화 타이밍/원본 상태 문자열 때문에 status가 '가입'으로 안 찍히는 경우가 있어도,
     // “가입 인정 기준(해약 아님 + 송장/렌탈 존재)”이면 가입으로 간주해서 예외를 항상 적용한다.
