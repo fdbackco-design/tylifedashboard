@@ -227,7 +227,11 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         raw_sales_member_id: c.sales_member_id as string,
       };
     })
-    .filter((x) => subtreeIds.has(x.origin))
+    // 표시 기준(요구):
+    // - 조직도처럼 "귀속(산하)" 기준(origin)이 서브트리에 포함되는 계약
+    // - + 원 담당자(contracts.sales_member_id)가 서브트리에 포함되는 계약도 함께 표시
+    //   (customer↔member 매핑으로 origin이 다른 사람으로 치환되어도 담당자 관점 내역을 잃지 않기 위함)
+    .filter((x) => subtreeIds.has(x.origin) || subtreeIds.has(x.raw_sales_member_id))
     .sort((a, b) => (b.join_date ?? '').localeCompare(a.join_date ?? ''));
 
   // 같은 고객명 + 같은 가입일 계약은 구좌 합산으로 한 줄로 묶는다.
