@@ -321,6 +321,7 @@ export function calculateOrgNodeMetrics(params: {
     hqId,
     leaderMaintenanceBonusBlockedByMemberId,
     attributeCommissionToTopLineUnderHq,
+    includeSelfCustomerContractsInRecognizedForMemberIds,
   });
 }
 
