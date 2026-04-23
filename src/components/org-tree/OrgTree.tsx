@@ -223,6 +223,21 @@ interface Props {
     customerNodesChildOfHq?: number;
     customerNodesInTree?: number;
     sampleMissing?: Array<{ contract_code: string; customer_id: string; customer_name: string; customer_phone: string | null }>;
+    selfCustomerRecognized?: {
+      targets_total: number;
+      self_customer_contracts_in_window_total: number;
+      self_customer_units_in_window_total: number;
+      targets_sample: Array<{
+        id: string;
+        name: string;
+        rank: string;
+        parent_id: string | null;
+        parent_name: string;
+        parent_rank: string;
+        self_customer_contracts_in_window: number;
+        self_customer_units_in_window: number;
+      }>;
+    };
   };
   metricsById?: Record<
     string,
@@ -569,6 +584,54 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
           </button>
         </div>
       </div>
+
+      {debug?.enabled && (
+        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+          <div className="font-semibold mb-1">디버그</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
+            <div>HQ eligible: {debug.hqEligibleTotal} / mapped {debug.hqEligibleMappedToCustomerNode} / missing {debug.hqEligibleMissingCustomerNode}</div>
+            <div>customer nodes: raw {debug.customerNodesRaw ?? '-'} → merged {debug.customerNodesAfterMerge ?? '-'} / childOfHQ {debug.customerNodesChildOfHq ?? '-'} / inTree {debug.customerNodesInTree ?? '-'}</div>
+            {debug.selfCustomerRecognized && (
+              <>
+                <div>
+                  self-customer targets: {debug.selfCustomerRecognized.targets_total}명
+                </div>
+                <div>
+                  self-customer(in window): {debug.selfCustomerRecognized.self_customer_contracts_in_window_total}건 · {debug.selfCustomerRecognized.self_customer_units_in_window_total}구좌
+                </div>
+              </>
+            )}
+          </div>
+
+          {debug.selfCustomerRecognized && debug.selfCustomerRecognized.targets_sample.length > 0 && (
+            <div className="mt-2 overflow-x-auto">
+              <table className="min-w-[720px] w-full text-[11px] border border-amber-200 rounded bg-white">
+                <thead className="bg-amber-100/60 border-b border-amber-200">
+                  <tr>
+                    {['대상', '직급', '부모', '부모직급', '본인고객(월) 건', '본인고객(월) 구좌'].map((h) => (
+                      <th key={h} className="px-2 py-1 text-left font-semibold text-amber-900 whitespace-nowrap">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-amber-100">
+                  {debug.selfCustomerRecognized.targets_sample.map((r) => (
+                    <tr key={r.id}>
+                      <td className="px-2 py-1 whitespace-nowrap">{r.name || r.id}</td>
+                      <td className="px-2 py-1 whitespace-nowrap">{r.rank}</td>
+                      <td className="px-2 py-1 whitespace-nowrap">{r.parent_name || r.parent_id || '-'}</td>
+                      <td className="px-2 py-1 whitespace-nowrap">{r.parent_rank || '-'}</td>
+                      <td className="px-2 py-1 tabular-nums text-right">{r.self_customer_contracts_in_window}</td>
+                      <td className="px-2 py-1 tabular-nums text-right">{r.self_customer_units_in_window}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 줌 가능한 뷰포트 */}
       <div
