@@ -60,7 +60,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
   const { start_date, end_date } = getSettlementWindowForYearMonth(yearMonth);
   const endExclusive = nextDay(end_date);
 
-  const [memberRes, membersRes, edgesRes, eligibleBaseRes, contractRowsRes] = await Promise.all([
+  const [memberRes, membersRes, edgesRes, contractRowsRes] = await Promise.all([
     db
       .from('organization_members')
       .select('id, name, rank, external_id, phone, source_customer_id')
@@ -72,13 +72,9 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
       .eq('is_active', true),
     db.from('organization_edges').select('parent_id, child_id'),
     db
-      .from('v_contract_settlement_base')
-      .select('contract_id, contract_code, join_date, unit_count, status, is_cancelled, sales_member_id')
-      .eq('year_month', yearMonth),
-    db
       .from('contracts')
       .select(
-        'id, contract_code, join_date, status, unit_count, item_name, sales_member_id, customer_id, rental_request_no, invoice_no, memo, customers(name)',
+        'id, contract_code, join_date, status, unit_count, item_name, sales_member_id, customer_id, sales_link_status, is_cancelled, rental_request_no, invoice_no, memo, customers(name)',
       )
       .gte('join_date', start_date)
       .lt('join_date', endExclusive),
@@ -157,26 +153,6 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
 
   const subtreeIds = collectSubtreeMemberIds(parentByChild, memberId);
 
-  const baseRows = (eligibleBaseRes.data ?? []) as Array<{
-    contract_id: string;
-    contract_code: string;
-    join_date: string | null;
-    unit_count: number | null;
-    status: string;
-    is_cancelled: boolean;
-    sales_member_id: string;
-  }>;
-
-  const contractIds = baseRows.map((r) => r.contract_id);
-  const { data: contractCustomerRows } = await db
-    .from('contracts')
-    .select('id, customer_id')
-    .in('id', contractIds);
-  const customerIdByContractId = new Map<string, string>();
-  for (const r of (contractCustomerRows ?? []) as Array<{ id: string; customer_id: string }>) {
-    customerIdByContractId.set(r.id, r.customer_id);
-  }
-
   const memberIdByCustomerId = new Map<string, string>();
   for (const m of membersRaw as any[]) {
     const sid = (m.source_customer_id ?? null) as string | null;
@@ -191,8 +167,8 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     }
   }
 
-  const attributedSalesMemberId = (r: { contract_id: string; sales_member_id: string }): string => {
-    const customer_id = customerIdByContractId.get(r.contract_id) ?? null;
+  const attributedSalesMemberId = (r: { customer_id: string | null; sales_member_id: string }): string => {
+    const customer_id = r.customer_id ?? null;
     let sales_member_id = r.sales_member_id;
     if (customer_id) {
       const mapped = memberIdByCustomerId.get(customer_id);
@@ -201,31 +177,54 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     return sales_member_id;
   };
 
-  const contractById = new Map<string, any>();
-  for (const c of (contractRowsRes.data ?? []) as any[]) contractById.set(c.id, c);
+  const isJoinEligible = (c: {
+    status: string;
+    rental_request_no: string | null;
+    invoice_no: string | null;
+  }): boolean => {
+    if (String(c.status ?? '').trim() === '가입') return true;
+    if (String(c.status ?? '').trim() === '해약') return false;
+    const rr = String(c.rental_request_no ?? '').trim();
+    const inv = String(c.invoice_no ?? '').trim();
+    return rr !== '' && inv !== '';
+  };
 
-  const rows = baseRows
-    .map((r) => {
-      const origin = attributedSalesMemberId(r);
-      const c = contractById.get(r.contract_id) ?? null;
-      const joinYmd = String(r.join_date ?? '').slice(0, 10);
+  const rows = ((contractRowsRes.data ?? []) as any[])
+    // v_contract_settlement_base와 동일한 "가입 인정 기준"으로 필터
+    .filter((c) => (c.is_cancelled ?? false) === false)
+    .filter((c) => String(c.status ?? '').trim() !== '취소')
+    .filter((c) => (c.sales_member_id ?? null) != null)
+    .filter((c) => String(c.sales_link_status ?? 'linked') === 'linked')
+    .filter((c) =>
+      isJoinEligible({
+        status: String(c.status ?? ''),
+        rental_request_no: (c.rental_request_no ?? null) as string | null,
+        invoice_no: (c.invoice_no ?? null) as string | null,
+      }),
+    )
+    .map((c) => {
+      const origin = attributedSalesMemberId({
+        customer_id: (c.customer_id ?? null) as string | null,
+        sales_member_id: c.sales_member_id as string,
+      });
+      const joinYmd = String(c.join_date ?? '').slice(0, 10);
       return {
-        contract_id: r.contract_id,
-        contract_code: r.contract_code,
-        join_date: r.join_date,
+        contract_id: c.id as string,
+        contract_code: c.contract_code as string,
+        join_date: c.join_date as string | null,
         join_ymd: joinYmd,
-        unit_count: r.unit_count ?? 0,
-        status: r.status,
+        unit_count: Number(c.unit_count ?? 0),
+        status: String(c.status ?? ''),
         origin,
-        customer_name: (c?.customers as any)?.name ?? '-',
-        item_name: (c?.item_name as string | null | undefined) ?? null,
+        customer_name: ((c.customers as any)?.name as string | undefined) ?? '-',
+        item_name: (c.item_name as string | null | undefined) ?? null,
         display_status: getContractDisplayStatus({
-          status: (c?.status ?? r.status) as string,
-          rental_request_no: (c?.rental_request_no ?? null) as string | null,
-          invoice_no: (c?.invoice_no ?? null) as string | null,
-          memo: (c?.memo ?? null) as string | null,
+          status: String(c.status ?? ''),
+          rental_request_no: (c.rental_request_no ?? null) as string | null,
+          invoice_no: (c.invoice_no ?? null) as string | null,
+          memo: (c.memo ?? null) as string | null,
         }),
-        raw_sales_member_id: r.sales_member_id,
+        raw_sales_member_id: c.sales_member_id as string,
       };
     })
     .filter((x) => subtreeIds.has(x.origin))
