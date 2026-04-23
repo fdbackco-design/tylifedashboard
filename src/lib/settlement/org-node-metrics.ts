@@ -31,6 +31,12 @@ type EligibleContract = {
   status: string;
   sales_member_id: string | null;
   item_name?: string | null;
+  /**
+   * "본인이 고객인 계약" 여부.
+   * - 조직도 페이지에서 현재 프로젝트의 customer↔member 매핑 기준으로 판정해 전달한다.
+   * - 정산 로직 자체(월별 정산 API)는 그대로 두고, 조직도 화면의 인정수당(표시용)에서만 일부 예외 처리에 사용한다.
+   */
+  is_self_customer_contract?: boolean;
 };
 
 const LEADER_OR_ABOVE: readonly RankType[] = ['리더', '센터장', '사업본부장'];
@@ -241,6 +247,12 @@ export function calculateOrgNodeMetrics(params: {
    * - 라인 하위 노드의 금액은 0으로 내려(이중 집계 방지), 구좌는 기존대로 유지
    */
   attributeCommissionToTopLineUnderHq?: boolean;
+  /**
+   * 조직도 페이지 전용 예외:
+   * 특정 멤버는 "본인이 고객인 계약"의 기본수당도 인정수당에 포함한다.
+   * (기존 로직은 downline이 있으면 인정수당=롤업만 반영)
+   */
+  includeSelfCustomerContractsInRecognizedForMemberIds?: Set<string>;
   contracts: EligibleContract[]; // KPI 가입 인정 계약(선필터)
   rules: SettlementRule[];
   settlementWindow: { start_date: string; end_date: string; label_year_month: string };
@@ -258,6 +270,7 @@ export function calculateOrgNodeMetrics(params: {
     leaderMaintenanceBonusBlockedByMemberId,
     policyPromotedMemberIdSet,
     attributeCommissionToTopLineUnderHq = false,
+    includeSelfCustomerContractsInRecognizedForMemberIds,
   } = params;
   const parentByChild = treeRowsParam?.length
     ? buildParentMapFromTreeRows(treeRowsParam)
@@ -326,6 +339,7 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
   hqId?: string | null;
   leaderMaintenanceBonusBlockedByMemberId?: Map<string, boolean>;
   attributeCommissionToTopLineUnderHq?: boolean;
+  includeSelfCustomerContractsInRecognizedForMemberIds?: Set<string>;
 }): Record<string, OrgNodeMetrics> {
   const {
     roots,
@@ -342,6 +356,7 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
     hqId,
     leaderMaintenanceBonusBlockedByMemberId,
     attributeCommissionToTopLineUnderHq = false,
+    includeSelfCustomerContractsInRecognizedForMemberIds,
   } = params;
 
   const refDate = `${settlementWindow.label_year_month}-01`;
@@ -377,6 +392,7 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
   const baseById = new Map<string, number>();
   const rollupById = new Map<string, number>();
   const bonusById = new Map<string, number>();
+  const selfCustomerBaseByOriginId = new Map<string, number>();
 
   for (const m of members) {
     cumUnits.set(m.id, 0);
@@ -384,6 +400,7 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
     baseById.set(m.id, 0);
     rollupById.set(m.id, 0);
     bonusById.set(m.id, 0);
+    selfCustomerBaseByOriginId.set(m.id, 0);
   }
 
   // 1) 구좌(누적/월): 계약 단위로 effective 체인을 따라 상위에도 누적
@@ -437,6 +454,16 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
     const penalty = commissionPenaltyWonForItemName(c.item_name);
     if (penalty > 0) {
       baseById.set(baseRecipient, (baseById.get(baseRecipient) ?? 0) - penalty);
+    }
+
+    // 조직도 페이지 전용 예외 집계: "본인이 고객인 계약"의 기본수당(패널티 포함)을 origin 기준으로 따로 모아둔다.
+    // - 기존 정산/롤업 계산은 변경하지 않는다.
+    // - 인정수당이 롤업만 표시되는 케이스(=downline 존재)에서만 추가 반영한다.
+    if (c.is_self_customer_contract) {
+      const add = originRate * unit - penalty;
+      if (add !== 0) {
+        selfCustomerBaseByOriginId.set(origin, (selfCustomerBaseByOriginId.get(origin) ?? 0) + add);
+      }
     }
 
     // 롤업: effective parent 체인을 따라 (상위-하위) 차액을 상위에 적립
@@ -493,7 +520,13 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
     const roll = rollupById.get(m.id) ?? 0;
     const bonus = bonusById.get(m.id) ?? 0;
     const totalPaid = base + roll + bonus;
-    const recognized = (hasDownlineById.get(m.id) ?? false) ? roll : totalPaid;
+    let recognized = (hasDownlineById.get(m.id) ?? false) ? roll : totalPaid;
+    if (
+      (hasDownlineById.get(m.id) ?? false) &&
+      includeSelfCustomerContractsInRecognizedForMemberIds?.has(m.id)
+    ) {
+      recognized += selfCustomerBaseByOriginId.get(m.id) ?? 0;
+    }
     out.set(m.id, {
       cumulativeUnitCount: cumUnits.get(m.id) ?? 0,
       monthlyUnitCount: monUnits.get(m.id) ?? 0,

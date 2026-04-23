@@ -89,14 +89,6 @@ export default async function OrganizationPage({
   const membersRaw = ((membersRes.data ?? []) as unknown as OrganizationMember[]).map((m) =>
     m.name === '안성준' ? { ...m, rank: '본사' as const } : m,
   );
-  const membersRawById = new Map<string, { rank: string; name: string; external_id?: string | null }>();
-  for (const m of membersRaw as any[]) {
-    membersRawById.set((m as any).id as string, {
-      rank: String((m as any).rank ?? ''),
-      name: String((m as any).name ?? ''),
-      external_id: ((m as any).external_id ?? null) as string | null,
-    });
-  }
   const edgesRaw = edgesRes.data ?? [];
   const contractCount = contractCountRes.count ?? 0;
   const lastSync = lastSyncRes.data as {
@@ -329,16 +321,10 @@ export default async function OrganizationPage({
     contract_code?: string | null;
     customer_name?: string | null;
   }): string => {
+    // 정책: customer 노드(본사 직계약 고객/가상 영업사원)는 "본인이 고객인 계약"을 본인에게 귀속해 보여준다.
+    // (담당자가 누구든 customer_id가 매핑되면 해당 customer 노드의 직접 계약으로 간주)
     const customerMemberId = customerMemberIdByCustomerId.get(c.customer_id) ?? null;
-    if (customerMemberId) {
-      // 요구사항: "안성준 직속으로 연결된 영업사원"만 본인이 고객인 계약을 본인 인정수당에 포함
-      const parentId = edgeMap.get(customerMemberId) ?? null;
-      const raw = membersRawById.get(customerMemberId) ?? null;
-      const isCustomerNode = ((raw?.external_id ?? '') as string).startsWith('customer:');
-      const isDirectUnderAhn = parentId != null && hqIdsRaw.has(parentId);
-      const isSalesMember = (raw?.rank ?? '') === '영업사원';
-      if (!isCustomerNode && isDirectUnderAhn && isSalesMember) return customerMemberId;
-    }
+    if (customerMemberId) return customerMemberId;
 
     // 동기화 타이밍/원본 상태 문자열 때문에 status가 '가입'으로 안 찍히는 경우가 있어도,
     // “가입 인정 기준(해약 아님 + 송장/렌탈 존재)”이면 가입으로 간주해서 예외를 항상 적용한다.
@@ -501,6 +487,7 @@ export default async function OrganizationPage({
       unit_count: c.unit_count ?? 0,
       status: c.status,
       item_name: c.item_name ?? null,
+      customer_id: c.customer_id,
       // metrics도 동일 정책: customer 노드로 귀속(origin)을 치환한다.
       sales_member_id: remapMemberId(mapSalesMemberForOrg({
         sales_member_id: c.sales_member_id,
@@ -513,6 +500,23 @@ export default async function OrganizationPage({
         contract_code: c.contract_code,
         customer_name: c.customers?.name ?? '',
       })),
+      // "본인이 고객인 계약" 판정(프로젝트의 customer↔member 매핑 사용)
+      is_self_customer_contract: (() => {
+        const effectiveSalesMemberId = remapMemberId(mapSalesMemberForOrg({
+          sales_member_id: c.sales_member_id,
+          customer_id: c.customer_id,
+          status: c.status,
+          rental_request_no: c.rental_request_no ?? null,
+          invoice_no: c.invoice_no ?? null,
+          memo: c.memo ?? null,
+          customer_phone: c.customers?.phone ?? null,
+          contract_code: c.contract_code,
+          customer_name: c.customers?.name ?? '',
+        }));
+        const effectiveCustomerMemberId = customerIdToEffectiveMemberId.get(c.customer_id) ?? null;
+        if (!effectiveCustomerMemberId) return false;
+        return remapMemberId(effectiveCustomerMemberId) === effectiveSalesMemberId;
+      })(),
     }));
 
   // 수당(인정/실지급) parent 체인은 트리와 동일한 단일 parent(child_id UNIQUE)를 써야 한다.
@@ -539,6 +543,27 @@ export default async function OrganizationPage({
     leaderMaintenanceBonusBlockedByMemberId: leaderMaintBlockByMemberId,
     policyPromotedMemberIdSet,
     attributeCommissionToTopLineUnderHq: true,
+    // 조직도 페이지 전용 예외: 안성준 직속(1단계) 영업사원/리더는 "본인 고객 계약" 기본수당도 인정수당에 포함
+    includeSelfCustomerContractsInRecognizedForMemberIds: (() => {
+      const byId = new Map<string, { name: string; rank: string }>();
+      for (const m of members as any[]) byId.set(m.id as string, { name: String(m.name ?? ''), rank: String(m.rank ?? '') });
+
+      const set = new Set<string>();
+      for (const e of dedupedEdges as any[]) {
+        const parentId = (e.parent_id ?? null) as string | null;
+        const childId = (e.child_id ?? null) as string | null;
+        if (!parentId || !childId) continue;
+
+        const p = byId.get(parentId);
+        const ch = byId.get(childId);
+        if (!p || !ch) continue;
+
+        const parentIsAhn = p.name === '안성준' && (p.rank === '영업사원' || p.rank === '본사');
+        const childIsTargetRank = ch.rank === '영업사원' || ch.rank === '리더';
+        if (parentIsAhn && childIsTargetRank) set.add(childId);
+      }
+      return set;
+    })(),
     contracts: kpiEligibleForMetrics,
     rules: (rulesRes.data ?? []) as any[],
     settlementWindow: { start_date, end_date, label_year_month },
