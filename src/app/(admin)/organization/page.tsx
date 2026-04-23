@@ -519,10 +519,27 @@ export default async function OrganizationPage({
       })(),
     }));
 
-  // 조직도 페이지 전용 예외 대상:
-  // - "본인 고객 계약"이 존재하는 경우, downline이 있어도 그 계약의 기본수당(패널티 포함)을 인정수당에 포함한다.
-  // - 특정 라인(예: 안성준 직속)으로 제한하지 않고, 모든 멤버에 동일 적용.
-  const selfCustomerRecognizedTargetIds = new Set<string>((members as any[]).map((m) => String((m as any).id)));
+  // 조직도 페이지 전용 예외 대상(안성준 직속 1단계 영업사원/리더) 계산 + 디버그용 요약
+  const selfCustomerRecognizedTargetIds = (() => {
+    const byId = new Map<string, { name: string; rank: string }>();
+    for (const m of members as any[]) byId.set(m.id as string, { name: String(m.name ?? ''), rank: String(m.rank ?? '') });
+
+    const set = new Set<string>();
+    for (const e of dedupedEdges as any[]) {
+      const parentId = (e.parent_id ?? null) as string | null;
+      const childId = (e.child_id ?? null) as string | null;
+      if (!parentId || !childId) continue;
+
+      const p = byId.get(parentId);
+      const ch = byId.get(childId);
+      if (!p || !ch) continue;
+
+      const parentIsAhn = p.name === '안성준' && (p.rank === '영업사원' || p.rank === '본사');
+      const childIsTargetRank = ch.rank === '영업사원' || ch.rank === '리더';
+      if (parentIsAhn && childIsTargetRank) set.add(childId);
+    }
+    return set;
+  })();
 
   const selfCustomerDebug = (() => {
     const byId = new Map<string, { name: string; rank: string }>();
