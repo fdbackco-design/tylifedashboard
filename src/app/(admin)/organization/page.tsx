@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { buildOrgTree } from '@/lib/settlement/calculator';
 import { BASE_AMOUNT_PER_UNIT } from '@/lib/settlement/constants';
-import { getSettlementWindowSeoul } from '@/lib/settlement/settlement-window';
+import { getSettlementWindowForYearMonth, getSettlementWindowSeoul } from '@/lib/settlement/settlement-window';
 import { calculateOrgNodeMetrics } from '@/lib/settlement/org-node-metrics';
 import { isSettlementEligibleContract } from '@/lib/settlement/settlement-eligibility';
 import { isContractJoinCompleted } from '@/lib/utils/contract-display-status';
@@ -47,13 +48,30 @@ function formatWon(value: number): string {
 export default async function OrganizationPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ debug?: string }>;
+  searchParams?: Promise<{ debug?: string; year_month?: string }>;
 }) {
   const sp = (await searchParams) ?? {};
   const debugEnabled = sp.debug === '1';
   const db = createAdminSupabaseClient();
 
-  const { start_date, end_date, label_year_month } = getSettlementWindowSeoul();
+  const defaultYearMonth = getSettlementWindowSeoul().label_year_month;
+  const requestedYearMonth = sp.year_month ?? defaultYearMonth;
+  const yearMonth = /^\d{4}-\d{2}$/.test(requestedYearMonth) ? requestedYearMonth : defaultYearMonth;
+  const { start_date, end_date, label_year_month } = getSettlementWindowForYearMonth(yearMonth);
+
+  // 월 목록 (최근 12개월) — 정산 현황과 동일 UX
+  const months: string[] = [];
+  const now = new Date();
+  for (let i = 0; i < 12; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  const monthHref = (m: string): string => {
+    const qs = new URLSearchParams();
+    qs.set('year_month', m);
+    if (debugEnabled) qs.set('debug', '1');
+    return `/organization?${qs.toString()}`;
+  };
 
   const [membersRes, edgesRes, contractCountRes, lastSyncRes, contractsRes, kpiRes, rulesRes, promoEventsRes] =
     await Promise.all([
@@ -682,8 +700,28 @@ export default async function OrganizationPage({
           <p className="text-sm text-gray-500 mt-0.5">
             총 {orgTreeVisibleCountExcludingHqRank}명 · 계약 {contractCount.toLocaleString()}건 저장됨
           </p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            기준 {label_year_month} · {start_date}~{end_date}
+          </p>
         </div>
         <SyncButton />
+      </div>
+
+      {/* 월 선택 (조직도 계산 기준) */}
+      <div className="flex gap-1 mb-5 flex-wrap items-center">
+        {months.map((m) => (
+          <Link
+            key={m}
+            href={monthHref(m)}
+            className={`px-2.5 py-1 rounded text-xs border ${
+              m === label_year_month
+                ? 'bg-slate-800 text-white border-slate-800'
+                : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
+            }`}
+          >
+            {m.slice(5)}월
+          </Link>
+        ))}
       </div>
 
       {/* 마지막 동기화 상태 */}
