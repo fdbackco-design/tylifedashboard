@@ -58,21 +58,15 @@ export default function SettlementLineTableClient(props: {
   const [splitSaveError, setSplitSaveError] = useState<string | null>(null);
 
   useEffect(() => {
-    const next: Record<string, boolean> = {};
-    for (const r of props.rows) {
-      next[r.topLineId] = props.selfIncludedInitialByTopId[r.topLineId] ?? true;
-    }
-    setSelfIncludedByTopId(next);
+    // 초기값은 DB에서 내려온 맵을 우선 사용 (행이 분리되어도 child id에 대한 설정이 바로 반영될 수 있게)
+    setSelfIncludedByTopId(props.selfIncludedInitialByTopId ?? {});
     setSaveError(null);
     // yearMonth/rows 바뀌면 다시 로드
   }, [props.yearMonth, props.rows, props.selfIncludedInitialByTopId]);
 
   useEffect(() => {
-    const next: Record<string, boolean> = {};
-    for (const r of props.rows) {
-      next[r.topLineId] = props.splitOpenInitialByTopId[r.topLineId] ?? false;
-    }
-    setSplitOpenByTopId(next);
+    // 초기값은 DB에서 내려온 맵을 우선 사용 (행이 분리되어도 child id에 대한 설정이 바로 반영될 수 있게)
+    setSplitOpenByTopId(props.splitOpenInitialByTopId ?? {});
     setSplitSaveError(null);
   }, [props.yearMonth, props.rows, props.splitOpenInitialByTopId]);
 
@@ -109,62 +103,78 @@ export default function SettlementLineTableClient(props: {
       return { base, rollup, leaderMaint, total, directContractCount, directUnitSum };
     };
 
-    // 산하 분리 보기: 행 재구성 (기본수당만 재분배가 목표이지만, 여기서는 "기존 계산 결과"를 subtree로 재집계해 행을 만든다)
-    const expandedRowsBase: SettlementLineRow[] = [];
-    for (const top of props.rows) {
-      const topId = top.topLineId;
-      const isSplit = splitOpenByTopId[topId] ?? false;
+    // 산하 분리 보기: 행 재구성(재귀)
+    // - split 상태인 노드는 "본인만" + "직계 자식 subtree 행들"로 펼친다.
+    // - split 상태가 아니면 해당 노드 subtree를 1행으로 보여준다.
+    type ExpandedRow = SettlementLineRow & { __anchorTopLineId: string };
+
+    const buildRowForSubtree = (nodeId: string, anchorTopLineId: string): ExpandedRow | null => {
+      const subtree = collectSubtree(nodeId);
+      const inLine = new Set<string>();
+      for (const mid of subtree) {
+        if ((props.topLineIdByMemberId[mid] ?? null) === anchorTopLineId) inLine.add(mid);
+      }
+      if (inLine.size === 0) return null;
+      const agg = sumAgg(inLine);
+      const meta = props.memberAggById[nodeId] ?? null;
+      return {
+        topLineId: nodeId,
+        topDisplayName: meta?.displayName ?? nodeId,
+        topRank: meta?.rank ?? '-',
+        base: agg.base,
+        rollup: agg.rollup,
+        leaderMaint: agg.leaderMaint,
+        total: agg.total,
+        directContractCount: agg.directContractCount,
+        directUnitSum: agg.directUnitSum,
+        ownDirectUnitSum: meta?.directUnitSum ?? 0,
+        __anchorTopLineId: anchorTopLineId,
+      };
+    };
+
+    const buildRowForSelfOnly = (nodeId: string, anchorTopLineId: string): ExpandedRow | null => {
+      const meta = props.memberAggById[nodeId] ?? null;
+      if (!meta) return null;
+      // self-only는 "본인 1명"의 기존 월정산 결과(기본/롤업/유지장려/합계)를 그대로 보여준다.
+      // (요구: 롤업/유지장려는 기존 결과 유지. base 역시 기존 계산값을 사용)
+      return {
+        topLineId: nodeId,
+        topDisplayName: meta.displayName ?? nodeId,
+        topRank: meta.rank ?? '-',
+        base: meta.base,
+        rollup: meta.rollup,
+        leaderMaint: meta.leaderMaint,
+        total: meta.total,
+        directContractCount: meta.directContractCount,
+        directUnitSum: meta.directUnitSum,
+        ownDirectUnitSum: meta.directUnitSum,
+        __anchorTopLineId: anchorTopLineId,
+      };
+    };
+
+    const expandNode = (nodeId: string, anchorTopLineId: string): ExpandedRow[] => {
+      const isSplit = (splitOpenByTopId[nodeId] ?? false) as boolean;
       if (!isSplit) {
-        expandedRowsBase.push(top);
-        continue;
+        const row = buildRowForSubtree(nodeId, anchorTopLineId);
+        return row ? [row] : [];
       }
 
-      // (1) 상위(본사 직속) 노드: 본인 멤버 1명만 남긴다.
-      const selfAgg = props.memberAggById[topId] ?? null;
-      if (selfAgg) {
-        expandedRowsBase.push({
-          topLineId: topId,
-          topDisplayName: top.topDisplayName,
-          topRank: top.topRank,
-          base: selfAgg.base,
-          rollup: selfAgg.rollup,
-          leaderMaint: selfAgg.leaderMaint,
-          total: selfAgg.total,
-          directContractCount: selfAgg.directContractCount,
-          directUnitSum: selfAgg.directUnitSum,
-          ownDirectUnitSum: selfAgg.directUnitSum,
-        });
-      } else {
-        // fallback: 데이터가 없으면 기존 행 유지
-        expandedRowsBase.push(top);
-      }
+      const out: ExpandedRow[] = [];
+      const selfRow = buildRowForSelfOnly(nodeId, anchorTopLineId);
+      if (selfRow) out.push(selfRow);
 
-      // (2) 직계 하위 노드들을 "독립 행"으로 표시 (해당 하위 subtree 합산)
-      const directChildren = props.childrenByParent[topId] ?? [];
+      const directChildren = props.childrenByParent[nodeId] ?? [];
       for (const childId of directChildren) {
-        // 현재 라인(topId)에 속한 멤버만 포함(다른 라인으로 분기된 경우 제외)
-        const subtree = collectSubtree(childId);
-        const inLine = new Set<string>();
-        for (const mid of subtree) {
-          if ((props.topLineIdByMemberId[mid] ?? null) === topId) inLine.add(mid);
-        }
-        if (inLine.size === 0) continue;
-
-        const agg = sumAgg(inLine);
-        const childMeta = props.memberAggById[childId] ?? null;
-        expandedRowsBase.push({
-          topLineId: childId,
-          topDisplayName: childMeta?.displayName ?? childId,
-          topRank: childMeta?.rank ?? '-',
-          base: agg.base,
-          rollup: agg.rollup,
-          leaderMaint: agg.leaderMaint,
-          total: agg.total,
-          directContractCount: agg.directContractCount,
-          directUnitSum: agg.directUnitSum,
-          ownDirectUnitSum: childMeta?.directUnitSum ?? 0,
-        });
+        // 같은 라인(anchor)에 속한 subtree만 보여준다.
+        out.push(...expandNode(childId, anchorTopLineId));
       }
+      return out;
+    };
+
+    const expandedRowsBase: ExpandedRow[] = [];
+    for (const top of props.rows) {
+      const anchorTopLineId = top.topLineId;
+      expandedRowsBase.push(...expandNode(anchorTopLineId, anchorTopLineId));
     }
 
     let excludedUnits = 0;
@@ -288,11 +298,12 @@ export default function SettlementLineTableClient(props: {
                       >
                         {r.topDisplayName || '-'}
                       </Link>
-                      {/* 산하 분리(Preview): 본사 직속 라인 노드만 대상으로 버튼 표시 */}
+                      {/* 산하 분리(Preview): 현재 행(노드)이 직계 자식이 있으면 언제든 분리 가능(재귀) */}
                       {(() => {
                         const hasChildren = (props.childrenByParent[r.topLineId] ?? []).length > 0;
-                        const isTopLine = (props.topLineIdByMemberId[r.topLineId] ?? null) === r.topLineId;
-                        if (!isTopLine) return null;
+                        // 월정산 결과에 존재하는 노드만(표시 가능한 노드만) 버튼 노출
+                        const hasMeta = !!props.memberAggById[r.topLineId];
+                        if (!hasMeta) return null;
                         return (
                           <button
                             type="button"
