@@ -106,9 +106,9 @@ export default function SettlementLineTableClient(props: {
     // 산하 분리 보기: 행 재구성(재귀)
     // - split 상태인 노드는 "본인만" + "직계 자식 subtree 행들"로 펼친다.
     // - split 상태가 아니면 해당 노드 subtree를 1행으로 보여준다.
-    type ExpandedRow = SettlementLineRow & { __anchorTopLineId: string };
+    type ExpandedRow = SettlementLineRow & { __anchorTopLineId: string; __depth: number };
 
-    const buildRowForSubtree = (nodeId: string, anchorTopLineId: string): ExpandedRow | null => {
+    const buildRowForSubtree = (nodeId: string, anchorTopLineId: string, depth: number): ExpandedRow | null => {
       const subtree = collectSubtree(nodeId);
       const inLine = new Set<string>();
       for (const mid of subtree) {
@@ -129,10 +129,11 @@ export default function SettlementLineTableClient(props: {
         directUnitSum: agg.directUnitSum,
         ownDirectUnitSum: meta?.directUnitSum ?? 0,
         __anchorTopLineId: anchorTopLineId,
+        __depth: depth,
       };
     };
 
-    const buildRowForSelfOnly = (nodeId: string, anchorTopLineId: string): ExpandedRow | null => {
+    const buildRowForSelfOnly = (nodeId: string, anchorTopLineId: string, depth: number): ExpandedRow | null => {
       const meta = props.memberAggById[nodeId] ?? null;
       if (!meta) return null;
       // self-only는 "본인 1명"의 기존 월정산 결과(기본/롤업/유지장려/합계)를 그대로 보여준다.
@@ -149,24 +150,25 @@ export default function SettlementLineTableClient(props: {
         directUnitSum: meta.directUnitSum,
         ownDirectUnitSum: meta.directUnitSum,
         __anchorTopLineId: anchorTopLineId,
+        __depth: depth,
       };
     };
 
-    const expandNode = (nodeId: string, anchorTopLineId: string): ExpandedRow[] => {
+    const expandNode = (nodeId: string, anchorTopLineId: string, depth: number): ExpandedRow[] => {
       const isSplit = (splitOpenByTopId[nodeId] ?? false) as boolean;
       if (!isSplit) {
-        const row = buildRowForSubtree(nodeId, anchorTopLineId);
+        const row = buildRowForSubtree(nodeId, anchorTopLineId, depth);
         return row ? [row] : [];
       }
 
       const out: ExpandedRow[] = [];
-      const selfRow = buildRowForSelfOnly(nodeId, anchorTopLineId);
+      const selfRow = buildRowForSelfOnly(nodeId, anchorTopLineId, depth);
       if (selfRow) out.push(selfRow);
 
       const directChildren = props.childrenByParent[nodeId] ?? [];
       for (const childId of directChildren) {
         // 같은 라인(anchor)에 속한 subtree만 보여준다.
-        out.push(...expandNode(childId, anchorTopLineId));
+        out.push(...expandNode(childId, anchorTopLineId, depth + 1));
       }
       return out;
     };
@@ -174,7 +176,7 @@ export default function SettlementLineTableClient(props: {
     const expandedRowsBase: ExpandedRow[] = [];
     for (const top of props.rows) {
       const anchorTopLineId = top.topLineId;
-      expandedRowsBase.push(...expandNode(anchorTopLineId, anchorTopLineId));
+      expandedRowsBase.push(...expandNode(anchorTopLineId, anchorTopLineId, 0));
     }
 
     let excludedUnits = 0;
@@ -296,7 +298,19 @@ export default function SettlementLineTableClient(props: {
                         href={`/settlement/member?year_month=${props.yearMonth}&member_id=${r.topLineId}`}
                         className="text-blue-600 hover:underline"
                       >
-                        {r.topDisplayName || '-'}
+                        <span
+                          className="inline-flex items-center"
+                          style={{
+                            paddingLeft: `${Math.min(5, (r.__depth ?? 0) as number) * 14}px`,
+                          }}
+                        >
+                          {(r.__depth ?? 0) > 0 && (
+                            <span className="mr-1 text-gray-400" aria-hidden="true">
+                              ↳
+                            </span>
+                          )}
+                          {r.topDisplayName || '-'}
+                        </span>
                       </Link>
                       {/* 산하 분리(Preview): 현재 행(노드)이 직계 자식이 있으면 언제든 분리 가능(재귀) */}
                       {(() => {
