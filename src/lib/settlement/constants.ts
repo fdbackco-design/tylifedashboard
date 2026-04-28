@@ -44,5 +44,6 @@ export function commissionPenaltyWonForItemName(
 ): number {
   const t = (itemName ?? '').trim();
   if (!t) return 0;
-  return t === COMMISSION_PENALTY_ITEM_NAME ? COMMISSION_PENALTY_WON : 0;
+  // 요구: 차감 금액은 유지하되, 물품명에 '에코백스'가 포함될 때만 차감
+  return t.includes('에코백스') ? COMMISSION_PENALTY_WON : 0;
 }
