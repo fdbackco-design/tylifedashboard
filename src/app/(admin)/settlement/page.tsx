@@ -9,6 +9,7 @@ import type { RankType } from '@/lib/types';
 import type { SettlementCalculationDetail } from '@/lib/types/settlement';
 import RecalcButton from './RecalcButton';
 import { isOrgDisplayHiddenMemberName } from '@/lib/organization/org-display-hidden';
+import SettlementLineTableClient, { type SettlementLineRow } from './SettlementLineTableClient';
 
 export const metadata: Metadata = { title: '정산 현황' };
 export const dynamic = 'force-dynamic';
@@ -361,6 +362,17 @@ export default async function SettlementPage({ searchParams }: PageProps) {
 
   const totalAmount = displayLineRows.reduce((sum, r) => sum + (r.total ?? 0), 0);
 
+  // DB 저장된 "본인 계약 수당 인정" 설정 로드 (월/라인 단위)
+  const { data: prefRows } = await db
+    .from('settlement_self_contract_preferences')
+    .select('top_line_id, included')
+    .eq('year_month', yearMonth);
+  const selfIncludedInitialByTopId: Record<string, boolean> = {};
+  for (const r of (prefRows ?? []) as Array<{ top_line_id: string; included: boolean }>) {
+    if (!r?.top_line_id) continue;
+    selfIncludedInitialByTopId[String(r.top_line_id)] = Boolean(r.included);
+  }
+
   const kpiRow = ((kpiRes.data ?? [])[0] ?? null) as
     | { total_join_units: number; period_join_units: number }
     | null;
@@ -388,9 +400,6 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       <div className="flex items-start justify-between mb-6">
         <div>
           <h2 className="text-2xl font-bold text-gray-800">정산 현황</h2>
-          <p className="text-sm text-gray-500 mt-0.5">
-            {yearMonth} · 합계 {formatKRW(totalAmount)}
-          </p>
           {allContractsCount > 0 && (
             <p className="text-xs text-gray-400 mt-0.5">
               {yearMonth} 계약 {allContractsCount}건 중{' '}
@@ -411,33 +420,33 @@ export default async function SettlementPage({ searchParams }: PageProps) {
         </div>
 
         <div className="flex items-start gap-3">
-          {/* KPI (오른쪽) */}
-          <div className="hidden md:grid grid-cols-3 gap-2">
-            <div className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm shadow-sm">
-              <div className="text-[11px] text-gray-500">총 매출</div>
-              <div className="font-bold text-gray-800 tabular-nums">{formatKRW(totalSales)}</div>
-            </div>
-            <div className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm shadow-sm">
-              <div className="text-[11px] text-gray-500">이번달 매출</div>
-              <div className="font-bold text-gray-800 tabular-nums">{formatKRW(periodSales)}</div>
-              <div className="text-[10px] text-gray-400 mt-0.5">
-                기준 {start_date}~{end_date}
-              </div>
-            </div>
-            <div className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm shadow-sm">
-              <div className="text-[11px] text-gray-500">수익</div>
-              <div className={`font-bold tabular-nums ${profit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
-                {formatKRW(profit)}
-              </div>
-              <div className="text-[10px] text-gray-400 mt-0.5">
-                이번달 매출 - 정산금 합계
-              </div>
-            </div>
-          </div>
-
           <RecalcButton yearMonth={yearMonth} />
         </div>
       </div>
+
+      {/* KPI + 합계 + 테이블(클라이언트 조정 반영) */}
+      <SettlementLineTableClient
+        yearMonth={yearMonth}
+        todayYearMonth={todayYearMonth}
+        startDate={start_date}
+        endDate={end_date}
+        totalSales={totalSales}
+        periodSales={periodSales}
+        selfIncludedInitialByTopId={selfIncludedInitialByTopId}
+        rows={displayLineRows.map<SettlementLineRow>((r) => ({
+          topLineId: r.topLineId,
+          topDisplayName: r.topDisplayName,
+          topRank: String(r.topRank ?? ''),
+          base: r.base,
+          rollup: r.rollup,
+          leaderMaint: r.leaderMaint,
+          total: r.total,
+          directContractCount: r.direct_contract_ids.size,
+          directUnitSum: r.direct_unit_sum,
+          ownDirectUnitSum: directByMember.get(r.topLineId)?.unitSum ?? 0,
+        }))}
+        onGoMemberDetailHref={(topLineId) => `/settlement/member?year_month=${yearMonth}&member_id=${topLineId}`}
+      />
 
       {/* 필터 */}
       <div className="flex gap-3 mb-5 flex-wrap items-center">
@@ -484,149 +493,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
         ))}
       </div>
 
-      {/* 정산 테이블 */}
-      <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                {[
-                  '담당자',
-                  '직급',
-                  '리더(정책)',
-                  '적용 단가',
-                  '직접계약',
-                  '직접구좌',
-                  '산하구좌',
-                  '기본수당',
-                  '롤업수당',
-                  '유지장려(리더)',
-                  '합계',
-                  '확정',
-                ].map((h) => (
-                  <th
-                    key={h}
-                    className="px-4 py-3 text-left text-xs font-semibold text-gray-600 whitespace-nowrap"
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {(settlements ?? []).length === 0 && (
-                <tr>
-                  <td colSpan={12} className="px-6 py-10 text-center">
-                    <p className="text-gray-500 font-medium mb-2">{yearMonth} 정산 데이터가 없습니다.</p>
-                    {allContractsCount === 0 ? (
-                      <p className="text-xs text-gray-400">
-                        이 달에 저장된 계약이 없습니다.{' '}
-                        <span className="font-medium">조직도 페이지</span>에서 TY Life 동기화를 먼저 실행하세요.
-                      </p>
-                    ) : eligibleContractsCount === 0 ? (
-                      <p className="text-xs text-amber-600">
-                        {allContractsCount}건의 계약이 있지만 정산 대상(가입 인정 기준)이 0건입니다.
-                        <br />
-                        정산 계산은 <strong>가입 상태 기준</strong>으로 계약을 포함합니다.
-                      </p>
-                    ) : (
-                      <p className="text-xs text-gray-400">
-                        위 &apos;{yearMonth} 정산 재계산&apos; 버튼을 눌러 정산을 계산하세요.
-                      </p>
-                    )}
-                  </td>
-                </tr>
-              )}
-              {displayLineRows.map((r) => {
-                return (
-                  <tr key={r.topLineId} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-medium">
-                      <Link
-                        href={`/settlement/member?year_month=${yearMonth}&member_id=${r.topLineId}`}
-                        className="text-blue-600 hover:underline"
-                      >
-                        {r.topDisplayName || '-'}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">{r.topRank as string}</td>
-                    <td className="px-4 py-3 text-xs text-gray-700">
-                      -
-                    </td>
-                    <td className="px-4 py-3 text-xs text-gray-600 max-w-[200px] whitespace-normal">
-                      라인 합계
-                    </td>
-                    <td className="px-4 py-3 tabular-nums text-right">
-                      {r.direct_contract_ids.size.toLocaleString()}건
-                    </td>
-                    <td className="px-4 py-3 tabular-nums text-right">
-                      {r.direct_unit_sum.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3 tabular-nums text-right">
-                      -
-                    </td>
-                    <td className="px-4 py-3 tabular-nums text-right text-gray-700">
-                      {formatKRW(r.base)}
-                    </td>
-                    <td className="px-4 py-3 tabular-nums text-right text-gray-700">
-                      {formatKRW(r.rollup)}
-                    </td>
-                    <td className="px-4 py-3 tabular-nums text-right text-violet-700">
-                      {formatKRW(r.leaderMaint)}
-                    </td>
-                    <td className="px-4 py-3 tabular-nums text-right font-bold text-gray-900">
-                      {formatKRW(r.total)}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      -
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-            {(settlements ?? []).length > 0 && (
-              <tfoot className="border-t-2 border-gray-200 bg-gray-50">
-                <tr>
-                  <td colSpan={7} className="px-4 py-3 font-semibold text-gray-700">
-                    합계
-                  </td>
-                  <td className="px-4 py-3 tabular-nums text-right font-semibold">
-                    {formatKRW(
-                      (settlements ?? []).reduce((sum, r) => {
-                        if (isHiddenMember(r)) return sum;
-                        if (isZeroOutMember(r)) return sum;
-                        return sum + ((r.base_commission as number) ?? 0);
-                      }, 0),
-                    )}
-                  </td>
-                  <td className="px-4 py-3 tabular-nums text-right font-semibold">
-                    {formatKRW(
-                      (settlements ?? []).reduce((sum, r) => {
-                        if (isHiddenMember(r)) return sum;
-                        if (isZeroOutMember(r)) return sum;
-                        return sum + ((r.rollup_commission as number) ?? 0);
-                      }, 0),
-                    )}
-                  </td>
-                  <td className="px-4 py-3 tabular-nums text-right font-semibold text-violet-700">
-                    {formatKRW(
-                      (settlements ?? []).reduce((sum, r) => {
-                        if (isHiddenMember(r)) return sum;
-                        if (isZeroOutMember(r)) return sum;
-                        const d = r.calculation_detail as SettlementCalculationDetail | null;
-                        return sum + (d?.leader_promotion?.leader_maintenance_bonus_amount ?? 0);
-                      }, 0),
-                    )}
-                  </td>
-                  <td className="px-4 py-3 tabular-nums text-right font-bold text-gray-900">
-                    {formatKRW(totalAmount)}
-                  </td>
-                  <td />
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-      </div>
+      {/* 테이블은 클라이언트 컴포넌트에서 렌더(토글/합계 조정 포함) */}
     </div>
   );
 }
