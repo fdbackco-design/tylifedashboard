@@ -431,29 +431,6 @@ export default async function SettlementPage({ searchParams }: PageProps) {
         </div>
       </div>
 
-      {/* KPI + 합계 + 테이블(클라이언트 조정 반영) */}
-      <SettlementLineTableClient
-        yearMonth={yearMonth}
-        todayYearMonth={todayYearMonth}
-        startDate={start_date}
-        endDate={end_date}
-        totalSales={totalSales}
-        periodSales={periodSales}
-        selfIncludedInitialByTopId={selfIncludedInitialByTopId}
-        rows={displayLineRows.map<SettlementLineRow>((r) => ({
-          topLineId: r.topLineId,
-          topDisplayName: r.topDisplayName,
-          topRank: String(r.topRank ?? ''),
-          base: r.base,
-          rollup: r.rollup,
-          leaderMaint: r.leaderMaint,
-          total: r.total,
-          directContractCount: r.direct_contract_ids.size,
-          directUnitSum: r.direct_unit_sum,
-          ownDirectUnitSum: directByMember.get(r.topLineId)?.unitSum ?? 0,
-        }))}
-      />
-
       {/* 필터 */}
       <div className="flex gap-3 mb-5 flex-wrap items-center">
         {/* 월 선택 */}
@@ -498,6 +475,29 @@ export default async function SettlementPage({ searchParams }: PageProps) {
           </Link>
         ))}
       </div>
+
+      {/* KPI + 합계 + 테이블(클라이언트 조정 반영) */}
+      <SettlementLineTableClient
+        yearMonth={yearMonth}
+        todayYearMonth={todayYearMonth}
+        startDate={start_date}
+        endDate={end_date}
+        totalSales={totalSales}
+        periodSales={periodSales}
+        selfIncludedInitialByTopId={selfIncludedInitialByTopId}
+        rows={displayLineRows.map<SettlementLineRow>((r) => ({
+          topLineId: r.topLineId,
+          topDisplayName: r.topDisplayName,
+          topRank: String(r.topRank ?? ''),
+          base: r.base,
+          rollup: r.rollup,
+          leaderMaint: r.leaderMaint,
+          total: r.total,
+          directContractCount: r.direct_contract_ids.size,
+          directUnitSum: r.direct_unit_sum,
+          ownDirectUnitSum: directByMember.get(r.topLineId)?.unitSum ?? 0,
+        }))}
+      />
 
       {/* 테이블은 클라이언트 컴포넌트에서 렌더(토글/합계 조정 포함) */}
     </div>
