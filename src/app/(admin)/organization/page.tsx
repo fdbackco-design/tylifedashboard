@@ -631,7 +631,10 @@ export default async function OrganizationPage({
     hqId: hqIdForTree,
     leaderMaintenanceBonusBlockedByMemberId: leaderMaintBlockByMemberId,
     policyPromotedMemberIdSet,
-    attributeCommissionToTopLineUnderHq: true,
+    // 조직도 화면에서는 각 노드의 수당을 그대로 표시해야 하므로,
+    // "본사 직속 라인장에게 금액을 몰아주고 하위 노드를 0으로 내리는" 라인 합산 정책은 끈다.
+    // (정산 현황 페이지의 라인 합계 표시용 정책과 분리)
+    attributeCommissionToTopLineUnderHq: false,
     // 조직도 페이지 전용 예외: 안성준 직속(1단계) 영업사원/리더는 "본인 고객 계약" 기본수당도 인정수당에 포함
     includeSelfCustomerContractsInRecognizedForMemberIds: selfCustomerRecognizedTargetIds,
     contracts: kpiEligibleForMetrics,
