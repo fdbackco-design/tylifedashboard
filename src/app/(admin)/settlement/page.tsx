@@ -363,14 +363,21 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const totalAmount = displayLineRows.reduce((sum, r) => sum + (r.total ?? 0), 0);
 
   // DB 저장된 "본인 계약 수당 인정" 설정 로드 (월/라인 단위)
-  const { data: prefRows } = await db
-    .from('settlement_self_contract_preferences')
-    .select('top_line_id, included')
-    .eq('year_month', yearMonth);
+  // - 새 테이블/마이그레이션이 아직 적용되지 않은 환경에서도 페이지 렌더가 깨지지 않게 방어한다.
   const selfIncludedInitialByTopId: Record<string, boolean> = {};
-  for (const r of (prefRows ?? []) as Array<{ top_line_id: string; included: boolean }>) {
-    if (!r?.top_line_id) continue;
-    selfIncludedInitialByTopId[String(r.top_line_id)] = Boolean(r.included);
+  try {
+    const { data: prefRows, error: prefErr } = await db
+      .from('settlement_self_contract_preferences')
+      .select('top_line_id, included')
+      .eq('year_month', yearMonth);
+    if (!prefErr) {
+      for (const r of (prefRows ?? []) as Array<{ top_line_id: string; included: boolean }>) {
+        if (!r?.top_line_id) continue;
+        selfIncludedInitialByTopId[String(r.top_line_id)] = Boolean(r.included);
+      }
+    }
+  } catch {
+    // ignore
   }
 
   const kpiRow = ((kpiRes.data ?? [])[0] ?? null) as
@@ -445,7 +452,6 @@ export default async function SettlementPage({ searchParams }: PageProps) {
           directUnitSum: r.direct_unit_sum,
           ownDirectUnitSum: directByMember.get(r.topLineId)?.unitSum ?? 0,
         }))}
-        onGoMemberDetailHref={(topLineId) => `/settlement/member?year_month=${yearMonth}&member_id=${topLineId}`}
       />
 
       {/* 필터 */}

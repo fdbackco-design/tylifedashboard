@@ -26,7 +26,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     .select('top_line_id, included')
     .eq('year_month', yearMonth);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // 마이그레이션 미적용 등으로 테이블이 없을 수 있음. 이 경우 UI가 죽지 않도록 빈 결과로 응답.
+  if (error) {
+    const msg = String(error.message ?? '');
+    if (msg.toLowerCase().includes('does not exist') || msg.toLowerCase().includes('not found')) {
+      return NextResponse.json({ year_month: yearMonth, data: [] });
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
   return NextResponse.json({ year_month: yearMonth, data: data ?? [] });
 }
 
@@ -60,7 +67,13 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
       { onConflict: 'year_month,top_line_id' },
     );
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    const msg = String(error.message ?? '');
+    if (msg.toLowerCase().includes('does not exist') || msg.toLowerCase().includes('not found')) {
+      return NextResponse.json({ error: '설정 테이블이 아직 준비되지 않았습니다(마이그레이션 필요).' }, { status: 503 });
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
   return NextResponse.json({ success: true, year_month: yearMonth, top_line_id: topLineId, included });
 }
 

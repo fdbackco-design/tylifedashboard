@@ -28,7 +28,6 @@ export default function SettlementLineTableClient(props: {
   periodSales: number;
   selfIncludedInitialByTopId: Record<string, boolean>;
   rows: SettlementLineRow[];
-  onGoMemberDetailHref: (topLineId: string) => string;
 }) {
   const [selfIncludedByTopId, setSelfIncludedByTopId] = useState<Record<string, boolean>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -146,7 +145,7 @@ export default function SettlementLineTableClient(props: {
                 <tr key={r.topLineId} className="hover:bg-gray-50">
                   <td className="px-4 py-3 font-medium">
                     <Link
-                      href={props.onGoMemberDetailHref(r.topLineId)}
+                      href={`/settlement/member?year_month=${props.yearMonth}&member_id=${r.topLineId}`}
                       className="text-blue-600 hover:underline"
                     >
                       {r.topDisplayName || '-'}
