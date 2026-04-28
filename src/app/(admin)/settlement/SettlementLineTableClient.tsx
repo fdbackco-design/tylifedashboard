@@ -27,10 +27,35 @@ export default function SettlementLineTableClient(props: {
   totalSales: number;
   periodSales: number;
   selfIncludedInitialByTopId: Record<string, boolean>;
+  splitOpenInitialByTopId: Record<string, boolean>;
   rows: SettlementLineRow[];
+  /**
+   * Preview: 산하 분리 보기용 데이터
+   * - childrenByParent: 화면 트리(treeRows) 기준의 parent -> direct children
+   * - memberAggById: 월정산 결과(기존 계산)에서 멤버별 금액/직접구좌를 그대로 전달
+   * - topLineIdByMemberId: 멤버가 속한 본사 직속 최상위 라인 id
+   */
+  childrenByParent: Record<string, string[]>;
+  memberAggById: Record<
+    string,
+    {
+      memberId: string;
+      displayName: string;
+      rank: string;
+      base: number;
+      rollup: number;
+      leaderMaint: number;
+      total: number;
+      directContractCount: number;
+      directUnitSum: number;
+    }
+  >;
+  topLineIdByMemberId: Record<string, string>;
 }) {
   const [selfIncludedByTopId, setSelfIncludedByTopId] = useState<Record<string, boolean>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [splitOpenByTopId, setSplitOpenByTopId] = useState<Record<string, boolean>>({});
+  const [splitSaveError, setSplitSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     const next: Record<string, boolean> = {};
@@ -42,11 +67,110 @@ export default function SettlementLineTableClient(props: {
     // yearMonth/rows 바뀌면 다시 로드
   }, [props.yearMonth, props.rows, props.selfIncludedInitialByTopId]);
 
+  useEffect(() => {
+    const next: Record<string, boolean> = {};
+    for (const r of props.rows) {
+      next[r.topLineId] = props.splitOpenInitialByTopId[r.topLineId] ?? false;
+    }
+    setSplitOpenByTopId(next);
+    setSplitSaveError(null);
+  }, [props.yearMonth, props.rows, props.splitOpenInitialByTopId]);
+
   const { adjustedTotalAmount, adjustedProfit, adjustedRows, excludedUnitsTotal } = useMemo(() => {
+    const collectSubtree = (rootId: string): Set<string> => {
+      const out = new Set<string>();
+      const stack = [rootId];
+      while (stack.length) {
+        const cur = stack.pop()!;
+        if (out.has(cur)) continue;
+        out.add(cur);
+        for (const ch of props.childrenByParent[cur] ?? []) stack.push(ch);
+      }
+      return out;
+    };
+
+    const sumAgg = (memberIds: Set<string>) => {
+      let base = 0;
+      let rollup = 0;
+      let leaderMaint = 0;
+      let total = 0;
+      let directContractCount = 0;
+      let directUnitSum = 0;
+      for (const id of memberIds) {
+        const m = props.memberAggById[id];
+        if (!m) continue;
+        base += m.base ?? 0;
+        rollup += m.rollup ?? 0;
+        leaderMaint += m.leaderMaint ?? 0;
+        total += m.total ?? 0;
+        directContractCount += m.directContractCount ?? 0;
+        directUnitSum += m.directUnitSum ?? 0;
+      }
+      return { base, rollup, leaderMaint, total, directContractCount, directUnitSum };
+    };
+
+    // 산하 분리 보기: 행 재구성 (기본수당만 재분배가 목표이지만, 여기서는 "기존 계산 결과"를 subtree로 재집계해 행을 만든다)
+    const expandedRowsBase: SettlementLineRow[] = [];
+    for (const top of props.rows) {
+      const topId = top.topLineId;
+      const isSplit = splitOpenByTopId[topId] ?? false;
+      if (!isSplit) {
+        expandedRowsBase.push(top);
+        continue;
+      }
+
+      // (1) 상위(본사 직속) 노드: 본인 멤버 1명만 남긴다.
+      const selfAgg = props.memberAggById[topId] ?? null;
+      if (selfAgg) {
+        expandedRowsBase.push({
+          topLineId: topId,
+          topDisplayName: top.topDisplayName,
+          topRank: top.topRank,
+          base: selfAgg.base,
+          rollup: selfAgg.rollup,
+          leaderMaint: selfAgg.leaderMaint,
+          total: selfAgg.total,
+          directContractCount: selfAgg.directContractCount,
+          directUnitSum: selfAgg.directUnitSum,
+          ownDirectUnitSum: selfAgg.directUnitSum,
+        });
+      } else {
+        // fallback: 데이터가 없으면 기존 행 유지
+        expandedRowsBase.push(top);
+      }
+
+      // (2) 직계 하위 노드들을 "독립 행"으로 표시 (해당 하위 subtree 합산)
+      const directChildren = props.childrenByParent[topId] ?? [];
+      for (const childId of directChildren) {
+        // 현재 라인(topId)에 속한 멤버만 포함(다른 라인으로 분기된 경우 제외)
+        const subtree = collectSubtree(childId);
+        const inLine = new Set<string>();
+        for (const mid of subtree) {
+          if ((props.topLineIdByMemberId[mid] ?? null) === topId) inLine.add(mid);
+        }
+        if (inLine.size === 0) continue;
+
+        const agg = sumAgg(inLine);
+        const childMeta = props.memberAggById[childId] ?? null;
+        expandedRowsBase.push({
+          topLineId: childId,
+          topDisplayName: childMeta?.displayName ?? childId,
+          topRank: childMeta?.rank ?? '-',
+          base: agg.base,
+          rollup: agg.rollup,
+          leaderMaint: agg.leaderMaint,
+          total: agg.total,
+          directContractCount: agg.directContractCount,
+          directUnitSum: agg.directUnitSum,
+          ownDirectUnitSum: childMeta?.directUnitSum ?? 0,
+        });
+      }
+    }
+
     let excludedUnits = 0;
-    const rows = props.rows.map((r) => {
+    const rows = expandedRowsBase.map((r) => {
       const included = selfIncludedByTopId[r.topLineId] ?? true;
-      const adjustWon = included ? 0 : r.ownDirectUnitSum * SELF_CONTRACT_COMMISSION_PER_UNIT_WON;
+      const adjustWon = included ? 0 : (r.ownDirectUnitSum ?? 0) * SELF_CONTRACT_COMMISSION_PER_UNIT_WON;
       if (!included) excludedUnits += r.ownDirectUnitSum;
       return {
         ...r,
@@ -64,11 +188,19 @@ export default function SettlementLineTableClient(props: {
       adjustedRows: rows,
       baseTotalAmount: baseTotal,
     };
-  }, [props.rows, props.periodSales, selfIncludedByTopId]);
+  }, [
+    props.rows,
+    props.periodSales,
+    selfIncludedByTopId,
+    splitOpenByTopId,
+    props.childrenByParent,
+    props.memberAggById,
+    props.topLineIdByMemberId,
+  ]);
 
-  const baseSum = useMemo(() => props.rows.reduce((s, r) => s + (r.base ?? 0), 0), [props.rows]);
-  const rollupSum = useMemo(() => props.rows.reduce((s, r) => s + (r.rollup ?? 0), 0), [props.rows]);
-  const leaderMaintSum = useMemo(() => props.rows.reduce((s, r) => s + (r.leaderMaint ?? 0), 0), [props.rows]);
+  const baseSum = useMemo(() => adjustedRows.reduce((s, r) => s + (r.base ?? 0), 0), [adjustedRows]);
+  const rollupSum = useMemo(() => adjustedRows.reduce((s, r) => s + (r.rollup ?? 0), 0), [adjustedRows]);
+  const leaderMaintSum = useMemo(() => adjustedRows.reduce((s, r) => s + (r.leaderMaint ?? 0), 0), [adjustedRows]);
 
   return (
     <>
@@ -82,6 +214,11 @@ export default function SettlementLineTableClient(props: {
         {saveError && (
           <span className="ml-2 text-xs text-red-600">
             (저장 실패: {saveError})
+          </span>
+        )}
+        {splitSaveError && (
+          <span className="ml-2 text-xs text-red-600">
+            (산하 분리 저장 실패: {splitSaveError})
           </span>
         )}
       </div>
@@ -144,12 +281,63 @@ export default function SettlementLineTableClient(props: {
               {adjustedRows.map((r) => (
                 <tr key={r.topLineId} className="hover:bg-gray-50">
                   <td className="px-4 py-3 font-medium">
-                    <Link
-                      href={`/settlement/member?year_month=${props.yearMonth}&member_id=${r.topLineId}`}
-                      className="text-blue-600 hover:underline"
-                    >
-                      {r.topDisplayName || '-'}
-                    </Link>
+                    <div className="flex items-center gap-2">
+                      <Link
+                        href={`/settlement/member?year_month=${props.yearMonth}&member_id=${r.topLineId}`}
+                        className="text-blue-600 hover:underline"
+                      >
+                        {r.topDisplayName || '-'}
+                      </Link>
+                      {/* 산하 분리(Preview): 본사 직속 라인 노드만 대상으로 버튼 표시 */}
+                      {(() => {
+                        const hasChildren = (props.childrenByParent[r.topLineId] ?? []).length > 0;
+                        const isTopLine = (props.topLineIdByMemberId[r.topLineId] ?? null) === r.topLineId;
+                        if (!isTopLine) return null;
+                        return (
+                          <button
+                            type="button"
+                            disabled={!hasChildren}
+                            onClick={() => {
+                              if (!hasChildren) return;
+                              const nextVal = !((splitOpenByTopId[r.topLineId] ?? false) as boolean);
+                              setSplitSaveError(null);
+                              setSplitOpenByTopId((prev) => ({ ...prev, [r.topLineId]: nextVal }));
+
+                              // DB 저장 (월/라인 단위)
+                              fetch('/api/settlement/line-split-preferences', {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  year_month: props.yearMonth,
+                                  top_line_id: r.topLineId,
+                                  is_split: nextVal,
+                                }),
+                              })
+                                .then(async (res) => {
+                                  const json = (await res.json()) as any;
+                                  if (!res.ok || !json?.success) {
+                                    throw new Error(json?.error ?? `HTTP ${res.status}`);
+                                  }
+                                })
+                                .catch((err) => {
+                                  // 실패 시 롤백
+                                  setSplitOpenByTopId((prev) => ({ ...prev, [r.topLineId]: !nextVal }));
+                                  setSplitSaveError(err instanceof Error ? err.message : String(err));
+                                });
+                            }}
+                            className={`px-2 py-0.5 rounded text-[11px] border ${
+                              !hasChildren
+                                ? 'bg-gray-50 text-gray-300 border-gray-200 cursor-not-allowed'
+                                : (splitOpenByTopId[r.topLineId] ?? false)
+                                  ? 'bg-slate-800 text-white border-slate-800'
+                                  : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
+                            }`}
+                          >
+                            {(splitOpenByTopId[r.topLineId] ?? false) ? '산하 합치기' : '산하 분리'}
+                          </button>
+                        );
+                      })()}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-gray-600">{r.topRank}</td>
                   <td className="px-4 py-3 text-xs text-gray-700">-</td>

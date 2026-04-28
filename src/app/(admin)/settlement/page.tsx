@@ -131,6 +131,15 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     nameByIdForTree.set(r.id as string, r.name as string);
   }
 
+  // parent -> children (preview UI용)
+  const childrenByParent: Record<string, string[]> = {};
+  for (const r of treeRows as any[]) {
+    const pid = (r.parent_id ?? null) as string | null;
+    if (!pid) continue;
+    if (!childrenByParent[pid]) childrenByParent[pid] = [];
+    childrenByParent[pid].push(r.id as string);
+  }
+
   const getTopLineId = (memberId: string): string => {
     // 본사(hq) 바로 아래 라인(최상위 노드)을 찾는다.
     // treeRows의 parent_id 규칙(본사 직속 customer/source_customer_id 등)을 그대로 따른다.
@@ -347,6 +356,50 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       >(),
     );
 
+  // 멤버별 월정산(기존 계산 결과) 메타/금액 맵 (클라이언트 preview 재집계용)
+  const memberAggById: Record<
+    string,
+    {
+      memberId: string;
+      displayName: string;
+      rank: string;
+      base: number;
+      rollup: number;
+      leaderMaint: number;
+      total: number;
+      directContractCount: number;
+      directUnitSum: number;
+    }
+  > = {};
+  const topLineIdByMemberId: Record<string, string> = {};
+  for (const r of (settlements ?? []) as any[]) {
+    const memberId = String(r.member_id ?? '');
+    if (!memberId) continue;
+    const nameRaw = String((r.organization_members as any)?.name ?? '');
+    const displayName = nameRaw.replace(/^\[고객\]\s*/, '');
+    const topLineId = getTopLineId(memberId);
+    topLineIdByMemberId[memberId] = topLineId;
+    const direct = directByMember.get(memberId) ?? { contractIds: new Set<string>(), unitSum: 0 };
+    const detail = r.calculation_detail as SettlementCalculationDetail | null;
+    const lp = detail?.leader_promotion ?? null;
+    const zeroOut = nameRaw === ZERO_OUT_MEMBER_NAME;
+    const base = zeroOut ? 0 : Number(r.base_commission ?? 0);
+    const rollup = zeroOut ? 0 : Number(r.rollup_commission ?? 0);
+    const leaderMaint = zeroOut ? 0 : Number(lp?.leader_maintenance_bonus_amount ?? 0);
+    const total = zeroOut ? 0 : Number(r.total_amount ?? 0);
+    memberAggById[memberId] = {
+      memberId,
+      displayName,
+      rank: String(r.rank ?? ''),
+      base,
+      rollup,
+      leaderMaint,
+      total,
+      directContractCount: direct.contractIds.size,
+      directUnitSum: direct.unitSum,
+    };
+  }
+
   const displayLineRows = [...displayRows.values()]
     .filter((r) => {
       // 숨김/zero-out 멤버는 이미 월정산 row 단계에서 0이 되었지만,
@@ -374,6 +427,23 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       for (const r of (prefRows ?? []) as Array<{ top_line_id: string; included: boolean }>) {
         if (!r?.top_line_id) continue;
         selfIncludedInitialByTopId[String(r.top_line_id)] = Boolean(r.included);
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // DB 저장된 "산하 분리 보기" 설정 로드 (월/라인 단위)
+  const splitOpenInitialByTopId: Record<string, boolean> = {};
+  try {
+    const { data: splitRows, error: splitErr } = await db
+      .from('settlement_line_split_preferences')
+      .select('top_line_id, is_split')
+      .eq('year_month', yearMonth);
+    if (!splitErr) {
+      for (const r of (splitRows ?? []) as Array<{ top_line_id: string; is_split: boolean }>) {
+        if (!r?.top_line_id) continue;
+        splitOpenInitialByTopId[String(r.top_line_id)] = Boolean(r.is_split);
       }
     }
   } catch {
@@ -485,6 +555,10 @@ export default async function SettlementPage({ searchParams }: PageProps) {
         totalSales={totalSales}
         periodSales={periodSales}
         selfIncludedInitialByTopId={selfIncludedInitialByTopId}
+        splitOpenInitialByTopId={splitOpenInitialByTopId}
+        childrenByParent={childrenByParent}
+        memberAggById={memberAggById}
+        topLineIdByMemberId={topLineIdByMemberId}
         rows={displayLineRows.map<SettlementLineRow>((r) => ({
           topLineId: r.topLineId,
           topDisplayName: r.topDisplayName,
