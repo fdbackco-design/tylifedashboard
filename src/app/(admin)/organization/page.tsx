@@ -518,23 +518,6 @@ export default async function OrganizationPage({
         contract_code: c.contract_code,
         customer_name: c.customers?.name ?? '',
       })),
-      // "본인이 고객인 계약" 판정(프로젝트의 customer↔member 매핑 사용)
-      is_self_customer_contract: (() => {
-        const effectiveSalesMemberId = remapMemberId(mapSalesMemberForOrg({
-          sales_member_id: c.sales_member_id,
-          customer_id: c.customer_id,
-          status: c.status,
-          rental_request_no: c.rental_request_no ?? null,
-          invoice_no: c.invoice_no ?? null,
-          memo: c.memo ?? null,
-          customer_phone: c.customers?.phone ?? null,
-          contract_code: c.contract_code,
-          customer_name: c.customers?.name ?? '',
-        }));
-        const effectiveCustomerMemberId = customerIdToEffectiveMemberId.get(c.customer_id) ?? null;
-        if (!effectiveCustomerMemberId) return false;
-        return remapMemberId(effectiveCustomerMemberId) === effectiveSalesMemberId;
-      })(),
     }));
 
   // 조직도 페이지 전용 예외 대상(안성준 직속 1단계 영업사원/리더) 계산 + 디버그용 요약
@@ -635,8 +618,6 @@ export default async function OrganizationPage({
     // "본사 직속 라인장에게 금액을 몰아주고 하위 노드를 0으로 내리는" 라인 합산 정책은 끈다.
     // (정산 현황 페이지의 라인 합계 표시용 정책과 분리)
     attributeCommissionToTopLineUnderHq: false,
-    // 조직도 페이지 전용 예외: 안성준 직속(1단계) 영업사원/리더는 "본인 고객 계약" 기본수당도 인정수당에 포함
-    includeSelfCustomerContractsInRecognizedForMemberIds: selfCustomerRecognizedTargetIds,
     contracts: kpiEligibleForMetrics,
     rules: (rulesRes.data ?? []) as any[],
     settlementWindow: { start_date, end_date, label_year_month },
