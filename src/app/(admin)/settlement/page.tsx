@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { buildOrgTree, formatKRW } from '@/lib/settlement/calculator';
-import { getSettlementWindowForYearMonth } from '@/lib/settlement/settlement-window';
+import { getSettlementWindowForYearMonth, getSettlementWindowSeoul } from '@/lib/settlement/settlement-window';
 import { BASE_AMOUNT_PER_UNIT } from '@/lib/settlement/constants';
 import type { RankType } from '@/lib/types';
 import type { SettlementCalculationDetail } from '@/lib/types/settlement';
@@ -38,7 +38,8 @@ function nextDay(dateYmd: string): string {
 
 export default async function SettlementPage({ searchParams }: PageProps) {
   const params = await searchParams;
-  const yearMonth = params.year_month ?? getCurrentYearMonth();
+  const todayYearMonth = getSettlementWindowSeoul().label_year_month;
+  const yearMonth = params.year_month ?? todayYearMonth;
   const rankFilter = params.rank as RankType | undefined;
   const debugEnabled = params.debug === '1';
 
@@ -442,10 +443,20 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       <div className="flex gap-3 mb-5 flex-wrap items-center">
         {/* 월 선택 */}
         <div className="flex gap-1">
+          <Link
+            href={`/settlement?year_month=${todayYearMonth}${rankFilter ? `&rank=${rankFilter}` : ''}${debugEnabled ? '&debug=1' : ''}`}
+            className={`px-2.5 py-1 rounded text-xs border ${
+              yearMonth === todayYearMonth
+                ? 'bg-slate-800 text-white border-slate-800'
+                : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
+            }`}
+          >
+            오늘(기준월)
+          </Link>
           {months.map((m) => (
             <Link
               key={m}
-              href={`/settlement?year_month=${m}${rankFilter ? `&rank=${rankFilter}` : ''}`}
+              href={`/settlement?year_month=${m}${rankFilter ? `&rank=${rankFilter}` : ''}${debugEnabled ? '&debug=1' : ''}`}
               className={`px-2.5 py-1 rounded text-xs border ${m === yearMonth ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'}`}
             >
               {m.slice(5)}월

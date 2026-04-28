@@ -261,6 +261,16 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
 
       {/* 월 선택 (집계 기준월) */}
       <div className="flex gap-1 flex-wrap items-center">
+        <Link
+          href={monthHref(defaultYearMonth)}
+          className={`px-2.5 py-1 rounded text-xs border ${
+            year_month === defaultYearMonth
+              ? 'bg-slate-800 text-white border-slate-800'
+              : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
+          }`}
+        >
+          오늘(기준월)
+        </Link>
         {months.map((m) => (
           <Link
             key={m}
