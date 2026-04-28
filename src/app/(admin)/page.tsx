@@ -1,9 +1,11 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import Link from 'next/link';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { buildDashboardAggregations } from '@/lib/dashboard/aggregations';
 import { buildSettlementTreeRows } from '@/lib/settlement/settlement-org-tree';
 import type { RankType } from '@/lib/types';
+import { getSettlementWindowSeoul } from '@/lib/settlement/settlement-window';
 
 export const metadata: Metadata = { title: '대시보드' };
 
@@ -105,13 +107,33 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
   const db = createAdminSupabaseClient();
   const sp = (await props.searchParams) ?? {};
 
-  // 요청 스펙: "4월(2026-03-26 ~ 2026-04-25)"를 반드시 지원
-  // 기본값은 2026-04로 두되, 필요 시 year_month=YYYY-MM 쿼리로 바꿀 수 있게 한다.
+  // 기본값: "오늘 날짜가 포함되는 정산 윈도우(26~25)"의 기준월(label_year_month)
+  // 필요 시 year_month=YYYY-MM 쿼리로 바꿀 수 있다.
   const yearMonthRaw = sp.year_month;
-  const year_month = typeof yearMonthRaw === 'string' ? yearMonthRaw : '2026-04';
+  const defaultYearMonth = getSettlementWindowSeoul().label_year_month;
+  const requestedYearMonth = typeof yearMonthRaw === 'string' ? yearMonthRaw : defaultYearMonth;
+  const year_month = /^\d{4}-\d{2}$/.test(requestedYearMonth) ? requestedYearMonth : defaultYearMonth;
   const debugEnabled = sp.debug === '1';
 
   const agg = await buildDashboardAggregations({ db, year_month });
+
+  // 월 목록: 현재 기준월(year_month)을 맨 앞에 두고 -1개월씩 나열
+  const months: string[] = [];
+  {
+    const [ys, ms] = year_month.split('-');
+    const baseY = parseInt(ys, 10);
+    const baseM = parseInt(ms, 10); // 1-12
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(baseY, baseM - 1 - i, 1);
+      months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
+  }
+  const monthHref = (m: string): string => {
+    const qs = new URLSearchParams();
+    qs.set('year_month', m);
+    if (debugEnabled) qs.set('debug', '1');
+    return `/?${qs.toString()}`;
+  };
 
   // debug=1: organization_edges 누락/이상 케이스를 바로 출력
   let debugEdgeReport: string | null = null;
@@ -236,6 +258,23 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
           <div>브리핑 기준일(전날): {agg.briefing.base_date_ymd}</div>
         </div>
       </header>
+
+      {/* 월 선택 (집계 기준월) */}
+      <div className="flex gap-1 flex-wrap items-center">
+        {months.map((m) => (
+          <Link
+            key={m}
+            href={monthHref(m)}
+            className={`px-2.5 py-1 rounded text-xs border ${
+              m === year_month
+                ? 'bg-slate-800 text-white border-slate-800'
+                : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
+            }`}
+          >
+            {m.slice(5)}월
+          </Link>
+        ))}
+      </div>
 
       {/* 1) 상단: 핵심 요약 카드 */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

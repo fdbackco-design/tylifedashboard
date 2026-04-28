@@ -59,12 +59,17 @@ export default async function OrganizationPage({
   const yearMonth = /^\d{4}-\d{2}$/.test(requestedYearMonth) ? requestedYearMonth : defaultYearMonth;
   const { start_date, end_date, label_year_month } = getSettlementWindowForYearMonth(yearMonth);
 
-  // 월 목록 (최근 12개월) — 정산 현황과 동일 UX
+  // 월 목록: "기준 월(label_year_month)"을 맨 앞에 두고 -1개월씩 나열
+  // (오늘 날짜가 26일 이후면 기준월이 다음달로 넘어가므로, Date(now) 기반이면 UX가 어긋날 수 있음)
   const months: string[] = [];
-  const now = new Date();
-  for (let i = 0; i < 12; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  {
+    const [ys, ms] = label_year_month.split('-');
+    const baseY = parseInt(ys, 10);
+    const baseM = parseInt(ms, 10); // 1-12
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(baseY, baseM - 1 - i, 1);
+      months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
   }
   const monthHref = (m: string): string => {
     const qs = new URLSearchParams();

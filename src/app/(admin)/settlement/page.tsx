@@ -369,14 +369,17 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const periodSales = periodJoinUnits * BASE_AMOUNT_PER_UNIT;
   const profit = periodSales - totalAmount;
 
-  // 월 목록 (최근 12개월)
+  // 월 목록: 현재 선택된 기준월(yearMonth)을 맨 앞에 두고 -1개월씩 나열
+  // (정산 기준이 26~25라 "오늘 달"과 기준월이 어긋날 수 있음)
   const months: string[] = [];
-  const now = new Date();
-  for (let i = 0; i < 12; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    months.push(
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
-    );
+  {
+    const [ys, ms] = yearMonth.split('-');
+    const baseY = parseInt(ys, 10);
+    const baseM = parseInt(ms, 10); // 1-12
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(baseY, baseM - 1 - i, 1);
+      months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
   }
 
   return (
