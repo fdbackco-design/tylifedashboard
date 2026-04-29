@@ -69,14 +69,13 @@ export default function SettlementLineTableClient(props: {
     // 초기값은 DB에서 내려온 맵을 우선 사용 (행이 분리되어도 child id에 대한 설정이 바로 반영될 수 있게)
     setSelfIncludedByTopId(props.selfIncludedInitialByTopId ?? {});
     setSaveError(null);
-    // yearMonth/rows 바뀌면 다시 로드
-  }, [props.yearMonth, props.rows, props.selfIncludedInitialByTopId]);
+  }, [props.yearMonth, props.selfIncludedInitialByTopId]);
 
   useEffect(() => {
     // 초기값은 DB에서 내려온 맵을 우선 사용 (행이 분리되어도 child id에 대한 설정이 바로 반영될 수 있게)
     setSplitOpenByTopId(props.splitOpenInitialByTopId ?? {});
     setSplitSaveError(null);
-  }, [props.yearMonth, props.rows, props.splitOpenInitialByTopId]);
+  }, [props.yearMonth, props.splitOpenInitialByTopId]);
 
   const { adjustedTotalAmount, adjustedProfit, adjustedRows, excludedUnitsTotal } = useMemo(() => {
     const collectSubtree = (rootId: string): Set<string> => {
@@ -204,6 +203,14 @@ export default function SettlementLineTableClient(props: {
       memberSet: rowMemberSetList[idx],
     }));
 
+    const rowByTopLineId = new Map<string, (typeof rowMetaList)[number]>();
+    for (const rm of rowMetaList) rowByTopLineId.set(rm.topLineId, rm);
+
+    const parentByChild = new Map<string, string | null>();
+    for (const [pid, children] of Object.entries(props.childrenByParent)) {
+      for (const ch of children ?? []) parentByChild.set(ch, pid);
+    }
+
     const baseByRowIdx = new Map<number, number>();
     const addBase = (rowIdx: number, won: number) => {
       baseByRowIdx.set(rowIdx, (baseByRowIdx.get(rowIdx) ?? 0) + won);
@@ -261,19 +268,37 @@ export default function SettlementLineTableClient(props: {
       if (exactRow) {
         selected = exactRow;
         if (reason.startsWith('direct_')) reason = 'direct_exact_row';
-      } else if (candidates.length > 0) {
-        // 우선순위 2) depth가 가장 깊은 row
-        const maxDepth = Math.max(...candidates.map((rm) => rm.depth));
-        const deepest = candidates.filter((rm) => rm.depth === maxDepth);
-        if (deepest.length === 1) {
-          selected = deepest[0];
-          if (reason.startsWith('direct_')) reason = 'direct_deepest_row';
-        } else {
-          // 우선순위 3) depth 동률이면 memberSet size가 가장 작은 row
-          const minSetSize = Math.min(...deepest.map((rm) => rm.memberSet.size));
-          const smallest = deepest.filter((rm) => rm.memberSet.size === minSetSize);
-          selected = smallest[0] ?? deepest[0];
-          if (reason.startsWith('direct_')) reason = 'direct_smallest_subtree_row';
+      } else {
+        // 우선순위 2) target의 "가장 가까운 표시 조상 row"를 먼저 탐색
+        let cur: string | null = targetMemberId;
+        const seen = new Set<string>();
+        while (cur) {
+          const hit = rowByTopLineId.get(cur);
+          if (hit) {
+            selected = hit;
+            if (reason.startsWith('direct_')) reason = 'direct_deepest_row';
+            break;
+          }
+          const parentId: string | null = parentByChild.get(cur) ?? null;
+          if (!parentId || seen.has(parentId)) break;
+          seen.add(parentId);
+          cur = parentId;
+        }
+
+        // 조상 탐색 실패 시 후보 기반으로 보정
+        if (!selected && candidates.length > 0) {
+          const maxDepth = Math.max(...candidates.map((rm) => rm.depth));
+          const deepest = candidates.filter((rm) => rm.depth === maxDepth);
+          if (deepest.length === 1) {
+            selected = deepest[0];
+            if (reason.startsWith('direct_')) reason = 'direct_deepest_row';
+          } else {
+            // 우선순위 3) depth 동률이면 memberSet size가 가장 작은 row
+            const minSetSize = Math.min(...deepest.map((rm) => rm.memberSet.size));
+            const smallest = deepest.filter((rm) => rm.memberSet.size === minSetSize);
+            selected = smallest[0] ?? deepest[0];
+            if (reason.startsWith('direct_')) reason = 'direct_smallest_subtree_row';
+          }
         }
       }
 
