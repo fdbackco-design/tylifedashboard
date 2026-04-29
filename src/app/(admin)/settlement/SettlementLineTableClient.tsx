@@ -232,6 +232,25 @@ export default function SettlementLineTableClient(props: {
       selectedRowMemberSetSize: number | null;
       reason: string;
     }> = [];
+    const unresolvedBaseItems: Array<{
+      contractId: string;
+      baseWon: number;
+      rawSalesMemberId: string | null;
+      rawSalesMemberRank: string | null;
+      isRawSalesMemberHeadOffice: boolean;
+      mappedMemberId: string | null;
+      resolvedTargetMemberId: string | null;
+      targetSource: string;
+      reason: string;
+      fallbackReason: string;
+    }> = [];
+    const baseSummaryByRow = new Map<string, {
+      selectedRowName: string;
+      selectedRowTopLineId: string;
+      contractCount: number;
+      totalBaseWon: number;
+      contractIds: string[];
+    }>();
 
     // 기본수당 귀속 우선순위 적용 (계약 단위)
     for (const c of props.contractBaseItems) {
@@ -273,7 +292,42 @@ export default function SettlementLineTableClient(props: {
         targetSource = 'mapped_member';
         reason = 'mapped_member';
       }
-      if (!targetMemberId) continue;
+      if (!targetMemberId) {
+        const unresolvedReason = isRawSalesMemberHeadOffice
+          ? 'unresolved_head_office_mapped_not_in_tree'
+          : 'unresolved_no_assignable_row';
+        unresolvedBaseItems.push({
+          contractId: c.contractId,
+          baseWon,
+          rawSalesMemberId: c.rawSalesMemberId,
+          rawSalesMemberRank: rawRank,
+          isRawSalesMemberHeadOffice,
+          mappedMemberId: c.mappedMemberId,
+          resolvedTargetMemberId: null,
+          targetSource,
+          reason: unresolvedReason,
+          fallbackReason: 'target_member_missing',
+        });
+        if (props.debugEnabled) {
+          debugRows.push({
+            contractId: c.contractId,
+            baseWon,
+            rawSalesMemberId: c.rawSalesMemberId,
+            rawSalesMemberRank: rawRank,
+            isRawSalesMemberHeadOffice,
+            mappedMemberId: c.mappedMemberId,
+            isSelfCustomerContract: c.isSelfCustomerContract,
+            resolvedTargetMemberId: null,
+            targetSource,
+            selectedRowTopLineId: null,
+            selectedRowName: null,
+            selectedRowDepth: null,
+            selectedRowMemberSetSize: null,
+            reason: unresolvedReason,
+          });
+        }
+        continue;
+      }
 
       // targetMemberId를 포함하는 후보 row를 모두 수집
       const candidates = rowMetaList.filter((rm) => rm.memberSet.has(targetMemberId as string));
@@ -327,18 +381,63 @@ export default function SettlementLineTableClient(props: {
       }
 
       if (!selected) {
-        // 우선순위 4) fallback row
-        const topId = props.topLineIdByMemberId[targetMemberId] ?? null;
-        if (topId) {
-          selected = rowMetaList.find((rm) => rm.topLineId === topId && rm.depth === 0) ?? null;
+        const unresolvedReason = isRawSalesMemberHeadOffice
+          ? (
+              c.mappedMemberId && !rowByTopLineId.has(c.mappedMemberId) && !parentByChild.has(c.mappedMemberId)
+                ? 'unresolved_head_office_mapped_not_in_tree'
+                : 'unresolved_no_visible_ancestor'
+            )
+          : 'unresolved_no_assignable_row';
+        unresolvedBaseItems.push({
+          contractId: c.contractId,
+          baseWon,
+          rawSalesMemberId: c.rawSalesMemberId,
+          rawSalesMemberRank: rawRank,
+          isRawSalesMemberHeadOffice,
+          mappedMemberId: c.mappedMemberId,
+          resolvedTargetMemberId: targetMemberId,
+          targetSource,
+          reason: unresolvedReason,
+          fallbackReason: 'no_visible_row',
+        });
+        if (props.debugEnabled) {
+          debugRows.push({
+            contractId: c.contractId,
+            baseWon,
+            rawSalesMemberId: c.rawSalesMemberId,
+            rawSalesMemberRank: rawRank,
+            isRawSalesMemberHeadOffice,
+            mappedMemberId: c.mappedMemberId,
+            isSelfCustomerContract: c.isSelfCustomerContract,
+            resolvedTargetMemberId: targetMemberId,
+            targetSource,
+            selectedRowTopLineId: null,
+            selectedRowName: null,
+            selectedRowDepth: null,
+            selectedRowMemberSetSize: null,
+            reason: unresolvedReason,
+          });
         }
-        if (!selected) selected = rowMetaList[0] ?? null;
-        targetSource = 'fallback';
-        reason = 'fallback_display_root';
+        continue;
       }
 
       if (selected) {
         addBase(selected.idx, baseWon);
+        const summaryKey = selected.topLineId;
+        const prev = baseSummaryByRow.get(summaryKey);
+        if (prev) {
+          prev.contractCount += 1;
+          prev.totalBaseWon += baseWon;
+          prev.contractIds.push(c.contractId);
+        } else {
+          baseSummaryByRow.set(summaryKey, {
+            selectedRowName: selected.topDisplayName,
+            selectedRowTopLineId: selected.topLineId,
+            contractCount: 1,
+            totalBaseWon: baseWon,
+            contractIds: [c.contractId],
+          });
+        }
       }
 
       if (props.debugEnabled) {
@@ -363,7 +462,21 @@ export default function SettlementLineTableClient(props: {
 
     if (props.debugEnabled && debugRows.length > 0) {
       // eslint-disable-next-line no-console
+      console.log('[settlement split debug] contract base distribution');
+      // eslint-disable-next-line no-console
       console.table(debugRows);
+    }
+    if (props.debugEnabled && unresolvedBaseItems.length > 0) {
+      // eslint-disable-next-line no-console
+      console.log('[settlement split debug] unresolved base items');
+      // eslint-disable-next-line no-console
+      console.table(unresolvedBaseItems);
+    }
+    if (props.debugEnabled && baseSummaryByRow.size > 0) {
+      // eslint-disable-next-line no-console
+      console.log('[settlement split debug] base summary by row');
+      // eslint-disable-next-line no-console
+      console.table(Array.from(baseSummaryByRow.values()));
     }
 
     let excludedUnits = 0;
