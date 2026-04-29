@@ -536,11 +536,8 @@ export function calculateMemberSettlement(
   const incentiveAmountCombined = ruleIncentiveAmount + leaderMaintenanceBonus;
   let totalAmount = baseCommission + rollupCommission + leaderMaintenanceBonus;
 
-  // 예외 규칙: '[고객] 김동건'은 가입 이후 정산에서 합계 수당을 60만원 차감한다.
-  // (아직 가입이 없어도, 향후 가입으로 정산에 포함되는 순간부터 자동 적용됨)
-  const manualAdjustment =
-    member.name.trim() === '[고객] 김동건' && totalUnitCount > 0 ? -600_000 : 0;
-  if (manualAdjustment !== 0) totalAmount += manualAdjustment;
+  // 수동 예외 차감 규칙은 사용하지 않는다.
+  const manualAdjustment = 0;
   // 가입 구좌가 0이면 합계는 항상 0원으로 고정(음수 방지)
   if (totalUnitCount === 0) totalAmount = 0;
 
