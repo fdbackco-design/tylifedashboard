@@ -226,8 +226,18 @@ export default function SettlementLineTableClient(props: {
       if (!targetMemberId) continue;
 
       // target member를 포함하는 현재 표시 row에 기본수당 배분
+      // 우선순위:
+      // 1) 현재 화면에 "해당 멤버 id 자체" 행이 있으면 그 행(담당자 직접 계약 보호)
+      // 2) 없으면 target 멤버를 포함하는 subtree 행
       let assigned = false;
+      const exactIdx = expandedRowsBase.findIndex((r) => r.topLineId === targetMemberId);
+      if (exactIdx >= 0) {
+        addBase(exactIdx, baseWon);
+        assigned = true;
+      }
+
       for (let i = 0; i < rowMemberSetList.length; i++) {
+        if (assigned) break;
         if (rowMemberSetList[i].has(targetMemberId)) {
           addBase(i, baseWon);
           assigned = true;
