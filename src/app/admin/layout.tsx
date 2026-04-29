@@ -6,12 +6,12 @@ export const metadata: Metadata = {
 };
 
 const NAV_ITEMS = [
-  { href: '/', label: '대시보드' },
-  { href: '/contracts', label: '계약 관리' },
-  { href: '/pending-sales', label: '담당 미확인' },
-  { href: '/pending-contractor', label: '편입 매핑 대기' },
-  { href: '/organization', label: '조직도' },
-  { href: '/settlement', label: '정산 현황' },
+  { href: '/admin', label: '대시보드' },
+  { href: '/admin/contracts', label: '계약 관리' },
+  { href: '/admin/pending-sales', label: '담당 미확인' },
+  { href: '/admin/pending-contractor', label: '편입 매핑 대기' },
+  { href: '/admin/organization', label: '조직도' },
+  { href: '/admin/settlement', label: '정산 현황' },
 ] as const;
 
 export default function AdminLayout({

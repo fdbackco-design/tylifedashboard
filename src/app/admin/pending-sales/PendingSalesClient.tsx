@@ -94,7 +94,7 @@ export default function PendingSalesClient() {
             <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
               <div>
                 <Link
-                  href={`/contracts/${row.id}`}
+                  href={`/admin/contracts/${row.id}`}
                   className="font-mono text-sm font-semibold text-blue-600 hover:underline"
                 >
                   {row.contract_code}

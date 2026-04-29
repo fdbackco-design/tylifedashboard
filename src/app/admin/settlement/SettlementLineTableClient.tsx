@@ -600,7 +600,7 @@ export default function SettlementLineTableClient(props: {
                   <td className="px-4 py-3 font-medium">
                     <div className="flex items-center gap-2">
                       <Link
-                        href={`/settlement/member?year_month=${props.yearMonth}&member_id=${r.topLineId}`}
+                        href={`/admin/settlement/member?year_month=${props.yearMonth}&member_id=${r.topLineId}`}
                         className="text-blue-600 hover:underline"
                       >
                         <span
