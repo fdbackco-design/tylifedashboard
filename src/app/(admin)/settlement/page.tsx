@@ -597,6 +597,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
         todayYearMonth={todayYearMonth}
         startDate={start_date}
         endDate={end_date}
+        debugEnabled={debugEnabled}
         totalSales={totalSales}
         periodSales={periodSales}
         selfIncludedInitialByTopId={selfIncludedInitialByTopId}

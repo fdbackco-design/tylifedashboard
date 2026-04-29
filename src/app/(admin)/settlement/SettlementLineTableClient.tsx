@@ -24,6 +24,7 @@ export default function SettlementLineTableClient(props: {
   todayYearMonth: string;
   startDate: string;
   endDate: string;
+  debugEnabled?: boolean;
   totalSales: number;
   periodSales: number;
   selfIncludedInitialByTopId: Record<string, boolean>;
@@ -290,7 +291,7 @@ export default function SettlementLineTableClient(props: {
         addBase(selected.idx, baseWon);
       }
 
-      if (process.env.NODE_ENV !== 'production') {
+      if (props.debugEnabled) {
         debugRows.push({
           contractId: c.contractId,
           baseWon,
@@ -307,7 +308,7 @@ export default function SettlementLineTableClient(props: {
       }
     }
 
-    if (process.env.NODE_ENV !== 'production' && debugRows.length > 0) {
+    if (props.debugEnabled && debugRows.length > 0) {
       // eslint-disable-next-line no-console
       console.table(debugRows);
     }
@@ -338,6 +339,7 @@ export default function SettlementLineTableClient(props: {
     };
   }, [
     props.rows,
+    props.debugEnabled,
     props.periodSales,
     selfIncludedByTopId,
     splitOpenByTopId,
