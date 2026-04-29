@@ -84,7 +84,8 @@ export default async function OrganizationMyTreePage({
     db
       .from('organization_members')
       .select('id,name,rank,phone,external_id,source_customer_id')
-      .eq('is_active', true),
+      // 루트(member_id)는 비활성 상태여도 반드시 포함 (권한 사용자가 계정 발급 시점에 비활성인 경우 방어)
+      .or(`is_active.eq.true,id.eq.${memberId}`),
     db.from('organization_edges').select('parent_id,child_id'),
     db.from('settlement_rules').select('*'),
     db

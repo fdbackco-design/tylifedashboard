@@ -15,6 +15,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const { data: bySource } = await db
       .from('organization_members')
       .select('id, name, rank, phone, source_customer_id, external_id')
+      .eq('is_active', true)
       .eq('source_customer_id', customerId)
       .neq('rank', '본사')
       .limit(50);
@@ -23,6 +24,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const { data: byExternal } = await db
       .from('organization_members')
       .select('id, name, rank, phone, source_customer_id, external_id')
+      .eq('is_active', true)
       .eq('external_id', `customer:${customerId}`)
       .limit(50);
 
