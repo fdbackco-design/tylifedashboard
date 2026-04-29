@@ -51,7 +51,10 @@ export default function AccountIssueClient() {
     setIsSearching(true);
     setSearchError(null);
     try {
-      const res = await fetch(`/api/admin/account-issue/customers?query=${encodeURIComponent(normalizedQuery)}`);
+      const res = await fetch(
+        `/api/admin/account-issue/customers?query=${encodeURIComponent(normalizedQuery)}`,
+        { credentials: 'include' },
+      );
       const json = (await res.json()) as ApiResult<CustomerRow[]>;
       if (!res.ok || !json.success) throw new Error('검색 실패');
       setCustomers(json.data);
@@ -66,6 +69,7 @@ export default function AccountIssueClient() {
   async function loadMemberCandidates(customerId: string) {
     const res = await fetch(
       `/api/admin/account-issue/member-candidates?customer_id=${encodeURIComponent(customerId)}`,
+      { credentials: 'include' },
     );
     const json = (await res.json()) as ApiResult<MemberCandidate[]>;
     if (!res.ok || !json.success) throw new Error(json.success ? 'error' : json.error);
@@ -110,6 +114,7 @@ export default function AccountIssueClient() {
         password,
         is_active: isActive,
       }),
+      credentials: 'include',
     });
     const json = (await res.json()) as ApiResult<{ user_id: string }>;
     if (!res.ok || !json.success) {
