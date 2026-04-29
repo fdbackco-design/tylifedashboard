@@ -19,8 +19,10 @@ export default function LoginClient(props: { redirect: string }) {
     setLoading(true);
     try {
       const supabase = createClient();
+      const emailDomain = 'tylifedashboard.local';
+      const loginEmail = loginCode.includes('@') ? loginCode.trim() : `${loginCode.trim()}@${emailDomain}`;
       const { error: signErr } = await supabase.auth.signInWithPassword({
-        email: loginCode.trim(),
+        email: loginEmail,
         password,
       });
       if (signErr) throw signErr;
