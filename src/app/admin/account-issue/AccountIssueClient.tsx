@@ -30,6 +30,12 @@ function randomPassword(len = 12): string {
   return out;
 }
 
+function randomDigits8(): string {
+  // 8자리(앞자리가 0일 수도 있음) 숫자만 생성
+  const n = Math.floor(Math.random() * 100_000_000);
+  return String(n).padStart(8, '0');
+}
+
 export default function AccountIssueClient() {
   const [query, setQuery] = useState('');
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
@@ -45,6 +51,7 @@ export default function AccountIssueClient() {
   const [isActive, setIsActive] = useState(true);
 
   const normalizedQuery = useMemo(() => query.trim(), [query]);
+  const emailDomain = 'tylifedashboard.local';
 
   async function searchCustomers() {
     if (!normalizedQuery) return;
@@ -77,12 +84,14 @@ export default function AccountIssueClient() {
     setMemberCandidates(json.data);
     const first = json.data[0]?.id ?? '';
     setSelectedMemberId(first);
-    if (!loginCode) {
-      // Supabase Auth(email/password)로 사용하므로 email 형식이 필요
-      const emailDomain = 'tylifedashboard.local';
-      setLoginCode(first ? `user-${first.slice(0, 8)}@${emailDomain}` : '');
+    // 자동 생성 요구사항:
+    // - login_code: 무작위 8자리 숫자
+    // - password: login_code와 동일한 값
+    if (!loginCode || !password) {
+      const code = randomDigits8();
+      setLoginCode(code);
+      setPassword(code);
     }
-    if (!password) setPassword(randomPassword());
   }
 
   async function handleSelectCustomer(c: CustomerRow) {
@@ -95,8 +104,8 @@ export default function AccountIssueClient() {
   async function issueAccount() {
     if (!selectedCustomer) return;
     if (!selectedMemberId) return;
-    if (!loginCode.includes('@')) {
-      alert('로그인 ID(login_code)는 이메일 형태여야 합니다. 예: name@example.com');
+    if (!loginCode.trim() || !password) {
+      alert('로그인 ID와 비밀번호를 입력/자동생성 해주세요.');
       return;
     }
     if (!password) {
@@ -104,25 +113,51 @@ export default function AccountIssueClient() {
       return;
     }
 
-    const res = await fetch('/api/admin/account-issue/issue', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        customer_id: selectedCustomer.id,
-        member_id: selectedMemberId,
-        login_code: loginCode,
-        password,
-        is_active: isActive,
-      }),
-      credentials: 'include',
-    });
-    const json = (await res.json()) as ApiResult<{ user_id: string }>;
-    if (!res.ok || !json.success) {
-      alert(json.success ? '발급 실패' : json.error);
+    const codeDigits = loginCode.trim();
+    const shouldRetryForUniqueDigits = !codeDigits.includes('@') && password.trim() === codeDigits;
+
+    const maxRetries = shouldRetryForUniqueDigits ? 5 : 1;
+    let lastError: string | null = null;
+
+    for (let i = 0; i < maxRetries; i++) {
+      const codeToTry = shouldRetryForUniqueDigits ? randomDigits8() : codeDigits;
+      const loginEmail = codeDigits.includes('@') ? codeDigits : `${codeToTry}@${emailDomain}`;
+      const passwordToTry = shouldRetryForUniqueDigits ? codeToTry : password;
+
+      const res = await fetch('/api/admin/account-issue/issue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_id: selectedCustomer.id,
+          member_id: selectedMemberId,
+          login_code: loginEmail,
+          password: passwordToTry,
+          is_active: isActive,
+        }),
+        credentials: 'include',
+      });
+
+      const json = (await res.json()) as ApiResult<{ user_id: string }>;
+      if (res.ok && json.success) {
+        // retry 성공 시 UI에도 반영
+        if (shouldRetryForUniqueDigits) {
+          setLoginCode(codeToTry);
+          setPassword(codeToTry);
+        }
+        alert(`계정 발급 완료: ${json.data.user_id}`);
+        return;
+      }
+
+      lastError = json.success ? '발급 실패' : json.error;
+      if (res.status === 409 && shouldRetryForUniqueDigits) {
+        continue; // 중복이면 code 재생성 후 재시도
+      }
+
+      alert(lastError ?? '발급 실패');
       return;
     }
 
-    alert(`계정 발급 완료: ${json.data.user_id}`);
+    alert(lastError ?? '발급 실패(중복 코드 재시도 초과)');
   }
 
   return (
@@ -207,20 +242,21 @@ export default function AccountIssueClient() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700">로그인 ID(login_code: 이메일)</label>
+              <label className="block text-sm font-medium text-gray-700">로그인 ID(8자리 숫자)</label>
               <input
                 value={loginCode}
                 onChange={(e) => setLoginCode(e.target.value)}
-                placeholder="name@example.com"
+                placeholder="12345678"
                 className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
               />
               <button
                 type="button"
                 className="mt-2 text-xs text-blue-600 hover:underline"
                 onClick={() => {
-                  const emailDomain = 'tylifedashboard.local';
                   if (!selectedMemberId) return;
-                  setLoginCode(`user-${selectedMemberId.slice(0, 8)}@${emailDomain}`);
+                  const code = randomDigits8();
+                  setLoginCode(code);
+                  setPassword(code);
                 }}
               >
                 자동 생성
@@ -228,18 +264,21 @@ export default function AccountIssueClient() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700">초기 비밀번호</label>
+              <label className="block text-sm font-medium text-gray-700">초기 비밀번호(화면에 표시)</label>
               <input
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="비밀번호"
+                placeholder="12345678"
                 className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                type="password"
               />
               <button
                 type="button"
                 className="mt-2 text-xs text-blue-600 hover:underline"
-                onClick={() => setPassword(randomPassword())}
+                onClick={() => {
+                  const code = randomDigits8();
+                  setLoginCode(code);
+                  setPassword(code);
+                }}
               >
                 자동 생성
               </button>
