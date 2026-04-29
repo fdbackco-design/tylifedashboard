@@ -194,6 +194,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const eligibleContracts = baseRows.map((r) => {
     const customer_id = customerIdByContractId.get(r.contract_id) ?? null;
     const item_name = itemNameByContractId.get(r.contract_id) ?? null;
+    const raw_sales_member_id = r.sales_member_id;
     let sales_member_id = r.sales_member_id;
     if (customer_id) {
       const mapped = memberIdByCustomerId.get(customer_id);
@@ -203,7 +204,17 @@ export default async function SettlementPage({ searchParams }: PageProps) {
         // fallback (HQ only): customer 매핑이 존재할 때만 치환 가능하므로 여기선 그대로 둔다
       }
     }
-    return { ...r, id: r.contract_id, customer_id, sales_member_id, unit_count: r.unit_count ?? 0, item_name };
+    const is_self_customer_contract = !!customer_id && !!memberIdByCustomerId.get(customer_id);
+    return {
+      ...r,
+      id: r.contract_id,
+      customer_id,
+      raw_sales_member_id,
+      sales_member_id,
+      unit_count: r.unit_count ?? 0,
+      item_name,
+      is_self_customer_contract,
+    };
   });
 
   // 정산현황 표의 "직접계약/직접구좌"도 위 귀속 기준으로 재계산
@@ -265,6 +276,40 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       </div>
     );
   }
+
+  // contract_id -> 기본수당(subtotal) (월정산 계산 결과에서 추출)
+  const baseWonByContractId = new Map<string, number>();
+  for (const s of (settlements ?? []) as any[]) {
+    const detail = s.calculation_detail as SettlementCalculationDetail | null;
+    for (const dc of detail?.direct_contracts ?? []) {
+      const cid = String((dc as any).contract_id ?? '');
+      if (!cid) continue;
+      if (!baseWonByContractId.has(cid)) {
+        baseWonByContractId.set(cid, Number((dc as any).subtotal ?? 0));
+      }
+    }
+  }
+
+  const contractBaseItems = eligibleContracts
+    .map((c) => {
+      const contractId = String((c as any).id ?? '');
+      if (!contractId) return null;
+      const baseWon = baseWonByContractId.get(contractId) ?? 0;
+      return {
+        contractId,
+        baseWon,
+        rawSalesMemberId: ((c as any).raw_sales_member_id ?? null) as string | null,
+        mappedMemberId: ((c as any).sales_member_id ?? null) as string | null,
+        isSelfCustomerContract: Boolean((c as any).is_self_customer_contract ?? false),
+      };
+    })
+    .filter((v): v is {
+      contractId: string;
+      baseWon: number;
+      rawSalesMemberId: string | null;
+      mappedMemberId: string | null;
+      isSelfCustomerContract: boolean;
+    } => v != null);
 
   const ZERO_OUT_MEMBER_NAME = '정성은';
 
@@ -559,6 +604,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
         childrenByParent={childrenByParent}
         memberAggById={memberAggById}
         topLineIdByMemberId={topLineIdByMemberId}
+        contractBaseItems={contractBaseItems}
         rows={displayLineRows.map<SettlementLineRow>((r) => ({
           topLineId: r.topLineId,
           topDisplayName: r.topDisplayName,

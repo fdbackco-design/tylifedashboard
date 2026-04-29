@@ -51,6 +51,13 @@ export default function SettlementLineTableClient(props: {
     }
   >;
   topLineIdByMemberId: Record<string, string>;
+  contractBaseItems: Array<{
+    contractId: string;
+    baseWon: number;
+    rawSalesMemberId: string | null;
+    mappedMemberId: string | null;
+    isSelfCustomerContract: boolean;
+  }>;
 }) {
   const [selfIncludedByTopId, setSelfIncludedByTopId] = useState<Record<string, boolean>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -84,23 +91,19 @@ export default function SettlementLineTableClient(props: {
     };
 
     const sumAgg = (memberIds: Set<string>) => {
-      let base = 0;
       let rollup = 0;
       let leaderMaint = 0;
-      let total = 0;
       let directContractCount = 0;
       let directUnitSum = 0;
       for (const id of memberIds) {
         const m = props.memberAggById[id];
         if (!m) continue;
-        base += m.base ?? 0;
         rollup += m.rollup ?? 0;
         leaderMaint += m.leaderMaint ?? 0;
-        total += m.total ?? 0;
         directContractCount += m.directContractCount ?? 0;
         directUnitSum += m.directUnitSum ?? 0;
       }
-      return { base, rollup, leaderMaint, total, directContractCount, directUnitSum };
+      return { rollup, leaderMaint, directContractCount, directUnitSum };
     };
 
     // 산하 분리 보기: 행 재구성(재귀)
@@ -121,10 +124,10 @@ export default function SettlementLineTableClient(props: {
         topLineId: nodeId,
         topDisplayName: meta?.displayName ?? nodeId,
         topRank: meta?.rank ?? '-',
-        base: agg.base,
+        base: 0, // 기본수당은 아래 계약 단위 귀속으로 재계산
         rollup: agg.rollup,
         leaderMaint: agg.leaderMaint,
-        total: agg.total,
+        total: agg.rollup + agg.leaderMaint,
         directContractCount: agg.directContractCount,
         directUnitSum: agg.directUnitSum,
         ownDirectUnitSum: meta?.directUnitSum ?? 0,
@@ -142,10 +145,10 @@ export default function SettlementLineTableClient(props: {
         topLineId: nodeId,
         topDisplayName: meta.displayName ?? nodeId,
         topRank: meta.rank ?? '-',
-        base: meta.base,
+        base: 0, // 기본수당은 아래 계약 단위 귀속으로 재계산
         rollup: meta.rollup,
         leaderMaint: meta.leaderMaint,
-        total: meta.total,
+        total: meta.rollup + meta.leaderMaint,
         directContractCount: meta.directContractCount,
         directUnitSum: meta.directUnitSum,
         ownDirectUnitSum: meta.directUnitSum,
@@ -179,16 +182,80 @@ export default function SettlementLineTableClient(props: {
       expandedRowsBase.push(...expandNode(anchorTopLineId, anchorTopLineId, 0));
     }
 
+    // row index by member set membership (분리 상태 반영)
+    const rowMemberSetList = expandedRowsBase.map((r) => {
+      const subtree = collectSubtree(r.topLineId);
+      const inLine = new Set<string>();
+      for (const mid of subtree) {
+        if ((props.topLineIdByMemberId[mid] ?? null) === r.__anchorTopLineId) inLine.add(mid);
+      }
+      // split된 self row는 본인만 포함
+      const isSplitSelf = (splitOpenByTopId[r.topLineId] ?? false) && (r.__depth >= 0);
+      if (isSplitSelf) return new Set<string>([r.topLineId]);
+      return inLine;
+    });
+
+    const baseByRowIdx = new Map<number, number>();
+    const addBase = (rowIdx: number, won: number) => {
+      baseByRowIdx.set(rowIdx, (baseByRowIdx.get(rowIdx) ?? 0) + won);
+    };
+
+    // 기본수당 귀속 우선순위 적용 (계약 단위)
+    for (const c of props.contractBaseItems) {
+      const baseWon = Number(c.baseWon ?? 0);
+      if (!Number.isFinite(baseWon) || baseWon === 0) continue;
+
+      let targetMemberId: string | null = null;
+
+      // 1) 본인 고객 계약 우선
+      if (c.isSelfCustomerContract && c.mappedMemberId) {
+        const mappedTop = props.topLineIdByMemberId[c.mappedMemberId] ?? null;
+        const isTopLineSelf = mappedTop != null && mappedTop === c.mappedMemberId;
+        targetMemberId = isTopLineSelf ? c.mappedMemberId : mappedTop;
+      }
+
+      // 2) 일반 계약: 담당자 직접 계약은 담당자 본인
+      if (!targetMemberId && c.rawSalesMemberId) {
+        targetMemberId = c.rawSalesMemberId;
+      }
+
+      // 3) 그 외: 표시 루트(상위)로 귀속
+      if (!targetMemberId && c.mappedMemberId) {
+        targetMemberId = props.topLineIdByMemberId[c.mappedMemberId] ?? null;
+      }
+      if (!targetMemberId) continue;
+
+      // target member를 포함하는 현재 표시 row에 기본수당 배분
+      let assigned = false;
+      for (let i = 0; i < rowMemberSetList.length; i++) {
+        if (rowMemberSetList[i].has(targetMemberId)) {
+          addBase(i, baseWon);
+          assigned = true;
+          break;
+        }
+      }
+      if (!assigned) {
+        // fallback: target이 속한 top-line row로 귀속
+        const topId = props.topLineIdByMemberId[targetMemberId] ?? null;
+        if (!topId) continue;
+        const idx = expandedRowsBase.findIndex((r) => r.topLineId === topId && r.__anchorTopLineId === topId);
+        if (idx >= 0) addBase(idx, baseWon);
+      }
+    }
+
     let excludedUnits = 0;
-    const rows = expandedRowsBase.map((r) => {
+    const rows = expandedRowsBase.map((r, idx) => {
+      const base = baseByRowIdx.get(idx) ?? 0;
+      const totalBeforeSelfToggle = base + (r.rollup ?? 0) + (r.leaderMaint ?? 0);
       const included = selfIncludedByTopId[r.topLineId] ?? true;
       const adjustWon = included ? 0 : (r.ownDirectUnitSum ?? 0) * SELF_CONTRACT_COMMISSION_PER_UNIT_WON;
       if (!included) excludedUnits += r.ownDirectUnitSum;
       return {
         ...r,
+        base,
         selfContractIncluded: included,
         selfContractAdjustWon: adjustWon,
-        adjustedTotal: r.total - adjustWon,
+        adjustedTotal: totalBeforeSelfToggle - adjustWon,
       };
     });
     const baseTotal = rows.reduce((s, r) => s + (r.total ?? 0), 0);
@@ -208,6 +275,7 @@ export default function SettlementLineTableClient(props: {
     props.childrenByParent,
     props.memberAggById,
     props.topLineIdByMemberId,
+    props.contractBaseItems,
   ]);
 
   const baseSum = useMemo(() => adjustedRows.reduce((s, r) => s + (r.base ?? 0), 0), [adjustedRows]);
