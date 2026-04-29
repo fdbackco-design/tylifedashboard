@@ -6,6 +6,8 @@ type CustomerRow = {
   id: string;
   name: string;
   phone: string | null;
+  rank?: string | null;
+  customer_id?: string | null;
 };
 
 type MemberCandidate = {
@@ -51,6 +53,7 @@ export default function AccountIssueClient() {
   const [searchError, setSearchError] = useState<string | null>(null);
 
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRow | null>(null);
+  const selectedCustomerId = selectedCustomer?.customer_id ?? null;
   const [memberCandidates, setMemberCandidates] = useState<MemberCandidate[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState<string>('');
 
@@ -124,6 +127,8 @@ export default function AccountIssueClient() {
         `/api/admin/account-issue/customers?query=${encodeURIComponent(normalizedQuery)}`,
         { credentials: 'include' },
       );
+      // 이제 검색 결과는 organization_members 기반이다.
+      // id=member_id, customer_id는 (있으면) source_customer_id/external_id(customer:...)로 채워진다.
       const json = (await res.json()) as ApiResult<CustomerRow[]>;
       if (!res.ok || !json.success) throw new Error('검색 실패');
       setCustomers(json.data);
@@ -135,30 +140,21 @@ export default function AccountIssueClient() {
     }
   }
 
-  async function loadMemberCandidates(customerId: string) {
-    const res = await fetch(
-      `/api/admin/account-issue/member-candidates?customer_id=${encodeURIComponent(customerId)}`,
-      { credentials: 'include' },
-    );
-    const json = (await res.json()) as ApiResult<MemberCandidate[]>;
-    if (!res.ok || !json.success) throw new Error(json.success ? 'error' : json.error);
-
-    setMemberCandidates(json.data);
-    const first = json.data[0]?.id ?? '';
-    setSelectedMemberId(first);
-    await loadExistingProfile(first);
-  }
-
   async function handleSelectCustomer(c: CustomerRow) {
     setSelectedCustomer(c);
-    setMemberCandidates([]);
-    setSelectedMemberId('');
-    await loadMemberCandidates(c.id);
+    // 검색 결과가 organization_members 기반이므로, 선택 즉시 해당 멤버를 발급 대상으로 설정
+    setMemberCandidates([{ id: c.id, name: c.name, rank: c.rank ?? '-', phone: c.phone ?? null }]);
+    setSelectedMemberId(c.id);
+    await loadExistingProfile(c.id);
   }
 
   async function issueAccount() {
     if (!selectedCustomer) return;
     if (!selectedMemberId) return;
+    if (!selectedCustomerId) {
+      alert('이 조직원은 customers 테이블과 연결(customer_id)되어 있지 않아 계정 발급이 불가합니다.');
+      return;
+    }
     if (!loginCode.trim() || !password) {
       alert('로그인 ID와 비밀번호를 입력/자동생성 해주세요.');
       return;
@@ -184,7 +180,7 @@ export default function AccountIssueClient() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          customer_id: selectedCustomer.id,
+          customer_id: selectedCustomerId,
           member_id: selectedMemberId,
           login_code: loginCodeToSend,
           password: passwordToTry,
@@ -300,6 +296,10 @@ export default function AccountIssueClient() {
                     <div className="text-xs text-gray-500">
                       {c.phone ?? '-'} ({normalizePhoneDigits(c.phone ?? '') || '-'})
                     </div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      {c.rank ? `직급: ${c.rank}` : '직급: -'} · customer 연결:{' '}
+                      {c.customer_id ? '있음' : '없음'}
+                    </div>
                   </div>
                   <div className="text-xs text-gray-500">선택</div>
                 </div>
@@ -313,8 +313,14 @@ export default function AccountIssueClient() {
         <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-4">
           <div className="text-sm font-semibold text-gray-700">선택된 대상</div>
           <div className="text-sm text-gray-700">
-            <span className="font-medium">{selectedCustomer.name}</span> · {selectedCustomer.phone ?? '-'}
+            <span className="font-medium">{selectedCustomer.name}</span> · {selectedCustomer.phone ?? '-'} ·{' '}
+            {selectedCustomer.rank ? `(${selectedCustomer.rank})` : '(직급 -)'}
           </div>
+          {!selectedCustomerId ? (
+            <div className="text-xs text-amber-700">
+              이 조직원은 `customers`와 연결된 customer_id가 없어 계정 발급이 불가합니다. (organization_members.source_customer_id 또는 external_id=customer:&lt;id&gt; 필요)
+            </div>
+          ) : null}
 
           <div>
             <label className="block text-sm font-medium text-gray-700">연결 가능한 조직원 후보</label>
@@ -398,7 +404,7 @@ export default function AccountIssueClient() {
           <div className="flex gap-2">
             <button
               type="button"
-              disabled={!selectedMemberId || !loginCode || !password}
+              disabled={!selectedMemberId || !loginCode || !password || !selectedCustomerId}
               onClick={issueAccount}
               className="px-4 py-2 rounded-md bg-emerald-700 text-white text-sm font-semibold disabled:opacity-50"
             >
