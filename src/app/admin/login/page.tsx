@@ -22,7 +22,7 @@ export default function AdminLoginPage({ searchParams }: { searchParams?: { erro
             <div className="text-sm font-medium text-gray-700">ID</div>
             <input
               name="id"
-              defaultValue="admin"
+              defaultValue=""
               className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
             />
           </label>
@@ -32,7 +32,7 @@ export default function AdminLoginPage({ searchParams }: { searchParams?: { erro
               name="pw"
               type="password"
               defaultValue=""
-              placeholder="0703"
+              placeholder=""
               className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
             />
           </label>
