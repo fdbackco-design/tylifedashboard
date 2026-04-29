@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import OrgTree from '@/components/org-tree/OrgTree';
-import { createAdminSupabaseClient } from '@/lib/supabase/server';
+import { createAdminSupabaseClient, createServerSupabaseClient } from '@/lib/supabase/server';
 import { buildOrgTree } from '@/lib/settlement/calculator';
 import { collectSubtreeMemberIdsDownstream } from '@/lib/settlement/settlement-org-tree';
 import { getSettlementWindowForYearMonth, getSettlementWindowSeoul } from '@/lib/settlement/settlement-window';
@@ -30,18 +30,21 @@ export default async function OrganizationMyTreePage({
   const yearMonth = /^\d{4}-\d{2}$/.test(requestedYearMonth) ? requestedYearMonth : defaultYearMonth;
   const { start_date, end_date, label_year_month } = getSettlementWindowForYearMonth(yearMonth);
 
-  // organization_members/edges는 현재 RLS 정책이 없어서 anon으로는 조회가 비게 된다.
-  // 개인 조직도는 "member_id 기반 subtree만" 서버에서 엄격히 필터링해서 내려준다.
-  const db = createAdminSupabaseClient();
+  // user session은 anon+RLS 클라이언트로 읽어야 한다.
+  const userDb = await createServerSupabaseClient();
   const {
     data: { user },
-  } = await db.auth.getUser();
+  } = await userDb.auth.getUser();
+
+  // organization_members/edges 등은 현재 RLS 정책이 없어서 service_role로 읽는다.
+  // 대신 subtree 필터링으로 범위를 엄격히 제한한다.
+  const adminDb = createAdminSupabaseClient();
 
   if (!user) {
     redirect(`/login?redirect=${encodeURIComponent(`/organization?year_month=${yearMonth}`)}`);
   }
 
-  const { data: profile, error: profileErr } = await db
+  const { data: profile, error: profileErr } = await userDb
     .from('user_profiles')
     .select('member_id,is_active')
     .eq('id', user.id)
@@ -91,14 +94,14 @@ export default async function OrganizationMyTreePage({
 
   // 공통: 조직 구성 + 계약(서브트리 기준)
   const [membersRes, edgesRes, rulesRes, contractsRes] = await Promise.all([
-    db
+    adminDb
       .from('organization_members')
       .select('id,name,rank,phone,external_id,source_customer_id'),
     // 개인 조직도는 member_id 중심 서브트리만 필터링하므로,
     // 여기서는 is_active 필터를 제거하고 서버에서 subtree 기준으로만 범위를 제한한다.
-    db.from('organization_edges').select('parent_id,child_id'),
-    db.from('settlement_rules').select('*'),
-    db
+    adminDb.from('organization_edges').select('parent_id,child_id'),
+    adminDb.from('settlement_rules').select('*'),
+    adminDb
       .from('contracts')
       .select(
         'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, is_cancelled, customers(name, phone)',
