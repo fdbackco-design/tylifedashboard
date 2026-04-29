@@ -20,7 +20,9 @@ export async function POST(req: Request) {
     return NextResponse.redirect(loginUrl);
   }
 
-  const res = NextResponse.redirect(redirectTo);
+  // NextResponse.redirect는 절대 URL/URL 객체만 허용
+  const redirectTarget = new URL(redirectTo, url);
+  const res = NextResponse.redirect(redirectTarget);
   res.cookies.set(ADMIN_COOKIE_NAME, ADMIN_COOKIE_VALUE, {
     httpOnly: true,
     sameSite: 'lax',
