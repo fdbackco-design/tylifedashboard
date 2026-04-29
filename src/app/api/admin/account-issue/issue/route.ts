@@ -5,7 +5,7 @@ import { isAdminAuthed } from '@/lib/admin-auth';
 type Body = {
   customer_id: string;
   member_id: string;
-  login_code: string; // email 형태
+  login_code: string; // 8자리 숫자(요구사항) — 내부적으로 auth email로 변환됨
   password: string;
   is_active: boolean;
 };
@@ -24,9 +24,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!customer_id || !member_id || !login_code || !password) {
     return NextResponse.json({ success: false, error: 'missing fields' }, { status: 400 });
   }
-  if (!login_code.includes('@')) {
-    return NextResponse.json({ success: false, error: 'login_code must be email' }, { status: 400 });
+
+  const EMAIL_DOMAIN = 'tylifedashboard.local';
+  const extractDigits8 = (v: string): string | null => {
+    const local = v.includes('@') ? v.split('@')[0] : v;
+    return /^\d{8}$/.test(local) ? local : null;
+  };
+
+  // 요구사항: login_code/password는 8자리 숫자여야 함
+  const digits = extractDigits8(login_code);
+  if (!digits) {
+    return NextResponse.json({ success: false, error: 'login_code must be 8-digit number' }, { status: 400 });
   }
+  const passwordDigits = extractDigits8(password);
+  if (!passwordDigits || passwordDigits !== digits) {
+    return NextResponse.json({ success: false, error: 'password must be the same 8-digit number as login_code' }, { status: 400 });
+  }
+
+  // Supabase Auth는 email이 필요하므로 내부적으로만 email 생성
+  const authEmail = `${digits}@${EMAIL_DOMAIN}`;
 
   const db = createAdminSupabaseClient();
 
@@ -48,8 +64,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // 1) auth.users 생성
     const created = await db.auth.admin.createUser({
-      email: login_code,
-      password,
+      email: authEmail,
+      password: digits,
       email_confirm: true,
       user_metadata: { member_id },
     });
@@ -76,7 +92,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       id: userId,
       customer_id,
       member_id,
-      login_code,
+      login_code: digits,
       display_name: member?.name ?? customer?.name ?? null,
       phone: member?.phone ?? customer?.phone ?? null,
       role: 'member',

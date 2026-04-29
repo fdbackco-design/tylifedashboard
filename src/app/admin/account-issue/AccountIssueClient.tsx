@@ -177,8 +177,8 @@ export default function AccountIssueClient() {
     let lastError: string | null = null;
 
     for (let i = 0; i < maxRetries; i++) {
-      const loginEmail = isDigitsOnly ? `${digitsToTry}@${emailDomain}` : loginCodeTrim;
       const passwordToTry = isDigitsOnly ? digitsToTry : password;
+      const loginCodeToSend = isDigitsOnly ? digitsToTry : loginCodeTrim;
 
       const res = await fetch('/api/admin/account-issue/issue', {
         method: 'POST',
@@ -186,7 +186,7 @@ export default function AccountIssueClient() {
         body: JSON.stringify({
           customer_id: selectedCustomer.id,
           member_id: selectedMemberId,
-          login_code: loginEmail,
+          login_code: loginCodeToSend,
           password: passwordToTry,
           is_active: isActive,
         }),
