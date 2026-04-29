@@ -50,6 +50,14 @@ export default async function OrganizationMyTreePage({
   }
 
   const memberId = profile?.member_id as string | null;
+  const debugStats: Record<string, unknown> = {
+    debugEnabled,
+    user_id: user?.id ?? null,
+    profile_member_id: memberId,
+    yearMonth,
+    settlementWindow: { start_date, end_date, label_year_month },
+  };
+
   if (!memberId) {
     return (
       <div className="p-6">
@@ -114,6 +122,9 @@ export default async function OrganizationMyTreePage({
   const edgesRaw = (edgesRes.data ?? []) as Array<{ parent_id: string | null; child_id: string }>;
   const rules = (rulesRes.data ?? []) as SettlementRule[];
 
+  debugStats.members_raw_count = membersRaw.length;
+  debugStats.edges_raw_count = (edgesRes.data ?? []).length;
+
   // treeRows 기준으로 서브트리 계산
   const treeRowsBase: OrgTreeRow[] = membersRaw.map((m) => ({
     id: m.id,
@@ -135,6 +146,8 @@ export default async function OrganizationMyTreePage({
 
   const subtreeMembers = membersRaw.filter((m) => subtreeIds.has(m.id));
   const subtreeIdSet = new Set(subtreeMembers.map((m) => m.id));
+  debugStats.subtree_ids_count = subtreeIds.size;
+  debugStats.subtree_members_count = subtreeMembers.length;
 
   // subtree parent는 “parent가 subtree 밖이면 root 처리(=parent null)”
   const subtreeTreeRows: OrgTreeRow[] = treeRows
@@ -143,8 +156,11 @@ export default async function OrganizationMyTreePage({
       const pid = r.parent_id ?? null;
       return { ...r, parent_id: pid && subtreeIdSet.has(pid) ? pid : null };
     });
+  debugStats.subtree_tree_rows_count = subtreeTreeRows.length;
 
   const tree = buildOrgTree(subtreeTreeRows);
+  debugStats.tree_roots_count = tree.length;
+  debugStats.tree_root_ids = tree.map((r: any) => r.id);
 
   const eligibleContractsForMetrics = (contractsRes.data ?? [])
     .filter((c) => {
@@ -162,6 +178,7 @@ export default async function OrganizationMyTreePage({
       item_name: (c as any).item_name ?? null,
       sales_member_id: (c as any).sales_member_id as string,
     }));
+  debugStats.eligible_contracts_for_metrics_count = eligibleContractsForMetrics.length;
 
   const contractsByMember: Record<string, ContractItem[]> = {};
   for (const c of contractsRes.data ?? []) {
@@ -192,6 +209,8 @@ export default async function OrganizationMyTreePage({
       customer_name: (c as any).customers?.name ?? '',
     });
   }
+  debugStats.contracts_by_member_keys = Object.keys(contractsByMember).slice(0, 30);
+  debugStats.contracts_by_member_total_rows = Object.values(contractsByMember).reduce((s, arr) => s + arr.length, 0);
 
   // edges/subtree는 calculateOrgNodeMetrics에 넣을 때도 서브트리만 유지
   const subtreeEdges = edgesRaw.filter((e) => e.child_id && subtreeIdSet.has(e.child_id) && e.parent_id && subtreeIdSet.has(e.parent_id));
@@ -208,6 +227,15 @@ export default async function OrganizationMyTreePage({
 
   return (
     <div className="p-6">
+      {debugEnabled ? (
+        <div className="mb-4 bg-slate-50 border border-slate-200 rounded-lg p-4">
+          <div className="text-sm font-semibold text-slate-800 mb-2">[organization debug] stats</div>
+          <pre className="text-[11px] leading-4 text-slate-700 whitespace-pre-wrap">
+            {JSON.stringify(debugStats, null, 2)}
+          </pre>
+        </div>
+      ) : null}
+
       <div className="flex items-start justify-between mb-6">
         <div>
           <h2 className="text-2xl font-bold text-gray-800">내 조직도</h2>
@@ -241,7 +269,16 @@ export default async function OrganizationMyTreePage({
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-        <OrgTree roots={tree as any} contractsByMember={contractsByMember} metricsById={orgMetricsById as any} debug={{ enabled: false } as any} />
+        <OrgTree
+          roots={tree as any}
+          contractsByMember={contractsByMember}
+          metricsById={orgMetricsById as any}
+          debug={
+            debugEnabled
+              ? ({ enabled: true } as any)
+              : ({ enabled: false, hqId: null, hqEligibleTotal: 0, hqEligibleMappedToCustomerNode: 0, hqEligibleMissingCustomerNode: 0 } as any)
+          }
+        />
       </div>
     </div>
   );
