@@ -17,9 +17,6 @@ export async function POST(req: Request) {
   if (id !== ADMIN_ID || pw !== ADMIN_PW) {
     const loginUrl = new URL('/admin/login', url);
     loginUrl.searchParams.set('error', '1');
-    // 원래 목적 페이지는 유지
-    const originalRedirect = url.searchParams.get('redirect');
-    if (originalRedirect) loginUrl.searchParams.set('redirect', originalRedirect);
     return NextResponse.redirect(loginUrl);
   }
 

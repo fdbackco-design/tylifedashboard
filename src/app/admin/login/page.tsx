@@ -17,7 +17,7 @@ export default function AdminLoginPage({ searchParams }: { searchParams?: { erro
           </div>
         ) : null}
 
-        <form method="POST" action="/admin/login" className="space-y-3">
+        <form method="POST" action="/admin/login/submit" className="space-y-3">
           <label className="block">
             <div className="text-sm font-medium text-gray-700">ID</div>
             <input
