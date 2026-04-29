@@ -196,15 +196,21 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     const item_name = itemNameByContractId.get(r.contract_id) ?? null;
     const raw_sales_member_id = r.sales_member_id;
     let sales_member_id = r.sales_member_id;
+    const mappedCustomerMemberId = customer_id ? (memberIdByCustomerId.get(customer_id) ?? null) : null;
     if (customer_id) {
-      const mapped = memberIdByCustomerId.get(customer_id);
-      if (mapped) {
-        sales_member_id = mapped;
+      if (mappedCustomerMemberId) {
+        sales_member_id = mappedCustomerMemberId;
       } else if (hqIdsRaw.has(r.sales_member_id)) {
         // fallback (HQ only): customer 매핑이 존재할 때만 치환 가능하므로 여기선 그대로 둔다
       }
     }
-    const is_self_customer_contract = !!customer_id && !!memberIdByCustomerId.get(customer_id);
+    // "본인 고객 계약"은 단순 customer 매핑 존재가 아니라,
+    // 고객으로 매핑된 멤버와 원 담당자(raw_sales_member_id)가 동일한 경우에만 true.
+    // (그 외는 일반 담당자 직접 계약으로 처리되어야 산하 분리 시 최상위로 과도 귀속되지 않음)
+    const is_self_customer_contract =
+      !!customer_id &&
+      mappedCustomerMemberId != null &&
+      mappedCustomerMemberId === raw_sales_member_id;
     return {
       ...r,
       id: r.contract_id,
