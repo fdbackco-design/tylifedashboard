@@ -170,6 +170,12 @@ export default function AccountIssueClient() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="예: 김세영 / 010-1234-5678"
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                if (!normalizedQuery) return;
+                searchCustomers();
+              }}
               className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
             />
           </div>
