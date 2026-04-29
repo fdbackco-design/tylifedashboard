@@ -220,9 +220,12 @@ export default function SettlementLineTableClient(props: {
       contractId: string;
       baseWon: number;
       rawSalesMemberId: string | null;
+      rawSalesMemberRank: string | null;
+      isRawSalesMemberHeadOffice: boolean;
       mappedMemberId: string | null;
       isSelfCustomerContract: boolean;
       resolvedTargetMemberId: string | null;
+      targetSource: string;
       selectedRowTopLineId: string | null;
       selectedRowName: string | null;
       selectedRowDepth: number | null;
@@ -235,7 +238,11 @@ export default function SettlementLineTableClient(props: {
       const baseWon = Number(c.baseWon ?? 0);
       if (!Number.isFinite(baseWon) || baseWon === 0) continue;
 
+      const rawRank = c.rawSalesMemberId ? (props.memberAggById[c.rawSalesMemberId]?.rank ?? null) : null;
+      const isRawSalesMemberHeadOffice = rawRank === '본사';
+
       let targetMemberId: string | null = null;
+      let targetSource = 'fallback';
       let reason = 'fallback_display_root';
 
       // 1) 본인 고객 계약 우선
@@ -243,31 +250,27 @@ export default function SettlementLineTableClient(props: {
         const mappedTop = props.topLineIdByMemberId[c.mappedMemberId] ?? null;
         const isTopLineSelf = mappedTop != null && mappedTop === c.mappedMemberId;
         targetMemberId = isTopLineSelf ? c.mappedMemberId : mappedTop;
+        targetSource = isTopLineSelf ? 'self_customer_top_root' : 'self_customer_parent_root';
         reason = isTopLineSelf ? 'self_customer_top_root' : 'self_customer_parent_root';
       }
 
-      // 2) 일반 계약: 담당자 직접 계약은 "표시 가능한 경우"에만 담당자 본인
-      //    (raw id가 현재 표시 트리와 연결되지 않으면 mapped id를 우선 사용)
+      // 2) 일반 계약: raw 담당자가 있고 "본사"가 아니면 raw를 타깃으로 사용
       if (!targetMemberId && c.rawSalesMemberId) {
-        const rawId = c.rawSalesMemberId;
-        const rawInAnyDisplayedSet = rowMetaList.some((rm) => rm.memberSet.has(rawId));
-        const rawIsDisplayedRow = rowByTopLineId.has(rawId);
-        const rawHasTopLine = !!props.topLineIdByMemberId[rawId];
-        if (rawInAnyDisplayedSet || rawIsDisplayedRow || rawHasTopLine) {
-          targetMemberId = rawId;
-          reason = 'direct_exact_row';
+        if (!isRawSalesMemberHeadOffice) {
+          targetMemberId = c.rawSalesMemberId;
+          targetSource = 'raw_sales_member';
+          reason = 'direct_raw_sales_member';
         } else if (c.mappedMemberId) {
           targetMemberId = c.mappedMemberId;
-          reason = 'direct_mapped_member';
-        } else {
-          targetMemberId = rawId;
-          reason = 'direct_raw_unmapped';
+          targetSource = 'mapped_member_because_raw_is_head_office';
+          reason = 'raw_is_head_office_use_mapped';
         }
       }
 
-      // 3) 그 외: customer 매핑을 타깃으로 사용
+      // 3) raw가 없거나 raw가 본사였고 mapped로 아직 못 잡은 경우 mapped 사용
       if (!targetMemberId && c.mappedMemberId) {
         targetMemberId = c.mappedMemberId;
+        targetSource = 'mapped_member';
         reason = 'mapped_member';
       }
       if (!targetMemberId) continue;
@@ -280,7 +283,6 @@ export default function SettlementLineTableClient(props: {
       const exactRow = rowMetaList.find((rm) => rm.topLineId === targetMemberId) ?? null;
       if (exactRow) {
         selected = exactRow;
-        if (reason.startsWith('direct_')) reason = 'direct_exact_row';
       } else {
         // 우선순위 2) target의 "가장 가까운 표시 조상 row"를 먼저 탐색
         let cur: string | null = targetMemberId;
@@ -289,7 +291,10 @@ export default function SettlementLineTableClient(props: {
           const hit = rowByTopLineId.get(cur);
           if (hit) {
             selected = hit;
-            if (reason.startsWith('direct_')) reason = 'direct_deepest_row';
+            if (reason === 'raw_is_head_office_use_mapped') {
+              targetSource = 'mapped_ancestor_because_raw_is_head_office';
+              reason = 'raw_is_head_office_use_mapped_ancestor';
+            }
             break;
           }
           const parentId: string | null = parentByChild.get(cur) ?? null;
@@ -304,13 +309,19 @@ export default function SettlementLineTableClient(props: {
           const deepest = candidates.filter((rm) => rm.depth === maxDepth);
           if (deepest.length === 1) {
             selected = deepest[0];
-            if (reason.startsWith('direct_')) reason = 'direct_deepest_row';
+            if (reason === 'raw_is_head_office_use_mapped') {
+              targetSource = 'mapped_ancestor_because_raw_is_head_office';
+              reason = 'raw_is_head_office_use_mapped_ancestor';
+            }
           } else {
             // 우선순위 3) depth 동률이면 memberSet size가 가장 작은 row
             const minSetSize = Math.min(...deepest.map((rm) => rm.memberSet.size));
             const smallest = deepest.filter((rm) => rm.memberSet.size === minSetSize);
             selected = smallest[0] ?? deepest[0];
-            if (reason.startsWith('direct_')) reason = 'direct_smallest_subtree_row';
+            if (reason === 'raw_is_head_office_use_mapped') {
+              targetSource = 'mapped_ancestor_because_raw_is_head_office';
+              reason = 'raw_is_head_office_use_mapped_ancestor';
+            }
           }
         }
       }
@@ -322,6 +333,7 @@ export default function SettlementLineTableClient(props: {
           selected = rowMetaList.find((rm) => rm.topLineId === topId && rm.depth === 0) ?? null;
         }
         if (!selected) selected = rowMetaList[0] ?? null;
+        targetSource = 'fallback';
         reason = 'fallback_display_root';
       }
 
@@ -334,9 +346,12 @@ export default function SettlementLineTableClient(props: {
           contractId: c.contractId,
           baseWon,
           rawSalesMemberId: c.rawSalesMemberId,
+          rawSalesMemberRank: rawRank,
+          isRawSalesMemberHeadOffice,
           mappedMemberId: c.mappedMemberId,
           isSelfCustomerContract: c.isSelfCustomerContract,
           resolvedTargetMemberId: targetMemberId,
+          targetSource,
           selectedRowTopLineId: selected?.topLineId ?? null,
           selectedRowName: selected?.topDisplayName ?? null,
           selectedRowDepth: selected?.depth ?? null,
