@@ -246,16 +246,29 @@ export default function SettlementLineTableClient(props: {
         reason = isTopLineSelf ? 'self_customer_top_root' : 'self_customer_parent_root';
       }
 
-      // 2) 일반 계약: 담당자 직접 계약은 담당자 본인
+      // 2) 일반 계약: 담당자 직접 계약은 "표시 가능한 경우"에만 담당자 본인
+      //    (raw id가 현재 표시 트리와 연결되지 않으면 mapped id를 우선 사용)
       if (!targetMemberId && c.rawSalesMemberId) {
-        targetMemberId = c.rawSalesMemberId;
-        reason = 'direct_exact_row';
+        const rawId = c.rawSalesMemberId;
+        const rawInAnyDisplayedSet = rowMetaList.some((rm) => rm.memberSet.has(rawId));
+        const rawIsDisplayedRow = rowByTopLineId.has(rawId);
+        const rawHasTopLine = !!props.topLineIdByMemberId[rawId];
+        if (rawInAnyDisplayedSet || rawIsDisplayedRow || rawHasTopLine) {
+          targetMemberId = rawId;
+          reason = 'direct_exact_row';
+        } else if (c.mappedMemberId) {
+          targetMemberId = c.mappedMemberId;
+          reason = 'direct_mapped_member';
+        } else {
+          targetMemberId = rawId;
+          reason = 'direct_raw_unmapped';
+        }
       }
 
-      // 3) 그 외: 표시 루트(상위)로 귀속
+      // 3) 그 외: customer 매핑을 타깃으로 사용
       if (!targetMemberId && c.mappedMemberId) {
-        targetMemberId = props.topLineIdByMemberId[c.mappedMemberId] ?? null;
-        reason = 'fallback_display_root';
+        targetMemberId = c.mappedMemberId;
+        reason = 'mapped_member';
       }
       if (!targetMemberId) continue;
 
