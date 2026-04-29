@@ -35,15 +35,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         .from('organization_members')
         .select('id, name, phone, source_customer_id, external_id')
         .ilike('name', `%${q}%`)
-        .eq('is_active', true)
-        .limit(15),
+        .limit(50),
       // phone은 포맷이 섞일 수 있어, DB에서 1차로 ilike 매칭한 뒤 숫자만 비교로 확정한다.
       db
         .from('organization_members')
         .select('id, name, phone, source_customer_id, external_id')
         .ilike('phone', `%${q}%`)
-        .eq('is_active', true)
-        .limit(15),
+        .limit(50),
     ]);
 
     const matchedMembers = [...(membersByNameRes.data ?? []), ...(membersByPhoneRes.data ?? [])] as Array<{
