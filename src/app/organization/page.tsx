@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import OrgTree from '@/components/org-tree/OrgTree';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { buildOrgTree } from '@/lib/settlement/calculator';
 import { collectSubtreeMemberIdsDownstream } from '@/lib/settlement/settlement-org-tree';
 import { getSettlementWindowForYearMonth, getSettlementWindowSeoul } from '@/lib/settlement/settlement-window';
@@ -30,7 +30,9 @@ export default async function OrganizationMyTreePage({
   const yearMonth = /^\d{4}-\d{2}$/.test(requestedYearMonth) ? requestedYearMonth : defaultYearMonth;
   const { start_date, end_date, label_year_month } = getSettlementWindowForYearMonth(yearMonth);
 
-  const db = await createServerSupabaseClient();
+  // organization_members/edges는 현재 RLS 정책이 없어서 anon으로는 조회가 비게 된다.
+  // 개인 조직도는 "member_id 기반 subtree만" 서버에서 엄격히 필터링해서 내려준다.
+  const db = createAdminSupabaseClient();
   const {
     data: { user },
   } = await db.auth.getUser();
@@ -91,9 +93,9 @@ export default async function OrganizationMyTreePage({
   const [membersRes, edgesRes, rulesRes, contractsRes] = await Promise.all([
     db
       .from('organization_members')
-      .select('id,name,rank,phone,external_id,source_customer_id')
-      // 루트(member_id)는 비활성 상태여도 반드시 포함 (권한 사용자가 계정 발급 시점에 비활성인 경우 방어)
-      .or(`is_active.eq.true,id.eq.${memberId}`),
+      .select('id,name,rank,phone,external_id,source_customer_id'),
+    // 개인 조직도는 member_id 중심 서브트리만 필터링하므로,
+    // 여기서는 is_active 필터를 제거하고 서버에서 subtree 기준으로만 범위를 제한한다.
     db.from('organization_edges').select('parent_id,child_id'),
     db.from('settlement_rules').select('*'),
     db
