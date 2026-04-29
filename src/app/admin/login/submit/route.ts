@@ -26,7 +26,8 @@ export async function POST(req: Request) {
   res.cookies.set(ADMIN_COOKIE_NAME, ADMIN_COOKIE_VALUE, {
     httpOnly: true,
     sameSite: 'lax',
-    path: '/admin',
+    // API 호출은 /api/admin/* 경로이므로 path를 /로 둬야 쿠키가 전달됨
+    path: '/',
     secure: process.env.NODE_ENV === 'production',
     maxAge: 60 * 60 * 24, // 24시간
   });
