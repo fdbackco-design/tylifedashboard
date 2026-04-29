@@ -36,6 +36,14 @@ function randomDigits8(): string {
   return String(n).padStart(8, '0');
 }
 
+function digitsFromLoginCode(loginCodeEmail: string | null | undefined): string | null {
+  const v = String(loginCodeEmail ?? '').trim();
+  if (!v) return null;
+  const local = v.includes('@') ? v.split('@')[0] : v;
+  if (/^\d{8}$/.test(local)) return local;
+  return null;
+}
+
 export default function AccountIssueClient() {
   const [query, setQuery] = useState('');
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
@@ -52,6 +60,45 @@ export default function AccountIssueClient() {
 
   const normalizedQuery = useMemo(() => query.trim(), [query]);
   const emailDomain = 'tylifedashboard.local';
+
+  async function loadExistingProfile(memberId: string) {
+    if (!memberId) return;
+    try {
+      const res = await fetch(`/api/admin/account-issue/existing?member_id=${encodeURIComponent(memberId)}`, {
+        credentials: 'include',
+      });
+      const json = (await res.json()) as ApiResult<
+        | {
+            id: string;
+            login_code: string;
+            is_active: boolean;
+          }
+        | null
+      >;
+
+      if (!res.ok || !json.success) throw new Error(json.success ? 'error' : json.error);
+
+      const profile = json.data;
+      if (!profile) {
+        const code = randomDigits8();
+        setLoginCode(code);
+        setPassword(code);
+        setIsActive(true);
+        return;
+      }
+
+      const digits = digitsFromLoginCode(profile.login_code);
+      // 기존 발급 규칙(login_code=digits@domain, password=digits)에 맞춰 화면에는 digits만 표시
+      setLoginCode(digits ?? profile.login_code);
+      setPassword(digits ?? '');
+      setIsActive(profile.is_active);
+    } catch {
+      // 기존이든 신규든, 오류가 나면 최소한 신규 발급 동작이 가능하도록 자동 생성값 세팅
+      const code = randomDigits8();
+      setLoginCode(code);
+      setPassword(code);
+    }
+  }
 
   async function searchCustomers() {
     if (!normalizedQuery) return;
@@ -84,14 +131,7 @@ export default function AccountIssueClient() {
     setMemberCandidates(json.data);
     const first = json.data[0]?.id ?? '';
     setSelectedMemberId(first);
-    // 자동 생성 요구사항:
-    // - login_code: 무작위 8자리 숫자
-    // - password: login_code와 동일한 값
-    if (!loginCode || !password) {
-      const code = randomDigits8();
-      setLoginCode(code);
-      setPassword(code);
-    }
+    await loadExistingProfile(first);
   }
 
   async function handleSelectCustomer(c: CustomerRow) {
@@ -113,16 +153,17 @@ export default function AccountIssueClient() {
       return;
     }
 
-    const codeDigits = loginCode.trim();
-    const shouldRetryForUniqueDigits = !codeDigits.includes('@') && password.trim() === codeDigits;
-
-    const maxRetries = shouldRetryForUniqueDigits ? 5 : 1;
+    const loginCodeTrim = loginCode.trim();
+    const isDigitsOnly = !loginCodeTrim.includes('@');
+    // digits-only 케이스는 (요구사항대로) password도 digits-only와 동일하게 전송한다.
+    // 다만 “중복(409)”이 뜬 경우에만 digits를 재생성하도록 한다(기존계정이면 UI가 바뀌지 않게).
+    const maxRetries = isDigitsOnly ? 5 : 1;
+    let digitsToTry = loginCodeTrim;
     let lastError: string | null = null;
 
     for (let i = 0; i < maxRetries; i++) {
-      const codeToTry = shouldRetryForUniqueDigits ? randomDigits8() : codeDigits;
-      const loginEmail = codeDigits.includes('@') ? codeDigits : `${codeToTry}@${emailDomain}`;
-      const passwordToTry = shouldRetryForUniqueDigits ? codeToTry : password;
+      const loginEmail = isDigitsOnly ? `${digitsToTry}@${emailDomain}` : loginCodeTrim;
+      const passwordToTry = isDigitsOnly ? digitsToTry : password;
 
       const res = await fetch('/api/admin/account-issue/issue', {
         method: 'POST',
@@ -139,18 +180,19 @@ export default function AccountIssueClient() {
 
       const json = (await res.json()) as ApiResult<{ user_id: string }>;
       if (res.ok && json.success) {
-        // retry 성공 시 UI에도 반영
-        if (shouldRetryForUniqueDigits) {
-          setLoginCode(codeToTry);
-          setPassword(codeToTry);
+        // “409 때문에 코드 재생성된 경우(i>0)”에만 UI 갱신
+        if (i > 0 && isDigitsOnly) {
+          setLoginCode(digitsToTry);
+          setPassword(digitsToTry);
         }
         alert(`계정 발급 완료: ${json.data.user_id}`);
         return;
       }
 
       lastError = json.success ? '발급 실패' : json.error;
-      if (res.status === 409 && shouldRetryForUniqueDigits) {
-        continue; // 중복이면 code 재생성 후 재시도
+      if (res.status === 409 && isDigitsOnly) {
+        digitsToTry = randomDigits8();
+        continue;
       }
 
       alert(lastError ?? '발급 실패');
@@ -233,7 +275,12 @@ export default function AccountIssueClient() {
             <label className="block text-sm font-medium text-gray-700">연결 가능한 조직원 후보</label>
             <select
               value={selectedMemberId}
-              onChange={(e) => setSelectedMemberId(e.target.value)}
+              onChange={(e) => {
+                const nextId = e.target.value;
+                setSelectedMemberId(nextId);
+                // 후보 변경 즉시 기존 계정 정보/신규 자동 생성값 반영
+                loadExistingProfile(nextId);
+              }}
               className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
             >
               {memberCandidates.length === 0 ? <option value="">후보 없음</option> : null}
