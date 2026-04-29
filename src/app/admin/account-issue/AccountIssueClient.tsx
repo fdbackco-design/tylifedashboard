@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 type CustomerRow = {
   id: string;
@@ -57,6 +57,21 @@ export default function AccountIssueClient() {
   const [loginCode, setLoginCode] = useState('');
   const [password, setPassword] = useState('');
   const [isActive, setIsActive] = useState(true);
+
+  const [issuedAccounts, setIssuedAccounts] = useState<
+    Array<{
+      id: string;
+      customer_id: string | null;
+      member_id: string | null;
+      login_code: string;
+      display_name: string | null;
+      phone: string | null;
+      role: string;
+      is_active: boolean;
+      must_change_password: boolean;
+      created_at: string;
+    }>
+  >([]);
 
   const normalizedQuery = useMemo(() => query.trim(), [query]);
   const emailDomain = 'tylifedashboard.local';
@@ -186,6 +201,7 @@ export default function AccountIssueClient() {
           setPassword(digitsToTry);
         }
         alert(`계정 발급 완료: ${json.data.user_id}`);
+        await loadIssuedAccounts();
         return;
       }
 
@@ -201,6 +217,35 @@ export default function AccountIssueClient() {
 
     alert(lastError ?? '발급 실패(중복 코드 재시도 초과)');
   }
+
+  async function loadIssuedAccounts() {
+    try {
+      const res = await fetch('/api/admin/account-issue/list', { credentials: 'include' });
+      const json = (await res.json()) as ApiResult<
+        Array<{
+          id: string;
+          customer_id: string | null;
+          member_id: string | null;
+          login_code: string;
+          display_name: string | null;
+          phone: string | null;
+          role: string;
+          is_active: boolean;
+          must_change_password: boolean;
+          created_at: string;
+        }>
+      >;
+      if (!res.ok || !json.success) throw new Error(json.success ? 'error' : json.error);
+      setIssuedAccounts(json.data);
+    } catch {
+      // 로딩 실패해도 발급 UI는 유지
+    }
+  }
+
+  useEffect(() => {
+    loadIssuedAccounts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -362,6 +407,66 @@ export default function AccountIssueClient() {
           </div>
         </div>
       ) : null}
+
+      {/* 생성된 계정 목록 */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4">
+        <div className="flex items-center justify-between mb-3 gap-3">
+          <div>
+            <div className="text-sm font-semibold text-gray-700">생성된 계정</div>
+            <div className="text-xs text-gray-500 mt-0.5">최근 순 · 최대 200개</div>
+          </div>
+          <button
+            type="button"
+            className="px-3 py-1.5 rounded-md border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+            onClick={loadIssuedAccounts}
+          >
+            새로고침
+          </button>
+        </div>
+        {issuedAccounts.length === 0 ? (
+          <p className="text-sm text-gray-500">생성된 계정이 없습니다.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border border-gray-200 rounded-lg">
+              <thead className="bg-gray-50">
+                <tr className="text-left text-xs text-gray-600">
+                  {['ID', '이름', '연락처', '계정(login_code)', '활성', '생성일'].map((h) => (
+                    <th key={h} className="px-3 py-2 border-b border-gray-200 font-semibold whitespace-nowrap">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {issuedAccounts.slice(0, 200).map((a) => (
+                  <tr key={a.id} className="hover:bg-gray-50">
+                    <td className="px-3 py-2 border-b border-gray-200 font-mono text-xs whitespace-nowrap">
+                      {a.member_id ?? '-'}
+                    </td>
+                    <td className="px-3 py-2 border-b border-gray-200 whitespace-nowrap">
+                      {a.display_name ?? '-'}
+                    </td>
+                    <td className="px-3 py-2 border-b border-gray-200 whitespace-nowrap">
+                      {a.phone ?? '-'}
+                    </td>
+                    <td className="px-3 py-2 border-b border-gray-200 font-mono text-xs whitespace-nowrap">
+                      {a.login_code}
+                    </td>
+                    <td className="px-3 py-2 border-b border-gray-200 whitespace-nowrap">
+                      <span className={a.is_active ? 'text-emerald-700 font-semibold' : 'text-gray-500'}>
+                        {a.is_active ? '활성' : '비활성'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 border-b border-gray-200 whitespace-nowrap text-xs text-gray-600">
+                      {a.created_at ? new Date(a.created_at).toLocaleString('ko-KR') : '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
