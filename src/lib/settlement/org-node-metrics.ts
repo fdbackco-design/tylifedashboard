@@ -434,7 +434,7 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
       if (prevRank === '리더') baseRecipient = prev;
     }
     baseById.set(baseRecipient, (baseById.get(baseRecipient) ?? 0) + originRate * unit);
-    const penalty = commissionPenaltyWonForItemName(c.item_name);
+    const penalty = commissionPenaltyWonForItemName(c.item_name, unit);
     if (penalty > 0) {
       baseById.set(baseRecipient, (baseById.get(baseRecipient) ?? 0) - penalty);
     }

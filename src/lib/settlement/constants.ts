@@ -34,15 +34,18 @@ export const SETTLEMENT_EXCLUDED_STATUSES: readonly ContractStatus[] = [
   '해약',
 ] as const;
 
-/** 특정 물품 계약 건당 직접 수당에서 차감 (원) */
-export const COMMISSION_PENALTY_WON = 100_000;
+/** 특정 물품 계약 차감 기준: 2구좌당 10만원 (= 1구좌당 5만원) */
+export const COMMISSION_PENALTY_PER_UNIT_WON = 50_000;
 
 /** 물품명이 펫버틀러 패널티 대상이면 건당 차감액(양수), 아니면 0 */
 export function commissionPenaltyWonForItemName(
   itemName: string | null | undefined,
+  unitCount?: number | null,
 ): number {
   const t = (itemName ?? '').trim();
   if (!t) return 0;
   // 요구: 차감 금액은 유지하되, 물품명에 '에코백스'가 포함될 때만 차감
-  return t.includes('에코백스') ? COMMISSION_PENALTY_WON : 0;
+  if (!t.includes('에코백스')) return 0;
+  const units = Math.max(0, Number(unitCount ?? 0));
+  return units * COMMISSION_PENALTY_PER_UNIT_WON;
 }

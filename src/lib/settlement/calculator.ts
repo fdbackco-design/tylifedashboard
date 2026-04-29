@@ -110,7 +110,7 @@ function calcDirectContracts(
 ): { items: ContractSettlementItem[]; total: number } {
   const items: ContractSettlementItem[] = contracts.map((c) => {
     const base = c.unit_count * rule.commission_per_unit;
-    const penalty = commissionPenaltyWonForItemName((c as { item_name?: string }).item_name);
+    const penalty = commissionPenaltyWonForItemName((c as { item_name?: string }).item_name, c.unit_count);
     return {
       contract_id: c.id,
       contract_code: c.contract_code,
@@ -284,7 +284,7 @@ function calcDirectContractsWithLeaderPromotion(
       promotionThresholdByMemberId,
     );
     const base = c.unit_count * rate;
-    const penalty = commissionPenaltyWonForItemName((c as { item_name?: string }).item_name);
+    const penalty = commissionPenaltyWonForItemName((c as { item_name?: string }).item_name, c.unit_count);
     return {
       contract_id: c.id,
       contract_code: c.contract_code,
