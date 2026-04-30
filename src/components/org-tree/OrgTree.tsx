@@ -124,25 +124,32 @@ function ContractPanel({
 
   return (
     <div className="mt-6 border-t-2 border-gray-200 pt-4">
-      <div className="flex items-center gap-2 mb-3 px-1">
-        <span className="font-bold text-gray-800 text-sm">{node.name}</span>
-        <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
-          {node.rank}
-        </span>
-        <span className="text-xs text-gray-500 ml-1">
-          산하 전체 {contracts.length}건 · 묶음 {aggregated.length}건
-        </span>
-        {completedCount > 0 && (
-          <span className="text-xs font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
-            가입 {completedCount}건
-          </span>
-        )}
-        <button
-          onClick={onClose}
-          className="ml-auto text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded hover:bg-gray-100"
-        >
-          닫기 ✕
-        </button>
+      <div className="mb-3 px-1">
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-bold text-gray-800 text-sm truncate">{node.name}</span>
+              <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full whitespace-nowrap">
+                {node.rank}
+              </span>
+              {completedCount > 0 && (
+                <span className="text-xs font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full whitespace-nowrap">
+                  가입 {completedCount}건
+                </span>
+              )}
+            </div>
+            <div className="mt-1 text-xs text-gray-500">
+              산하 전체 {contracts.length}건 · 묶음 {aggregated.length}건
+            </div>
+          </div>
+
+          <button
+            onClick={onClose}
+            className="shrink-0 text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded hover:bg-gray-100 whitespace-nowrap"
+          >
+            닫기 ✕
+          </button>
+        </div>
       </div>
 
       {contracts.length === 0 ? (
