@@ -3,7 +3,8 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { isAdminAuthed } from '@/lib/admin-auth';
 
 type Body = {
-  customer_id: string;
+  /** 없거나 빈 문자열이면 null 저장(organization_members만 있는 조직원도 발급 가능) */
+  customer_id?: string | null;
   member_id: string;
   login_code: string; // 8자리 숫자(요구사항) — 내부적으로 auth email로 변환됨
   password: string;
@@ -20,8 +21,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ success: false, error: 'invalid json' }, { status: 400 });
   }
 
-  const { customer_id, member_id, login_code, password, is_active } = body;
-  if (!customer_id || !member_id || !login_code || !password) {
+  const { member_id, login_code, password, is_active } = body;
+  const customerIdRaw =
+    typeof body.customer_id === 'string' ? body.customer_id.trim() : (body.customer_id ?? null);
+  const customer_id = customerIdRaw && customerIdRaw.length > 0 ? customerIdRaw : null;
+
+  if (!member_id || !login_code || !password) {
     return NextResponse.json({ success: false, error: 'missing fields' }, { status: 400 });
   }
 
@@ -79,14 +84,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const userId = created.data.user?.id;
     if (!userId) throw new Error('auth user id missing');
 
-    // 2) display/phone 보강
-    const [memberRes, customerRes] = await Promise.all([
-      db.from('organization_members').select('id, name, rank, phone').eq('id', member_id).maybeSingle(),
-      db.from('customers').select('id, name, phone').eq('id', customer_id).maybeSingle(),
-    ]);
-
+    // 2) display/phone 보강(조직원 우선, customer_id가 있을 때만 customers 조회)
+    const memberRes = await db.from('organization_members').select('id, name, rank, phone').eq('id', member_id).maybeSingle();
     const member = (memberRes.data ?? null) as any;
-    const customer = (customerRes.data ?? null) as any;
+
+    let customer: any = null;
+    if (customer_id) {
+      const customerRes = await db.from('customers').select('id, name, phone').eq('id', customer_id).maybeSingle();
+      customer = customerRes.data ?? null;
+    }
 
     const profile = {
       id: userId,

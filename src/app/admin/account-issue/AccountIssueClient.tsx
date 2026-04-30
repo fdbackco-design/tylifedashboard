@@ -151,10 +151,6 @@ export default function AccountIssueClient() {
   async function issueAccount() {
     if (!selectedCustomer) return;
     if (!selectedMemberId) return;
-    if (!selectedCustomerId) {
-      alert('이 조직원은 customers 테이블과 연결(customer_id)되어 있지 않아 계정 발급이 불가합니다.');
-      return;
-    }
     if (!loginCode.trim() || !password) {
       alert('로그인 ID와 비밀번호를 입력/자동생성 해주세요.');
       return;
@@ -180,7 +176,7 @@ export default function AccountIssueClient() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          customer_id: selectedCustomerId,
+          customer_id: selectedCustomerId ?? null,
           member_id: selectedMemberId,
           login_code: loginCodeToSend,
           password: passwordToTry,
@@ -297,8 +293,8 @@ export default function AccountIssueClient() {
                       {c.phone ?? '-'} ({normalizePhoneDigits(c.phone ?? '') || '-'})
                     </div>
                     <div className="text-xs text-gray-500 mt-0.5">
-                      {c.rank ? `직급: ${c.rank}` : '직급: -'} · customer 연결:{' '}
-                      {c.customer_id ? '있음' : '없음'}
+                      {c.rank ? `직급: ${c.rank}` : '직급: -'}
+                      {c.customer_id ? ' · 고객(customer) 연결 있음' : ''}
                     </div>
                   </div>
                   <div className="text-xs text-gray-500">선택</div>
@@ -316,14 +312,8 @@ export default function AccountIssueClient() {
             <span className="font-medium">{selectedCustomer.name}</span> · {selectedCustomer.phone ?? '-'} ·{' '}
             {selectedCustomer.rank ? `(${selectedCustomer.rank})` : '(직급 -)'}
           </div>
-          {!selectedCustomerId ? (
-            <div className="text-xs text-amber-700">
-              이 조직원은 `customers`와 연결된 customer_id가 없어 계정 발급이 불가합니다. (organization_members.source_customer_id 또는 external_id=customer:&lt;id&gt; 필요)
-            </div>
-          ) : null}
-
           <div>
-            <label className="block text-sm font-medium text-gray-700">연결 가능한 조직원 후보</label>
+            <label className="block text-sm font-medium text-gray-700">발급 대상 조직원</label>
             <select
               value={selectedMemberId}
               onChange={(e) => {
@@ -404,7 +394,7 @@ export default function AccountIssueClient() {
           <div className="flex gap-2">
             <button
               type="button"
-              disabled={!selectedMemberId || !loginCode || !password || !selectedCustomerId}
+              disabled={!selectedMemberId || !loginCode || !password}
               onClick={issueAccount}
               className="px-4 py-2 rounded-md bg-emerald-700 text-white text-sm font-semibold disabled:opacity-50"
             >
