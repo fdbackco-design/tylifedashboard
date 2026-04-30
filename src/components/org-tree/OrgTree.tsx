@@ -677,7 +677,7 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug, 
       {/* 줌 가능한 뷰포트 */}
       <div
         ref={viewportRef}
-        className={`w-full overflow-hidden rounded-lg select-none touch-none ${dragRef.current.active ? 'cursor-grabbing' : 'cursor-grab'}`}
+        className={`w-full h-[60vh] sm:h-[70vh] lg:h-[75vh] overflow-hidden rounded-lg select-none touch-none ${dragRef.current.active ? 'cursor-grabbing' : 'cursor-grab'}`}
         title="휠: 확대/축소 · 드래그: 이동"
         onPointerDown={(e) => {
           // 캔버스처럼 패닝: pointer capture로 영역 밖으로 나가도 드래그 유지
