@@ -214,6 +214,8 @@ interface Props {
   contractsByMember: Record<string, ContractItem[]>;
   /** 편집 모드(조직 수정) 노출 여부. 기본 true */
   editable?: boolean;
+  /** 노드 카드의 수당/실지급액(지표) 노출 여부. 기본 true */
+  showMetrics?: boolean;
   debug?: {
     enabled: boolean;
     hqId: string | null;
@@ -252,7 +254,7 @@ interface Props {
   >;
 }
 
-export default function OrgTree({ roots, contractsByMember, metricsById, debug, editable = true }: Props) {
+export default function OrgTree({ roots, contractsByMember, metricsById, debug, editable = true, showMetrics = true }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -468,6 +470,7 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug, 
               node={node}
               contractsByMember={contractsByMember}
               extraSubtreeIds={isHqRoot ? strippedNodeIds : undefined}
+              showMetrics={showMetrics}
               nodeMetrics={metricsById?.[node.id] ?? null}
               selectedId={selectedId}
               onSelect={handleSelect}

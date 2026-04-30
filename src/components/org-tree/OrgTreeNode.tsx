@@ -62,6 +62,7 @@ interface Props {
   node: OrgTreeNodeType;
   contractsByMember: Record<string, ContractItem[]>;
   extraSubtreeIds?: string[];
+  showMetrics?: boolean;
   nodeMetrics: null | {
     cumulativeUnitCount: number;
     monthlyUnitCount: number;
@@ -80,7 +81,15 @@ function formatManwon(won: number): string {
   return v.toLocaleString('ko-KR');
 }
 
-export default function OrgTreeNode({ node, contractsByMember, extraSubtreeIds, nodeMetrics, selectedId, onSelect }: Props) {
+export default function OrgTreeNode({
+  node,
+  contractsByMember,
+  extraSubtreeIds,
+  showMetrics = true,
+  nodeMetrics,
+  selectedId,
+  onSelect,
+}: Props) {
   const isSelected = selectedId === node.id;
   const style = RANK_STYLE[node.rank] ?? RANK_STYLE['영업사원'];
   const displayName = (node.name ?? '').replace(/^\[고객\]\s*/, '');
@@ -132,7 +141,7 @@ export default function OrgTreeNode({ node, contractsByMember, extraSubtreeIds, 
           </span>
         </div>
 
-        {nodeMetrics && node.rank !== '본사' && (
+        {showMetrics && nodeMetrics && node.rank !== '본사' && (
           <div className="mt-1.5 w-full text-[11px] text-gray-600 space-y-0.5">
             <div className="flex justify-between">
               <span className="text-gray-500">누적 구좌</span>
