@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/client';
 export default function LoginClient(props: { redirect: string }) {
   const router = useRouter();
   const redirect = useMemo(() => props.redirect, [props.redirect]);
+  const supabase = useMemo(() => createClient(), []);
 
   const [loginCode, setLoginCode] = useState('');
   const [password, setPassword] = useState('');
@@ -15,15 +16,15 @@ export default function LoginClient(props: { redirect: string }) {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (loading) return;
     setError(null);
     setLoading(true);
     try {
-      const supabase = createClient();
       const emailDomain = 'tylifedashboard.local';
       const loginEmail = loginCode.includes('@') ? loginCode.trim() : `${loginCode.trim()}@${emailDomain}`;
       const { error: signErr } = await supabase.auth.signInWithPassword({
         email: loginEmail,
-        password,
+        password: password,
       });
       if (signErr) throw signErr;
       router.replace(redirect);
@@ -40,6 +41,12 @@ export default function LoginClient(props: { redirect: string }) {
         <h1 className="text-xl font-bold text-gray-900 mb-1">로그인</h1>
         <p className="text-sm text-gray-600 mb-4">발급된 계정으로 로그인해주세요.</p>
 
+          {loading ? (
+            <div className="mb-4 px-3 py-2 rounded border border-slate-200 bg-slate-50 text-slate-700 text-sm">
+              처리중…
+            </div>
+          ) : null}
+
         {error ? (
           <div className="mb-4 px-3 py-2 rounded border border-red-200 bg-red-50 text-red-700 text-sm">
             {error}
@@ -52,7 +59,8 @@ export default function LoginClient(props: { redirect: string }) {
             <input
               value={loginCode}
               onChange={(e) => setLoginCode(e.target.value)}
-              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+              disabled={loading}
+              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm disabled:opacity-50"
               placeholder="8자리 숫자"
               autoComplete="username"
             />
@@ -63,7 +71,8 @@ export default function LoginClient(props: { redirect: string }) {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+              disabled={loading}
+              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm disabled:opacity-50"
               placeholder="비밀번호"
               autoComplete="current-password"
             />
@@ -71,9 +80,10 @@ export default function LoginClient(props: { redirect: string }) {
           <button
             type="submit"
             disabled={loading || !loginCode.trim() || !password}
-            className="w-full bg-slate-800 text-white rounded-md py-2.5 text-sm font-semibold hover:bg-slate-700 disabled:opacity-50"
+            aria-busy={loading}
+            className="w-full bg-slate-800 text-white rounded-md py-2.5 text-sm font-semibold hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading ? '로그인 중...' : '로그인'}
+            {loading ? '로그인 중' : '로그인'}
           </button>
         </form>
       </div>
