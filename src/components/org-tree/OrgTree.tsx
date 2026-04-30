@@ -212,6 +212,8 @@ function ContractPanel({
 interface Props {
   roots: OrgTreeNodeType[];
   contractsByMember: Record<string, ContractItem[]>;
+  /** 편집 모드(조직 수정) 노출 여부. 기본 true */
+  editable?: boolean;
   debug?: {
     enabled: boolean;
     hqId: string | null;
@@ -250,7 +252,7 @@ interface Props {
   >;
 }
 
-export default function OrgTree({ roots, contractsByMember, metricsById, debug }: Props) {
+export default function OrgTree({ roots, contractsByMember, metricsById, debug, editable = true }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -270,6 +272,15 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
   // 트리를 평탄화해 전체 노드 목록 확보
   const allNodes = useMemo(() => flattenOrgTreeNodes(roots as OrgTreeNodeType[]), [roots]);
   const strippedNodeIds = useMemo(() => collectStrippedNodeIdsForDisplay(roots as OrgTreeNodeType[]), [roots]);
+
+  // 개인 조직도 등 read-only 화면에서는 편집 모드를 강제로 끈다.
+  useEffect(() => {
+    if (!editable && editMode) {
+      setEditMode(false);
+      setEditMessage(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editable]);
 
   /**
    * UI 전용:
@@ -570,18 +581,20 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug }
               {editMessage.text}
             </span>
           )}
-          <button
-            type="button"
-            onClick={() => {
-              setEditMode((v) => !v);
-              setEditMessage(null);
-            }}
-            className={`px-3 py-1.5 text-xs rounded border ${
-              editMode ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-700 border-gray-300'
-            }`}
-          >
-            {editMode ? '편집 종료' : '조직 수정'}
-          </button>
+          {editable ? (
+            <button
+              type="button"
+              onClick={() => {
+                setEditMode((v) => !v);
+                setEditMessage(null);
+              }}
+              className={`px-3 py-1.5 text-xs rounded border ${
+                editMode ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-700 border-gray-300'
+              }`}
+            >
+              {editMode ? '편집 종료' : '조직 수정'}
+            </button>
+          ) : null}
         </div>
       </div>
 

@@ -321,6 +321,7 @@ export default async function OrganizationMyTreePage({
           roots={tree as any}
           contractsByMember={contractsByMember}
           metricsById={orgMetricsById as any}
+          editable={false}
           debug={
             debugEnabled
               ? ({ enabled: true } as any)
