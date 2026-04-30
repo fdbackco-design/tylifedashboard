@@ -439,7 +439,7 @@ export default function AccountIssueClient() {
             <table className="w-full text-sm border border-gray-200 rounded-lg">
               <thead className="bg-gray-50">
                 <tr className="text-left text-xs text-gray-600">
-                  {['ID', '이름', '연락처', '계정(login_code)', '활성', '생성일'].map((h) => (
+                  {['이름', '연락처', '계정(login_code)', '활성', '생성일'].map((h) => (
                     <th key={h} className="px-3 py-2 border-b border-gray-200 font-semibold whitespace-nowrap">
                       {h}
                     </th>
@@ -449,9 +449,6 @@ export default function AccountIssueClient() {
               <tbody>
                 {issuedAccounts.slice(0, 200).map((a) => (
                   <tr key={a.id} className="hover:bg-gray-50">
-                    <td className="px-3 py-2 border-b border-gray-200 font-mono text-xs whitespace-nowrap">
-                      {a.member_id ?? '-'}
-                    </td>
                     <td className="px-3 py-2 border-b border-gray-200 whitespace-nowrap">
                       {a.display_name ?? '-'}
                     </td>
