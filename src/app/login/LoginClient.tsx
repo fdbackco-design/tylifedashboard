@@ -1,11 +1,9 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 
 export default function LoginClient(props: { redirect: string }) {
-  const router = useRouter();
   const redirect = useMemo(() => props.redirect, [props.redirect]);
   const supabase = useMemo(() => createClient(), []);
 
@@ -27,7 +25,9 @@ export default function LoginClient(props: { redirect: string }) {
         password: password,
       });
       if (signErr) throw signErr;
-      router.replace(redirect);
+      // SSR이 세션 쿠키를 즉시 인식하도록, 클라이언트 라우팅 대신 full navigation 사용
+      window.location.assign(redirect);
+      return;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
