@@ -332,7 +332,7 @@ export default async function OrganizationMyTreePage({
   });
 
   return (
-    <div className="p-6">
+    <div className="p-3 sm:p-6">
       {debugEnabled ? (
         <div className="mb-4 bg-slate-50 border border-slate-200 rounded-lg p-4">
           <div className="text-sm font-semibold text-slate-800 mb-2">[organization debug] stats</div>
@@ -342,17 +342,17 @@ export default async function OrganizationMyTreePage({
         </div>
       ) : null}
 
-      <div className="flex items-start justify-between mb-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4 sm:mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">내 조직도</h2>
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-800">내 조직도</h2>
           <p className="text-sm text-gray-500 mt-0.5">
             기준 {label_year_month} · {start_date}~{end_date}
           </p>
         </div>
-        <div className="flex flex-col items-end gap-2">
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 w-full lg:w-auto">
+        <div className="flex flex-col gap-2 sm:items-end">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 w-full">
             <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
-              <span className="text-gray-500">이번달 준비 구좌 수</span>
+              <span className="text-gray-500">선택달 준비 구좌 수</span>
               <span className="ml-2 font-bold text-gray-800">{periodPendingUnits.toLocaleString('ko-KR')}구좌</span>
               <div className="text-[11px] text-gray-400 mt-0.5">
                 기준 {label_year_month} · {start_date}~{end_date}
@@ -363,7 +363,7 @@ export default async function OrganizationMyTreePage({
               <span className="ml-2 font-bold text-gray-800">{totalJoinUnits.toLocaleString('ko-KR')}구좌</span>
             </div>
             <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
-              <span className="text-gray-500">이번달 가입 구좌 수</span>
+              <span className="text-gray-500">선택달 가입 구좌 수</span>
               <span className="ml-2 font-bold text-gray-800">{periodJoinUnits.toLocaleString('ko-KR')}구좌</span>
               <div className="text-[11px] text-gray-400 mt-0.5">
                 기준 {label_year_month} · {start_date}~{end_date}
@@ -375,7 +375,7 @@ export default async function OrganizationMyTreePage({
       </div>
 
       {/* 월 선택 */}
-      <div className="flex gap-1 mb-5 flex-wrap items-center">
+      <div className="flex gap-1 mb-4 sm:mb-5 items-center overflow-x-auto whitespace-nowrap -mx-3 px-3 sm:mx-0 sm:px-0">
         <Link
           href={monthHref(defaultYearMonth)}
           className={`px-2.5 py-1 rounded text-xs border ${

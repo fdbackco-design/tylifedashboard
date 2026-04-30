@@ -574,11 +574,11 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug, 
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-3">
         <div className="text-xs text-gray-500">
           {editMode ? '편집 모드: 노드를 드래그해서 부모 노드 위에 놓으면 소속이 변경됩니다.' : '보기 모드'}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 justify-end">
           {editMessage && (
             <span className={`text-xs ${editMessage.ok ? 'text-green-700' : 'text-red-600'}`}>
               {editMessage.text}

@@ -1,15 +1,15 @@
 export default function OrganizationLoading() {
   return (
-    <div className="p-6">
-      <div className="flex items-start justify-between mb-6">
+    <div className="p-3 sm:p-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4 sm:mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">내 조직도</h2>
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-800">내 조직도</h2>
           <p className="text-sm text-gray-500 mt-0.5">불러오는 중…</p>
         </div>
       </div>
 
       {/* 월 버튼 영역 스켈레톤 */}
-      <div className="flex gap-1 mb-5 flex-wrap items-center">
+      <div className="flex gap-1 mb-4 sm:mb-5 items-center overflow-x-auto whitespace-nowrap -mx-3 px-3 sm:mx-0 sm:px-0">
         {Array.from({ length: 10 }).map((_, i) => (
           <div
             key={i}

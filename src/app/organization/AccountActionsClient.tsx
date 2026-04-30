@@ -74,7 +74,7 @@ export default function AccountActionsClient(props: { redirectAfterLogout?: stri
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center justify-end gap-2">
       {message ? (
         <span className={`text-xs ${message.ok ? 'text-emerald-700' : 'text-red-600'}`}>{message.text}</span>
       ) : null}
