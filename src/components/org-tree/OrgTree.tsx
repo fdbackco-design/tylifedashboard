@@ -278,6 +278,23 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug, 
     baseY: 0,
   });
 
+  // 모바일 핀치 줌(2손가락) 상태
+  const pinchRef = useRef<{
+    pointers: Map<number, { x: number; y: number }>;
+    active: boolean;
+    startDistance: number;
+    startScale: number;
+    startPan: { x: number; y: number };
+    startMid: { x: number; y: number };
+  }>({
+    pointers: new Map(),
+    active: false,
+    startDistance: 0,
+    startScale: 1,
+    startPan: { x: 0, y: 0 },
+    startMid: { x: 0, y: 0 },
+  });
+
   // 트리를 평탄화해 전체 노드 목록 확보
   const allNodes = useMemo(() => flattenOrgTreeNodes(roots as OrgTreeNodeType[]), [roots]);
   const strippedNodeIds = useMemo(() => collectStrippedNodeIdsForDisplay(roots as OrgTreeNodeType[]), [roots]);
@@ -666,6 +683,31 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug, 
           // 캔버스처럼 패닝: pointer capture로 영역 밖으로 나가도 드래그 유지
           if (e.pointerType === 'mouse' && e.button !== 0) return;
           if (editMode) return;
+
+          // 터치 포인터는 핀치 줌을 위해 추적
+          if (e.pointerType === 'touch') {
+            const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+            pinchRef.current.pointers.set(e.pointerId, { x: e.clientX - rect.left, y: e.clientY - rect.top });
+            try {
+              (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+            } catch {
+              // ignore
+            }
+
+            if (pinchRef.current.pointers.size === 2) {
+              const pts = [...pinchRef.current.pointers.values()];
+              const dx = pts[0].x - pts[1].x;
+              const dy = pts[0].y - pts[1].y;
+              pinchRef.current.active = true;
+              pinchRef.current.startDistance = Math.hypot(dx, dy) || 1;
+              pinchRef.current.startScale = scale;
+              pinchRef.current.startPan = { ...pan };
+              pinchRef.current.startMid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+              dragRef.current.active = false;
+              return;
+            }
+          }
+
           // 노드 카드 위에서 시작한 포인터는 "클릭 선택"을 우선 (패닝은 카드 밖 드래그)
           const target = e.target as HTMLElement | null;
           const isOnCard = !!target?.closest?.('[data-org-node-card="1"]');
@@ -682,6 +724,34 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug, 
           };
         }}
         onPointerMove={(e) => {
+          // 핀치 줌 처리(2손가락)
+          if (e.pointerType === 'touch' && pinchRef.current.pointers.has(e.pointerId)) {
+            const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+            pinchRef.current.pointers.set(e.pointerId, { x: e.clientX - rect.left, y: e.clientY - rect.top });
+
+            if (pinchRef.current.active && pinchRef.current.pointers.size === 2) {
+              e.preventDefault();
+              const pts = [...pinchRef.current.pointers.values()];
+              const dx = pts[0].x - pts[1].x;
+              const dy = pts[0].y - pts[1].y;
+              const dist = Math.hypot(dx, dy) || 1;
+              const factor = dist / (pinchRef.current.startDistance || 1);
+              const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+              const nextScale = clamp(pinchRef.current.startScale * factor, 0.2, 2.5);
+              const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+
+              // midpoint 기준으로 컨텐츠가 유지되도록 pan 보정
+              const startScale = pinchRef.current.startScale;
+              const startPan = pinchRef.current.startPan;
+              const contentX = (pinchRef.current.startMid.x - startPan.x) / startScale;
+              const contentY = (pinchRef.current.startMid.y - startPan.y) / startScale;
+
+              setScale(nextScale);
+              setPan({ x: mid.x - contentX * nextScale, y: mid.y - contentY * nextScale });
+              return;
+            }
+          }
+
           if (!dragRef.current.active) return;
           e.preventDefault();
           const dx = e.clientX - dragRef.current.startX;
@@ -690,14 +760,27 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug, 
         }}
         onPointerUp={(e) => {
           dragRef.current.active = false;
+          if (pinchRef.current.pointers.has(e.pointerId)) {
+            pinchRef.current.pointers.delete(e.pointerId);
+            if (pinchRef.current.pointers.size < 2) pinchRef.current.active = false;
+          }
           try {
             (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
           } catch {
             // ignore
           }
         }}
-        onPointerCancel={() => {
+        onPointerCancel={(e) => {
           dragRef.current.active = false;
+          if (pinchRef.current.pointers.has(e.pointerId)) {
+            pinchRef.current.pointers.delete(e.pointerId);
+            if (pinchRef.current.pointers.size < 2) pinchRef.current.active = false;
+          }
+          try {
+            (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+          } catch {
+            // ignore
+          }
         }}
       >
         {/* 고정 레이아웃 트리를 transform(translate+scale)로만 확대/이동 */}
