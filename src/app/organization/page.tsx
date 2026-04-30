@@ -92,8 +92,8 @@ export default async function OrganizationMyTreePage({
     return `/organization?${qs.toString()}`;
   };
 
-  // 공통: 조직 구성 + 계약(서브트리 기준)
-  const [membersRes, edgesRes, rulesRes, contractsRes] = await Promise.all([
+  // 공통: 조직 구성(월 무관) 먼저 조회 → subtree 계산 후 계약은 subtree만 조회(속도 개선)
+  const [membersRes, edgesRes, rulesRes] = await Promise.all([
     adminDb
       .from('organization_members')
       .select('id,name,rank,phone,external_id,source_customer_id'),
@@ -101,17 +101,6 @@ export default async function OrganizationMyTreePage({
     // 여기서는 is_active 필터를 제거하고 서버에서 subtree 기준으로만 범위를 제한한다.
     adminDb.from('organization_edges').select('parent_id,child_id'),
     adminDb.from('settlement_rules').select('*'),
-    adminDb
-      .from('contracts')
-      .select(
-        'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, is_cancelled, customers(name, phone)',
-      )
-      .not('sales_member_id', 'is', null)
-      .gte('join_date', start_date)
-      // endExclusive 계산은 프론트/기존 util과 동일하게 더 엄격히 맞추지 않고, join_date<=end_date 방식으로 처리
-      .lte('join_date', end_date)
-      .order('join_date', { ascending: false })
-      .limit(20000),
   ]);
 
   const membersRaw = (((membersRes.data ?? []) as unknown as any[]) ?? []).map((m) =>
@@ -154,6 +143,34 @@ export default async function OrganizationMyTreePage({
   debugStats.subtree_ids_count = subtreeIds.size;
   debugStats.subtree_members_count = subtreeMembers.length;
 
+  // 계약은 subtree에 속한 sales_member_id만 조회(월 버튼 클릭 시 지연 감소)
+  const subtreeMemberIds = [...subtreeIdSet.values()];
+  const chunk = <T,>(arr: T[], size: number): T[][] => {
+    const out: T[][] = [];
+    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+    return out;
+  };
+
+  const contractSelect =
+    'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, is_cancelled, customers(name, phone)';
+
+  const contractChunks = chunk(subtreeMemberIds, 500);
+  const contractResList = await Promise.all(
+    contractChunks.map((ids) =>
+      adminDb
+        .from('contracts')
+        .select(contractSelect)
+        .in('sales_member_id', ids)
+        .gte('join_date', start_date)
+        // endExclusive 계산은 프론트/기존 util과 동일하게 더 엄격히 맞추지 않고, join_date<=end_date 방식으로 처리
+        .lte('join_date', end_date)
+        .order('join_date', { ascending: false })
+        .limit(20000),
+    ),
+  );
+
+  const contractsRaw = contractResList.flatMap((r) => r.data ?? []);
+
   // subtree parent는 “parent가 subtree 밖이면 root 처리(=parent null)”
   const subtreeTreeRows: OrgTreeRow[] = treeRows
     .filter((r) => subtreeIdSet.has(r.id))
@@ -167,7 +184,7 @@ export default async function OrganizationMyTreePage({
   debugStats.tree_roots_count = tree.length;
   debugStats.tree_root_ids = tree.map((r: any) => r.id);
 
-  const eligibleContractsForMetrics = (contractsRes.data ?? [])
+  const eligibleContractsForMetrics = contractsRaw
     .filter((c) => {
       const joinDate = (c as any).join_date ? String((c as any).join_date).slice(0, 10) : '';
       // join_date window은 이미 쿼리에서 좁혔지만, 혹시 모를 날짜 형태 차이를 방어
@@ -186,9 +203,10 @@ export default async function OrganizationMyTreePage({
   debugStats.eligible_contracts_for_metrics_count = eligibleContractsForMetrics.length;
 
   const contractsByMember: Record<string, ContractItem[]> = {};
-  for (const c of contractsRes.data ?? []) {
+  for (const c of contractsRaw) {
     const salesMid = (c as any).sales_member_id as string | null;
     if (!salesMid) continue;
+    // 이미 in(sales_member_id, subtreeIds)로 좁혔지만, 혹시 모를 방어
     if (!subtreeIdSet.has(salesMid)) continue;
 
     const displayStatus = getContractDisplayStatus({
@@ -253,9 +271,9 @@ export default async function OrganizationMyTreePage({
       {/* 월 선택 */}
       <div className="flex gap-1 mb-5 flex-wrap items-center">
         <Link
-          href={monthHref(label_year_month)}
+          href={monthHref(defaultYearMonth)}
           className={`px-2.5 py-1 rounded text-xs border ${
-            label_year_month === yearMonth ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
+            defaultYearMonth === yearMonth ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
           }`}
         >
           오늘(기준월)
