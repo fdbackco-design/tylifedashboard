@@ -14,6 +14,7 @@ import type { OrgTreeRow } from '@/lib/types';
 import type { SettlementRule } from '@/lib/types/settlement';
 import type { ContractItem } from '@/components/org-tree/OrgTreeNode';
 import { buildChildrenByParentFromRows } from '@/lib/settlement/settlement-org-tree';
+import AccountActionsClient from './AccountActionsClient';
 
 export const metadata: Metadata = { title: '내 조직도' };
 export const dynamic = 'force-dynamic';
@@ -291,6 +292,7 @@ export default async function OrganizationMyTreePage({
             기준 {label_year_month} · {start_date}~{end_date}
           </p>
         </div>
+        <AccountActionsClient redirectAfterLogout={`/login?redirect=${encodeURIComponent(`/organization?year_month=${yearMonth}`)}`} />
       </div>
 
       {/* 월 선택 */}
