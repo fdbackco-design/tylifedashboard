@@ -450,7 +450,7 @@ export default function AccountIssueClient() {
                 {issuedAccounts.slice(0, 200).map((a) => (
                   <tr key={a.id} className="hover:bg-gray-50">
                     <td className="px-3 py-2 border-b border-gray-200 whitespace-nowrap">
-                      {a.display_name ?? '-'}
+                      {(a.display_name ?? '-').replace(/^\[고객\]\s*/, '')}
                     </td>
                     <td className="px-3 py-2 border-b border-gray-200 whitespace-nowrap">
                       {a.phone ?? '-'}
