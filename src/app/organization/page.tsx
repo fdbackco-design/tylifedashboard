@@ -228,6 +228,63 @@ export default async function OrganizationMyTreePage({
     }));
   debugStats.eligible_contracts_for_metrics_count = eligibleContractsForMetrics.length;
 
+  // ── 개인 대시 카드(서브트리 KPI) ─────────────────────────────
+  // 관리자 조직도(get_organization_kpis)와 동일한 기준으로 계산:
+  // - 이번달 준비 구좌: (정산 윈도우) + 준비/대기 + 해약 제외 + 취소 제외 + 렌탈 미충족 제외
+  // - 이번달 가입 구좌: (정산 윈도우) + 가입 완료(표시 상태 기준) + 취소 제외
+  const periodPendingUnits = contractsRaw
+    .filter((c: any) => !c.is_cancelled)
+    .filter((c: any) => c.status !== '해약')
+    .filter((c: any) => {
+      const displayStatus = getContractDisplayStatus({
+        status: c.status,
+        rental_request_no: c.rental_request_no ?? null,
+        invoice_no: c.invoice_no ?? null,
+        memo: c.memo ?? null,
+      });
+      if (displayStatus === '렌탈 미충족') return false;
+      return c.status === '준비' || c.status === '대기';
+    })
+    .reduce((sum: number, c: any) => sum + (c.unit_count ?? 0), 0);
+
+  const periodJoinUnits = contractsRaw
+    .filter((c: any) => !c.is_cancelled)
+    .filter((c: any) =>
+      getContractDisplayStatus({
+        status: c.status,
+        rental_request_no: c.rental_request_no ?? null,
+        invoice_no: c.invoice_no ?? null,
+        memo: c.memo ?? null,
+      }) === '가입',
+    )
+    .reduce((sum: number, c: any) => sum + (c.unit_count ?? 0), 0);
+
+  // 누적 가입 구좌: 월 제한 없이(서브트리 전체) 가입 완료(표시 상태) 합산
+  const cumulativeContractsSelect =
+    'unit_count, status, rental_request_no, invoice_no, memo, is_cancelled, sales_member_id';
+  const cumulativeResList = await Promise.all(
+    contractChunks.map((ids) =>
+      adminDb
+        .from('contracts')
+        .select(cumulativeContractsSelect)
+        .in('sales_member_id', ids)
+        .not('sales_member_id', 'is', null)
+        .limit(50000),
+    ),
+  );
+  const cumulativeContractsRaw = cumulativeResList.flatMap((r) => r.data ?? []);
+  const totalJoinUnits = cumulativeContractsRaw
+    .filter((c: any) => !c.is_cancelled)
+    .filter((c: any) =>
+      getContractDisplayStatus({
+        status: c.status,
+        rental_request_no: c.rental_request_no ?? null,
+        invoice_no: c.invoice_no ?? null,
+        memo: c.memo ?? null,
+      }) === '가입',
+    )
+    .reduce((sum: number, c: any) => sum + (c.unit_count ?? 0), 0);
+
   const contractsByMember: Record<string, ContractItem[]> = {};
   for (const c of contractsRaw) {
     const salesMid = (c as any).sales_member_id as string | null;
@@ -292,7 +349,29 @@ export default async function OrganizationMyTreePage({
             기준 {label_year_month} · {start_date}~{end_date}
           </p>
         </div>
-        <AccountActionsClient redirectAfterLogout={`/login?redirect=${encodeURIComponent(`/organization?year_month=${yearMonth}`)}`} />
+        <div className="flex flex-col items-end gap-2">
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 w-full lg:w-auto">
+            <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
+              <span className="text-gray-500">이번달 준비 구좌 수</span>
+              <span className="ml-2 font-bold text-gray-800">{periodPendingUnits.toLocaleString('ko-KR')}구좌</span>
+              <div className="text-[11px] text-gray-400 mt-0.5">
+                기준 {label_year_month} · {start_date}~{end_date}
+              </div>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
+              <span className="text-gray-500">누적 가입 구좌 수</span>
+              <span className="ml-2 font-bold text-gray-800">{totalJoinUnits.toLocaleString('ko-KR')}구좌</span>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
+              <span className="text-gray-500">이번달 가입 구좌 수</span>
+              <span className="ml-2 font-bold text-gray-800">{periodJoinUnits.toLocaleString('ko-KR')}구좌</span>
+              <div className="text-[11px] text-gray-400 mt-0.5">
+                기준 {label_year_month} · {start_date}~{end_date}
+              </div>
+            </div>
+          </div>
+          <AccountActionsClient redirectAfterLogout={`/login?redirect=${encodeURIComponent(`/organization?year_month=${yearMonth}`)}`} />
+        </div>
       </div>
 
       {/* 월 선택 */}
