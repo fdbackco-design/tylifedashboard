@@ -3,8 +3,9 @@
 import { useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
-export default function AccountActionsClient(props: { redirectAfterLogout?: string }) {
+export default function AccountActionsClient(props: { redirectAfterLogout?: string; showChangePassword?: boolean }) {
   const supabase = useMemo(() => createClient(), []);
+  const showChangePassword = props.showChangePassword ?? true;
 
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
@@ -78,13 +79,15 @@ export default function AccountActionsClient(props: { redirectAfterLogout?: stri
       {message ? (
         <span className={`text-xs ${message.ok ? 'text-emerald-700' : 'text-red-600'}`}>{message.text}</span>
       ) : null}
-      <button
-        type="button"
-        onClick={() => setIsOpen(true)}
-        className="px-3 py-1.5 rounded text-xs border bg-white text-gray-700 border-gray-300 hover:border-gray-400"
-      >
-        비밀번호 변경
-      </button>
+      {showChangePassword ? (
+        <button
+          type="button"
+          onClick={() => setIsOpen(true)}
+          className="px-3 py-1.5 rounded text-xs border bg-white text-gray-700 border-gray-300 hover:border-gray-400"
+        >
+          비밀번호 변경
+        </button>
+      ) : null}
       <button
         type="button"
         disabled={isLoggingOut}
@@ -94,7 +97,7 @@ export default function AccountActionsClient(props: { redirectAfterLogout?: stri
         {isLoggingOut ? '로그아웃 중' : '로그아웃'}
       </button>
 
-      {isOpen ? (
+      {showChangePassword && isOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/30"

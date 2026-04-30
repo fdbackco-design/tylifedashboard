@@ -370,7 +370,10 @@ export default async function OrganizationMyTreePage({
               </div>
             </div>
           </div>
-          <AccountActionsClient redirectAfterLogout={`/login?redirect=${encodeURIComponent(`/organization?year_month=${yearMonth}`)}`} />
+          <AccountActionsClient
+            showChangePassword={false}
+            redirectAfterLogout={`/login?redirect=${encodeURIComponent(`/organization?year_month=${yearMonth}`)}`}
+          />
         </div>
       </div>
 
