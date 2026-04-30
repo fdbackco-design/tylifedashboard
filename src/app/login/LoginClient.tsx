@@ -17,6 +17,7 @@ export default function LoginClient(props: { redirect: string }) {
     if (loading) return;
     setError(null);
     setLoading(true);
+    let navigated = false;
     try {
       const emailDomain = 'tylifedashboard.local';
       const loginEmail = loginCode.includes('@') ? loginCode.trim() : `${loginCode.trim()}@${emailDomain}`;
@@ -26,12 +27,14 @@ export default function LoginClient(props: { redirect: string }) {
       });
       if (signErr) throw signErr;
       // SSR이 세션 쿠키를 즉시 인식하도록, 클라이언트 라우팅 대신 full navigation 사용
+      navigated = true;
       window.location.assign(redirect);
       return;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      // navigation을 시작한 경우(성공)에는 loading을 유지해 “로그인 중 → 로그인” 깜빡임 방지
+      if (!navigated) setLoading(false);
     }
   }
 
