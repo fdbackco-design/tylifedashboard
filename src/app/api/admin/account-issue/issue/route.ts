@@ -67,7 +67,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ success: true, data: { user_id: existingProfile.id, existed: true } });
     }
 
-    // 1) auth.users 생성
+    // 1) auth.users 생성과 병렬로 프로필 보강용 행 조회(체감 지연 감소)
+    const memberPromise = db.from('organization_members').select('id, name, rank, phone').eq('id', member_id).maybeSingle();
+    const customerPromise = customer_id
+      ? db.from('customers').select('id, name, phone').eq('id', customer_id).maybeSingle()
+      : Promise.resolve({ data: null as null });
+
     const created = await db.auth.admin.createUser({
       email: authEmail,
       password: digits,
@@ -84,15 +89,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const userId = created.data.user?.id;
     if (!userId) throw new Error('auth user id missing');
 
-    // 2) display/phone 보강(조직원 우선, customer_id가 있을 때만 customers 조회)
-    const memberRes = await db.from('organization_members').select('id, name, rank, phone').eq('id', member_id).maybeSingle();
+    const [memberRes, customerRes] = await Promise.all([memberPromise, customerPromise]);
     const member = (memberRes.data ?? null) as any;
-
-    let customer: any = null;
-    if (customer_id) {
-      const customerRes = await db.from('customers').select('id, name, phone').eq('id', customer_id).maybeSingle();
-      customer = customerRes.data ?? null;
-    }
+    const customer = (customerRes.data ?? null) as any;
 
     const profile = {
       id: userId,

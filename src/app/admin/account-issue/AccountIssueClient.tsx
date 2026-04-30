@@ -60,6 +60,7 @@ export default function AccountIssueClient() {
   const [loginCode, setLoginCode] = useState('');
   const [password, setPassword] = useState('');
   const [isActive, setIsActive] = useState(true);
+  const [isIssuing, setIsIssuing] = useState(false);
 
   const [issuedAccounts, setIssuedAccounts] = useState<
     Array<{
@@ -168,46 +169,56 @@ export default function AccountIssueClient() {
     let digitsToTry = loginCodeTrim;
     let lastError: string | null = null;
 
-    for (let i = 0; i < maxRetries; i++) {
-      const passwordToTry = isDigitsOnly ? digitsToTry : password;
-      const loginCodeToSend = isDigitsOnly ? digitsToTry : loginCodeTrim;
+    setIsIssuing(true);
+    try {
+      for (let i = 0; i < maxRetries; i++) {
+        const passwordToTry = isDigitsOnly ? digitsToTry : password;
+        const loginCodeToSend = isDigitsOnly ? digitsToTry : loginCodeTrim;
 
-      const res = await fetch('/api/admin/account-issue/issue', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customer_id: selectedCustomerId ?? null,
-          member_id: selectedMemberId,
-          login_code: loginCodeToSend,
-          password: passwordToTry,
-          is_active: isActive,
-        }),
-        credentials: 'include',
-      });
+        const res = await fetch('/api/admin/account-issue/issue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customer_id: selectedCustomerId ?? null,
+            member_id: selectedMemberId,
+            login_code: loginCodeToSend,
+            password: passwordToTry,
+            is_active: isActive,
+          }),
+          credentials: 'include',
+        });
 
-      const json = (await res.json()) as ApiResult<{ user_id: string }>;
-      if (res.ok && json.success) {
-        // “409 때문에 코드 재생성된 경우(i>0)”에만 UI 갱신
-        if (i > 0 && isDigitsOnly) {
-          setLoginCode(digitsToTry);
-          setPassword(digitsToTry);
+        const json = (await res.json()) as ApiResult<{ user_id: string; existed?: boolean }>;
+        if (res.ok && json.success) {
+          // “409 때문에 코드 재생성된 경우(i>0)”에만 UI 갱신
+          if (i > 0 && isDigitsOnly) {
+            setLoginCode(digitsToTry);
+            setPassword(digitsToTry);
+          }
+          const existed = json.data.existed === true;
+          alert(
+            existed
+              ? `이미 발급된 계정입니다. 상태만 반영했습니다.\n사용자 ID: ${json.data.user_id}`
+              : `계정 발급 완료\n사용자 ID: ${json.data.user_id}`,
+          );
+          void loadIssuedAccounts();
+          return;
         }
-        alert(`계정 발급 완료: ${json.data.user_id}`);
-        await loadIssuedAccounts();
+
+        lastError = json.success ? '발급 실패' : json.error;
+        if (res.status === 409 && isDigitsOnly) {
+          digitsToTry = randomDigits8();
+          continue;
+        }
+
+        alert(lastError ?? '발급 실패');
         return;
       }
 
-      lastError = json.success ? '발급 실패' : json.error;
-      if (res.status === 409 && isDigitsOnly) {
-        digitsToTry = randomDigits8();
-        continue;
-      }
-
-      alert(lastError ?? '발급 실패');
-      return;
+      alert(lastError ?? '발급 실패(중복 코드 재시도 초과)');
+    } finally {
+      setIsIssuing(false);
     }
-
-    alert(lastError ?? '발급 실패(중복 코드 재시도 초과)');
   }
 
   async function loadIssuedAccounts() {
@@ -260,7 +271,7 @@ export default function AccountIssueClient() {
           </div>
           <button
             type="button"
-            disabled={isSearching || !normalizedQuery}
+            disabled={isSearching || isIssuing || !normalizedQuery}
             onClick={searchCustomers}
             className="px-4 py-2 rounded-md bg-slate-800 text-white text-sm font-semibold disabled:opacity-50"
           >
@@ -281,8 +292,9 @@ export default function AccountIssueClient() {
               <button
                 type="button"
                 key={c.id}
+                disabled={isIssuing}
                 onClick={() => handleSelectCustomer(c)}
-                className={`w-full text-left px-3 py-2 rounded-md border ${
+                className={`w-full text-left px-3 py-2 rounded-md border disabled:opacity-50 disabled:cursor-not-allowed ${
                   selectedCustomer?.id === c.id ? 'border-slate-800 bg-slate-50' : 'border-gray-200 hover:bg-gray-50'
                 }`}
               >
@@ -316,13 +328,14 @@ export default function AccountIssueClient() {
             <label className="block text-sm font-medium text-gray-700">발급 대상 조직원</label>
             <select
               value={selectedMemberId}
+              disabled={isIssuing}
               onChange={(e) => {
                 const nextId = e.target.value;
                 setSelectedMemberId(nextId);
                 // 후보 변경 즉시 기존 계정 정보/신규 자동 생성값 반영
                 loadExistingProfile(nextId);
               }}
-              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm disabled:opacity-50"
             >
               {memberCandidates.length === 0 ? <option value="">후보 없음</option> : null}
               {memberCandidates.map((m) => (
@@ -394,11 +407,11 @@ export default function AccountIssueClient() {
           <div className="flex gap-2">
             <button
               type="button"
-              disabled={!selectedMemberId || !loginCode || !password}
+              disabled={isIssuing || !selectedMemberId || !loginCode || !password}
               onClick={issueAccount}
-              className="px-4 py-2 rounded-md bg-emerald-700 text-white text-sm font-semibold disabled:opacity-50"
+              className="px-4 py-2 rounded-md bg-emerald-700 text-white text-sm font-semibold disabled:opacity-50 min-w-[140px]"
             >
-              계정 발급/저장
+              {isIssuing ? '처리중…' : '계정 발급/저장'}
             </button>
           </div>
         </div>
