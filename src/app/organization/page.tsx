@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
+import { unstable_cache } from 'next/cache';
 import OrgTree from '@/components/org-tree/OrgTree';
 import { createAdminSupabaseClient, createServerSupabaseClient } from '@/lib/supabase/server';
 import { buildOrgTree } from '@/lib/settlement/calculator';
@@ -16,6 +17,38 @@ import { buildChildrenByParentFromRows } from '@/lib/settlement/settlement-org-t
 
 export const metadata: Metadata = { title: '내 조직도' };
 export const dynamic = 'force-dynamic';
+
+type OrgMemberRow = {
+  id: string;
+  name: string;
+  rank: any;
+  phone: string | null;
+  external_id: string | null;
+  source_customer_id: string | null;
+};
+
+const getCachedOrgSnapshot = unstable_cache(
+  async (): Promise<{
+    members: OrgMemberRow[];
+    edges: Array<{ parent_id: string | null; child_id: string }>;
+    rules: SettlementRule[];
+  }> => {
+    const db = createAdminSupabaseClient();
+    const [membersRes, edgesRes, rulesRes] = await Promise.all([
+      db.from('organization_members').select('id,name,rank,phone,external_id,source_customer_id'),
+      db.from('organization_edges').select('parent_id,child_id'),
+      db.from('settlement_rules').select('*'),
+    ]);
+
+    return {
+      members: (membersRes.data ?? []) as OrgMemberRow[],
+      edges: (edgesRes.data ?? []) as Array<{ parent_id: string | null; child_id: string }>,
+      rules: (rulesRes.data ?? []) as SettlementRule[],
+    };
+  },
+  ['org_snapshot_v1'],
+  { revalidate: 60 },
+);
 
 export default async function OrganizationMyTreePage({
   searchParams,
@@ -92,18 +125,10 @@ export default async function OrganizationMyTreePage({
     return `/organization?${qs.toString()}`;
   };
 
-  // 공통: 조직 구성(월 무관) 먼저 조회 → subtree 계산 후 계약은 subtree만 조회(속도 개선)
-  const [membersRes, edgesRes, rulesRes] = await Promise.all([
-    adminDb
-      .from('organization_members')
-      .select('id,name,rank,phone,external_id,source_customer_id'),
-    // 개인 조직도는 member_id 중심 서브트리만 필터링하므로,
-    // 여기서는 is_active 필터를 제거하고 서버에서 subtree 기준으로만 범위를 제한한다.
-    adminDb.from('organization_edges').select('parent_id,child_id'),
-    adminDb.from('settlement_rules').select('*'),
-  ]);
+  // 공통: 조직 구성(월 무관)은 캐시된 스냅샷 사용 → 월 변경 시 지연 감소
+  const snapshot = await getCachedOrgSnapshot();
 
-  const membersRaw = (((membersRes.data ?? []) as unknown as any[]) ?? []).map((m) =>
+  const membersRaw = (snapshot.members ?? []).map((m) =>
     m.name === '안성준' ? { ...m, rank: '본사' as const } : m,
   ) as Array<{
     id: string;
@@ -113,11 +138,11 @@ export default async function OrganizationMyTreePage({
     external_id: string | null;
     source_customer_id: string | null;
   }>;
-  const edgesRaw = (edgesRes.data ?? []) as Array<{ parent_id: string | null; child_id: string }>;
-  const rules = (rulesRes.data ?? []) as SettlementRule[];
+  const edgesRaw = (snapshot.edges ?? []) as Array<{ parent_id: string | null; child_id: string }>;
+  const rules = (snapshot.rules ?? []) as SettlementRule[];
 
   debugStats.members_raw_count = membersRaw.length;
-  debugStats.edges_raw_count = (edgesRes.data ?? []).length;
+  debugStats.edges_raw_count = edgesRaw.length;
 
   // treeRows 기준으로 서브트리 계산
   const treeRowsBase: OrgTreeRow[] = membersRaw.map((m) => ({
