@@ -554,7 +554,8 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug, 
       const mouseY = e.clientY - rect.top;
 
       setScale((prevScale) => {
-        const nextScale = clamp(prevScale * factor, 0.4, 2.5);
+        // 모바일에서도 노드가 안 잘리도록 최소 줌을 더 허용
+        const nextScale = clamp(prevScale * factor, 0.2, 2.5);
         // 포인터 중심(focal) 줌: 화면 좌표(mouse)가 같은 컨텐츠 좌표를 계속 가리키도록 pan 보정
         setPan((prevPan) => {
           const contentX = (mouseX - prevPan.x) / prevScale;
@@ -652,16 +653,17 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug, 
       {/* 줌 가능한 뷰포트 */}
       <div
         ref={viewportRef}
-        className={`w-full overflow-hidden rounded-lg select-none ${dragRef.current.active ? 'cursor-grabbing' : 'cursor-grab'}`}
+        className={`w-full overflow-hidden rounded-lg select-none touch-none ${dragRef.current.active ? 'cursor-grabbing' : 'cursor-grab'}`}
         title="휠: 확대/축소 · 드래그: 이동"
         onPointerDown={(e) => {
           // 캔버스처럼 패닝: pointer capture로 영역 밖으로 나가도 드래그 유지
-          if (e.button !== 0) return;
+          if (e.pointerType === 'mouse' && e.button !== 0) return;
           if (editMode) return;
           // 노드 카드 위에서 시작한 포인터는 "클릭 선택"을 우선 (패닝은 카드 밖 드래그)
           const target = e.target as HTMLElement | null;
           const isOnCard = !!target?.closest?.('[data-org-node-card="1"]');
-          if (isOnCard) return;
+          // 모바일(터치)에서는 카드 위에서도 패닝을 허용해야 노드가 잘리지 않음
+          if (isOnCard && e.pointerType !== 'touch') return;
           e.preventDefault();
           (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
           dragRef.current = {
