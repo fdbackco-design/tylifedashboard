@@ -127,6 +127,28 @@ export function subtreeJoinUnitsJoinOnlyAsOf(
   return sum;
 }
 
+/** 정산 윈도우(start~end) 내 산하 '가입' 구좌 합 (둘 다 포함) */
+export function subtreeJoinUnitsJoinOnlyInWindow(params: {
+  memberId: string;
+  treeRows: OrgTreeRow[];
+  joinContractsAttributed: AttributedJoinContractRow[];
+  startInclusive: string;
+  endInclusive: string;
+}): number {
+  const childrenByParent = buildChildrenByParentFromRows(params.treeRows);
+  const subtree = collectSubtreeMemberIdsDownstream(params.memberId, childrenByParent);
+  const start = params.startInclusive.slice(0, 10);
+  const end = params.endInclusive.slice(0, 10);
+  let sum = 0;
+  for (const c of params.joinContractsAttributed) {
+    if (!subtree.has(c.sales_member_id)) continue;
+    const jd = c.join_date.slice(0, 10);
+    if (jd < start || jd > end) continue;
+    sum += Math.max(0, c.unit_count ?? 0);
+  }
+  return sum;
+}
+
 export function isLeaderMaintenanceBonusEligible(params: {
   memberDbRank: RankType;
   promotionThreshold: SalesMemberPromotionThreshold | null;

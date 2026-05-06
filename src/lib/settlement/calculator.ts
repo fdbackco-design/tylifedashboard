@@ -13,6 +13,7 @@ import {
   isContractStrictlyAfterPromotionThreshold,
   isLeaderMaintenanceBonusEligible,
   subtreeJoinUnitsJoinOnlyAsOf,
+  subtreeJoinUnitsJoinOnlyInWindow,
 } from './leader-promotion';
 import type { Contract } from '../types/contract';
 import { RANK_ORDER } from '../types/organization';
@@ -22,6 +23,7 @@ import {
   DEFAULT_INCENTIVE_CONFIG,
   commissionPenaltyWonForItemName,
 } from './constants';
+import { getSettlementWindowForYearMonth } from '@/lib/settlement/settlement-window';
 
 function monthEndDate(yearMonth: string): string {
   // 'YYYY-MM' -> 'YYYY-MM-DD' (해당 월 말일)
@@ -513,24 +515,23 @@ export function calculateMemberSettlement(
   let leaderMaintenanceBonus = 0;
   if (leaderOpts && (member.rank === '영업사원' || member.rank === '리더')) {
     const th = leaderOpts.promotionThresholdByMemberId.get(member.id) ?? null;
-    const u25 = subtreeJoinUnitsJoinOnlyAsOf(
-      member.id,
-      leaderOpts.treeRows,
-      leaderOpts.joinOnlyAttributed,
-      leaderOpts.settlementEndDate.slice(0, 10),
-    );
-    const alreadyPaid =
-      leaderOpts.leaderMaintenanceBonusAlreadyPaidByMemberId?.get(member.id) ?? false;
-    leaderMaintenanceBonus = alreadyPaid
-      ? 0
-      : isLeaderMaintenanceBonusEligible({
-      // 정책 승격으로 DB rank가 리더로 올라간 경우에도 유지장려금 판정은 영업사원 기준으로 동작해야 한다.
+    const { start_date, end_date } = getSettlementWindowForYearMonth(yearMonth);
+    const periodUnits = subtreeJoinUnitsJoinOnlyInWindow({
+      memberId: member.id,
+      treeRows: leaderOpts.treeRows,
+      joinContractsAttributed: leaderOpts.joinOnlyAttributed,
+      startInclusive: start_date,
+      endInclusive: end_date,
+    });
+
+    // 신규 20구좌마다 지급 (20→1회, 40→2회, ...)
+    // 정책 승격으로 DB rank가 리더로 올라간 경우에도 유지장려금 판정은 영업사원 기준으로 동작해야 한다.
+    const eligible = isLeaderMaintenanceBonusEligible({
       memberDbRank: member.rank === '리더' ? '영업사원' : member.rank,
       promotionThreshold: th,
-      subtreeJoinUnitsAsOf25: u25,
-    })
-        ? LEADER_MAINTENANCE_BONUS_WON
-        : 0;
+      subtreeJoinUnitsAsOf25: periodUnits,
+    });
+    leaderMaintenanceBonus = eligible ? Math.floor(periodUnits / 20) * LEADER_MAINTENANCE_BONUS_WON : 0;
   }
 
   const incentiveAmountCombined = ruleIncentiveAmount + leaderMaintenanceBonus;

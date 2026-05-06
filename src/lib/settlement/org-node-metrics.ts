@@ -459,12 +459,13 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
     }
   }
 
-  // 3) 유지장려(리더) — 정책 승격(threshold 존재) + 25일까지 20구좌 유지
+  // 3) 유지장려(리더) — 정책 승격(threshold 존재) + 신규 20구좌마다 지급(정산 윈도우 기준)
   {
     const childrenByParent = buildChildrenByParentFromRows(treeRowsForThreshold);
     const joinUnitsBySalesMember = new Map<string, number>();
     for (const c of joinAttributed) {
       const jd = c.join_date.slice(0, 10);
+      if (jd < settlementWindow.start_date) continue;
       if (jd > endInclusive) continue;
       joinUnitsBySalesMember.set(
         c.sales_member_id,
@@ -476,14 +477,12 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
       const th = promotionThresholdByMemberId.get(m.id) ?? null;
       if (!th) continue;
       if (m.rank !== '영업사원' && m.rank !== '리더') continue;
-      const blocked = leaderMaintenanceBonusBlockedByMemberId?.get(m.id) ?? false;
-      if (blocked) continue;
 
       const subtree = collectSubtreeMemberIdsDownstream(m.id, childrenByParent);
       let sum = 0;
       for (const sid of subtree) sum += joinUnitsBySalesMember.get(sid) ?? 0;
       if (sum < 20) continue;
-      bonusById.set(m.id, LEADER_MAINTENANCE_BONUS_WON);
+      bonusById.set(m.id, Math.floor(sum / 20) * LEADER_MAINTENANCE_BONUS_WON);
     }
   }
 
