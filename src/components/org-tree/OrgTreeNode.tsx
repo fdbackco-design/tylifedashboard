@@ -42,6 +42,17 @@ export function countCompleted(ids: string[], map: Record<string, ContractItem[]
   );
 }
 
+export function sumJoinUnits(ids: string[], map: Record<string, ContractItem[]>): number {
+  let sum = 0;
+  for (const id of ids) {
+    for (const c of map[id] ?? []) {
+      if (!isJoinCompleted(c)) continue;
+      sum += Math.max(0, Number(c.unit_count ?? 0));
+    }
+  }
+  return sum;
+}
+
 export function countByStatus(
   ids: string[],
   map: Record<string, ContractItem[]>,
@@ -63,6 +74,7 @@ interface Props {
   contractsByMember: Record<string, ContractItem[]>;
   extraSubtreeIds?: string[];
   showMetrics?: boolean;
+  showForecast?: boolean;
   nodeMetrics: null | {
     cumulativeUnitCount: number;
     monthlyUnitCount: number;
@@ -86,6 +98,7 @@ export default function OrgTreeNode({
   contractsByMember,
   extraSubtreeIds,
   showMetrics = true,
+  showForecast = false,
   nodeMetrics,
   selectedId,
   onSelect,
@@ -96,6 +109,10 @@ export default function OrgTreeNode({
 
   const subtreeIds = [...new Set([...collectSubtreeIds(node), ...(extraSubtreeIds ?? [])])];
   const counts = countByStatus(subtreeIds, contractsByMember);
+  const joinUnits = showForecast ? sumJoinUnits(subtreeIds, contractsByMember) : 0;
+  const goalUnits = 20;
+  const progressPct = showForecast ? Math.max(0, Math.min(100, Math.round((joinUnits / goalUnits) * 100))) : 0;
+  const remainingUnits = showForecast ? Math.max(0, goalUnits - joinUnits) : 0;
 
   return (
     <div
@@ -140,6 +157,30 @@ export default function OrgTreeNode({
             가입 {counts.가입}건
           </span>
         </div>
+
+        {showForecast && node.rank !== '본사' ? (
+          <div className="mt-1.5 w-full text-[11px] text-gray-600 space-y-1">
+            <div className="flex justify-between">
+              <span className="text-gray-500">예상 수당</span>
+              <span className="font-semibold text-gray-800 tabular-nums">
+                {nodeMetrics ? `${formatManwon(nodeMetrics.recognizedCommissionWon)}만원` : '-'}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-gray-500 whitespace-nowrap">목표(20구좌)</span>
+              <span className="font-semibold text-gray-800 tabular-nums whitespace-nowrap">
+                {joinUnits.toLocaleString('ko-KR')}구좌
+              </span>
+            </div>
+            <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+              <div className="h-2 rounded-full bg-emerald-600" style={{ width: `${progressPct}%` }} />
+            </div>
+            <div className="text-gray-500">
+              목표까지 남은 구좌 <span className="font-semibold text-gray-800 tabular-nums">{remainingUnits.toLocaleString('ko-KR')}</span>
+            </div>
+          </div>
+        ) : null}
 
         {showMetrics && nodeMetrics && node.rank !== '본사' && (
           <div className="mt-1.5 w-full text-[11px] text-gray-600 space-y-0.5">

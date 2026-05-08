@@ -223,6 +223,8 @@ interface Props {
   editable?: boolean;
   /** 노드 카드의 수당/실지급액(지표) 노출 여부. 기본 true */
   showMetrics?: boolean;
+  /** /organization 전용: 예상수당+목표 게이지 표시 */
+  showForecast?: boolean;
   debug?: {
     enabled: boolean;
     hqId: string | null;
@@ -261,7 +263,15 @@ interface Props {
   >;
 }
 
-export default function OrgTree({ roots, contractsByMember, metricsById, debug, editable = true, showMetrics = true }: Props) {
+export default function OrgTree({
+  roots,
+  contractsByMember,
+  metricsById,
+  debug,
+  editable = true,
+  showMetrics = true,
+  showForecast = false,
+}: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -495,6 +505,7 @@ export default function OrgTree({ roots, contractsByMember, metricsById, debug, 
               contractsByMember={contractsByMember}
               extraSubtreeIds={isHqRoot ? strippedNodeIds : undefined}
               showMetrics={showMetrics}
+              showForecast={showForecast}
               nodeMetrics={metricsById?.[node.id] ?? null}
               selectedId={selectedId}
               onSelect={handleSelect}

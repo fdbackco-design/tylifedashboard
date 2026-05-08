@@ -407,6 +407,7 @@ export default async function OrganizationMyTreePage({
           metricsById={orgMetricsById as any}
           editable={false}
           showMetrics={false}
+          showForecast={true}
           debug={
             debugEnabled
               ? ({ enabled: true } as any)
