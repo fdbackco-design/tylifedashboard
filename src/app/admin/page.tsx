@@ -35,7 +35,7 @@ function DataTable(props: { rows: Array<{ parent_name: string; member_name: stri
   };
 
   return (
-    <div className="overflow-auto rounded-lg border border-gray-200">
+    <div className="overflow-auto rounded-lg border border-gray-200 max-h-[420px] lg:max-h-[520px]">
       <table className="min-w-full text-sm">
         <thead className="bg-gray-50 sticky top-0 z-10">
           <tr className="text-xs text-gray-500 uppercase tracking-wide">
