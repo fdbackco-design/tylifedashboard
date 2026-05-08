@@ -160,13 +160,6 @@ export default function OrgTreeNode({
 
         {showForecast && node.rank !== '본사' ? (
           <div className="mt-1.5 w-full text-[11px] text-gray-600 space-y-1">
-            <div className="flex justify-between">
-              <span className="text-gray-500">예상 수당</span>
-              <span className="font-semibold text-gray-800 tabular-nums">
-                {nodeMetrics ? `${formatManwon(nodeMetrics.recognizedCommissionWon)}만원` : '-'}
-              </span>
-            </div>
-
             <div className="flex items-center justify-between gap-2">
               <span className="text-gray-500 whitespace-nowrap">목표(20구좌)</span>
               <span className="font-semibold text-gray-800 tabular-nums whitespace-nowrap">
