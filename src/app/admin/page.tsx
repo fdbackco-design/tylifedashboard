@@ -39,17 +39,17 @@ function DataTable(props: { rows: Array<{ parent_name: string; member_name: stri
       <table className="min-w-full text-sm">
         <thead className="bg-gray-50 sticky top-0 z-10">
           <tr className="text-xs text-gray-500 uppercase tracking-wide">
-            <th className="text-left font-medium px-4 py-3 whitespace-nowrap">상위 조직</th>
-            <th className="text-left font-medium px-4 py-3 whitespace-nowrap">담당자</th>
-            <th className="text-right font-medium px-4 py-3 whitespace-nowrap">구좌 수</th>
+            <th className="text-left font-medium px-4 py-2 whitespace-nowrap">상위 조직</th>
+            <th className="text-left font-medium px-4 py-2 whitespace-nowrap">담당자</th>
+            <th className="text-right font-medium px-4 py-2 whitespace-nowrap">구좌 수</th>
           </tr>
         </thead>
         <tbody>
           {props.rows.length ? (
             props.rows.map((r, idx) => (
               <tr key={`${r.member_name}-${idx}`} className="border-t border-gray-100">
-                <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{r.parent_name}</td>
-                <td className="px-4 py-3 text-gray-900 whitespace-nowrap font-medium">
+                <td className="px-4 py-2 text-gray-500 whitespace-nowrap">{r.parent_name}</td>
+                <td className="px-4 py-2 text-gray-900 whitespace-nowrap font-medium">
                   <span className="inline-flex items-center gap-2">
                     {badgeForRank(idx) ? (
                       <span className="text-base" aria-label={`rank-${idx + 1}`}>
@@ -63,7 +63,7 @@ function DataTable(props: { rows: Array<{ parent_name: string; member_name: stri
                     <span className="font-medium">{r.member_name}</span>
                   </span>
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums text-gray-900">
+                <td className="px-4 py-2 text-right tabular-nums text-gray-900">
                   <div className="flex items-center justify-end gap-3">
                     <span className="min-w-[64px] text-right font-medium">{r.unit_sum.toLocaleString()}구좌</span>
                     <div className="w-28">
@@ -82,7 +82,7 @@ function DataTable(props: { rows: Array<{ parent_name: string; member_name: stri
             ))
           ) : (
             <tr>
-              <td className="px-4 py-10 text-center text-gray-400" colSpan={3}>
+              <td className="px-4 py-6 text-center text-gray-400" colSpan={3}>
                 데이터 없음
               </td>
             </tr>
