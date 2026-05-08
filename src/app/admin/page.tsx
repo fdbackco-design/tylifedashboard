@@ -317,9 +317,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
           <DataTable rows={agg.allTimeJoinedSlots.rows} />
         </SectionCard>
 
-        <SectionCard title="담당자별 전날 영업 실적" subtitle={`기준일: ${agg.briefing.base_date_ymd}`}>
-          <DataTable rows={agg.dailyPerformanceByMember.rows} />
-        </SectionCard>
+        {/* "담당자별 전날 영업 실적" 섹션은 숨김 처리 */}
       </div>
 
       {/* 3) 하단: 텍스트 브리핑 박스 */}
