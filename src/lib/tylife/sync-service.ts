@@ -44,6 +44,7 @@ import {
   type AttributedJoinContractRow,
 } from '../settlement/leader-promotion';
 import type { RankType } from '../types/organization';
+import { isContractJoinCompleted } from '../utils/contract-display-status';
 
 function shouldExcludeRecruitmentName(name: string, relationship: string): boolean {
   const n = name.trim();
@@ -1048,8 +1049,9 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
           db.from('organization_edges').select('parent_id, child_id'),
           db
             .from('contracts')
-            .select('id, join_date, unit_count, sales_member_id, customer_id, sales_link_status, status, is_cancelled')
-            .eq('status', '가입')
+            .select(
+              'id, join_date, unit_count, sales_member_id, customer_id, sales_link_status, status, is_cancelled, rental_request_no, invoice_no, memo',
+            )
             .eq('is_cancelled', false),
         ]);
 
@@ -1087,6 +1089,17 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
         for (const row of (joinContractsRes.data ?? []) as any[]) {
           if ((row.sales_link_status ?? 'linked') !== 'linked') continue;
           if (!row.sales_member_id) continue;
+          // 조직도/정산과 동일하게 "가입 인정 기준"으로 필터링
+          if (
+            !isContractJoinCompleted({
+              status: String(row.status ?? ''),
+              rental_request_no: (row.rental_request_no ?? null) as string | null,
+              invoice_no: (row.invoice_no ?? null) as string | null,
+              memo: (row.memo ?? null) as string | null,
+            })
+          ) {
+            continue;
+          }
           let sid = row.sales_member_id as string;
           const cid = row.customer_id as string | null;
           if (cid) {
