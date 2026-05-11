@@ -26,7 +26,12 @@ function clean(value: string): string | null {
 export function normalizeDate(raw: string): string {
   if (!raw) return '';
   const s = raw.trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+  // "2026-05-11 성공" 같은 꼬리 텍스트가 붙는 케이스가 있어
+  // 문자열 앞부분의 날짜만 안전하게 추출한다.
+  const dash = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (dash) return `${dash[1]}-${dash[2]}-${dash[3]}`;
+
   const ds = s.match(/^(\d{4})[./](\d{2})[./](\d{2})/);
   if (ds) return `${ds[1]}-${ds[2]}-${ds[3]}`;
   const cs = s.match(/^(\d{4})(\d{2})(\d{2})$/);

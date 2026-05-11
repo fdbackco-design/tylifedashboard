@@ -683,7 +683,7 @@ export default async function OrganizationPage({
   return (
     <div className="p-6">
       {/* 헤더 + 동기화 버튼 */}
-      <div className="flex items-start justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-6">
         <div>
           <h2 className="text-2xl font-bold text-gray-800">조직도</h2>
           <p className="text-sm text-gray-500 mt-0.5">
@@ -693,7 +693,9 @@ export default async function OrganizationPage({
             기준 {label_year_month} · {start_date}~{end_date}
           </p>
         </div>
-        <SyncButton />
+        <div className="sm:shrink-0">
+          <SyncButton />
+        </div>
       </div>
 
       {/* 월 선택 (조직도 계산 기준) */}
