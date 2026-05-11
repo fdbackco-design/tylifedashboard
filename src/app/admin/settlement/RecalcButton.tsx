@@ -39,16 +39,16 @@ export default function RecalcButton({ yearMonth }: Props) {
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="flex flex-col items-stretch sm:items-end gap-1">
       <button
         onClick={handleRecalc}
         disabled={loading}
-        className="px-3 py-2 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className="w-full sm:w-auto px-3 py-2 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
       >
         {loading ? '계산 중...' : `${yearMonth} 정산 재계산`}
       </button>
       {message && (
-        <span className={`text-xs ${message.ok ? 'text-green-600' : 'text-red-500'}`}>
+        <span className={`text-xs ${message.ok ? 'text-green-600' : 'text-red-500'} break-keep`}>
           {message.text}
         </span>
       )}

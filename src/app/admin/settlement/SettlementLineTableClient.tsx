@@ -521,11 +521,14 @@ export default function SettlementLineTableClient(props: {
 
   return (
     <>
-      <div className="text-sm text-gray-500 mt-0.5">
-        {props.yearMonth} · 합계 {formatKRW(adjustedTotalAmount)}
+      <div className="text-xs sm:text-sm text-gray-500 mt-0.5 break-keep">
+        <span className="whitespace-nowrap">{props.yearMonth}</span> ·{' '}
+        <span className="whitespace-nowrap">합계 {formatKRW(adjustedTotalAmount)}</span>
         {excludedUnitsTotal > 0 && (
-          <span className="ml-2 text-xs text-amber-700">
-            (본인계약 미인정 {excludedUnitsTotal.toLocaleString('ko-KR')}구좌 · -{formatKRW(excludedUnitsTotal * SELF_CONTRACT_COMMISSION_PER_UNIT_WON)})
+          <span className="ml-2 text-[11px] sm:text-xs text-amber-700">
+            (본인계약 미인정{' '}
+            <span className="whitespace-nowrap">{excludedUnitsTotal.toLocaleString('ko-KR')}구좌</span> ·{' '}
+            <span className="whitespace-nowrap">-{formatKRW(excludedUnitsTotal * SELF_CONTRACT_COMMISSION_PER_UNIT_WON)}</span>)
           </span>
         )}
         {saveError && (

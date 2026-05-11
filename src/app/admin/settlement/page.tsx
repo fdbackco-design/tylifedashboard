@@ -524,8 +524,8 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   }
 
   return (
-    <div className="p-6">
-      <div className="flex items-start justify-between mb-6">
+    <div className="p-4 sm:p-6">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-6">
         <div>
           <h2 className="text-2xl font-bold text-gray-800">정산 현황</h2>
           {allContractsCount > 0 && (
@@ -547,15 +547,16 @@ export default async function SettlementPage({ searchParams }: PageProps) {
           )}
         </div>
 
-        <div className="flex items-start gap-3">
+        <div className="flex items-start gap-3 sm:shrink-0">
           <RecalcButton yearMonth={yearMonth} />
         </div>
       </div>
 
       {/* 필터 */}
-      <div className="flex gap-3 mb-5 flex-wrap items-center">
-        {/* 월 선택 */}
-        <div className="flex gap-1">
+      <div className="flex flex-col gap-3 mb-5">
+        {/* 월 선택: 모바일은 가로 스크롤 */}
+        <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+          <div className="flex gap-1 whitespace-nowrap w-max">
           <Link
             href={`/admin/settlement?year_month=${todayYearMonth}${rankFilter ? `&rank=${rankFilter}` : ''}${debugEnabled ? '&debug=1' : ''}`}
             className={`px-2.5 py-1 rounded text-xs border ${
@@ -575,26 +576,30 @@ export default async function SettlementPage({ searchParams }: PageProps) {
               {m.slice(5)}월
             </Link>
           ))}
+          </div>
         </div>
 
-        <span className="text-gray-300">|</span>
-
         {/* 직급 필터 */}
-        <Link
-          href={`/admin/settlement?year_month=${yearMonth}`}
-          className={`px-3 py-1 rounded text-xs border ${!rankFilter ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-300'}`}
-        >
-          전체
-        </Link>
-        {RANKS.map((r) => (
-          <Link
-            key={r}
-            href={`/admin/settlement?year_month=${yearMonth}&rank=${r}`}
-            className={`px-3 py-1 rounded text-xs border ${rankFilter === r ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-300'}`}
-          >
-            {r}
-          </Link>
-        ))}
+        <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+          <div className="flex gap-2 whitespace-nowrap w-max items-center">
+            <span className="text-gray-300">|</span>
+            <Link
+              href={`/admin/settlement?year_month=${yearMonth}`}
+              className={`px-3 py-1 rounded text-xs border ${!rankFilter ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-300'}`}
+            >
+              전체
+            </Link>
+            {RANKS.map((r) => (
+              <Link
+                key={r}
+                href={`/admin/settlement?year_month=${yearMonth}&rank=${r}`}
+                className={`px-3 py-1 rounded text-xs border ${rankFilter === r ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-300'}`}
+              >
+                {r}
+              </Link>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* KPI + 합계 + 테이블(클라이언트 조정 반영) */}
