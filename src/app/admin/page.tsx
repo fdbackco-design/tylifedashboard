@@ -95,10 +95,16 @@ function DataTable(props: { rows: Array<{ parent_name: string; member_name: stri
 
 function SummaryCard(props: { label: string; value: string; hint?: string }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-      <p className="text-xs text-gray-500">{props.label}</p>
-      <p className="text-4xl font-semibold text-blue-600 mt-2 tracking-tight">{props.value}</p>
-      {props.hint ? <p className="text-xs text-gray-500 mt-2">{props.hint}</p> : null}
+    <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-6 shadow-sm">
+      <p className="text-xs text-gray-500 leading-snug break-keep">
+        {props.label}
+      </p>
+      <p className="text-2xl sm:text-3xl lg:text-4xl font-semibold text-blue-600 mt-2 tracking-tight whitespace-nowrap">
+        {props.value}
+      </p>
+      {props.hint ? (
+        <p className="text-xs text-gray-500 mt-2 leading-snug break-keep">{props.hint}</p>
+      ) : null}
     </div>
   );
 }
@@ -247,13 +253,13 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
   ];
 
   return (
-    <div className="p-8 space-y-8">
-      <header className="flex items-end justify-between gap-6">
+    <div className="p-4 sm:p-8 space-y-6 sm:space-y-8">
+      <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 sm:gap-6">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">대시보드</h2>
           
         </div>
-        <div className="text-xs text-gray-500 text-right">
+        <div className="text-xs text-gray-500 sm:text-right">
           <div>브리핑 생성일: {agg.briefing.run_date_ymd}</div>
           <div>브리핑 기준일(전날): {agg.briefing.base_date_ymd}</div>
         </div>
@@ -287,7 +293,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
       </div>
 
       {/* 1) 상단: 핵심 요약 카드 */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {summaryCards.map((c) => (
           <SummaryCard key={c.label} label={c.label} value={c.value} hint={c.hint} />
         ))}
