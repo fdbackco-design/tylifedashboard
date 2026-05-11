@@ -27,6 +27,7 @@ export default function SettlementLineTableClient(props: {
   debugEnabled?: boolean;
   totalSales: number;
   periodSales: number;
+  rankByMemberId: Record<string, string>;
   selfIncludedInitialByTopId: Record<string, boolean>;
   splitOpenInitialByTopId: Record<string, boolean>;
   rows: SettlementLineRow[];
@@ -123,7 +124,7 @@ export default function SettlementLineTableClient(props: {
       return {
         topLineId: nodeId,
         topDisplayName: meta?.displayName ?? nodeId,
-        topRank: meta?.rank ?? '-',
+        topRank: props.rankByMemberId[nodeId] ?? meta?.rank ?? '-',
         base: 0, // 기본수당은 아래 계약 단위 귀속으로 재계산
         rollup: agg.rollup,
         leaderMaint: agg.leaderMaint,
@@ -144,7 +145,7 @@ export default function SettlementLineTableClient(props: {
       return {
         topLineId: nodeId,
         topDisplayName: meta.displayName ?? nodeId,
-        topRank: meta.rank ?? '-',
+        topRank: props.rankByMemberId[nodeId] ?? meta.rank ?? '-',
         base: 0, // 기본수당은 아래 계약 단위 귀속으로 재계산
         rollup: meta.rollup,
         leaderMaint: meta.leaderMaint,
@@ -257,7 +258,7 @@ export default function SettlementLineTableClient(props: {
       const baseWon = Number(c.baseWon ?? 0);
       if (!Number.isFinite(baseWon) || baseWon === 0) continue;
 
-      const rawRank = c.rawSalesMemberId ? (props.memberAggById[c.rawSalesMemberId]?.rank ?? null) : null;
+      const rawRank = c.rawSalesMemberId ? (props.rankByMemberId[c.rawSalesMemberId] ?? props.memberAggById[c.rawSalesMemberId]?.rank ?? null) : null;
       const isRawSalesMemberHeadOffice = rawRank === '본사';
 
       let targetMemberId: string | null = null;

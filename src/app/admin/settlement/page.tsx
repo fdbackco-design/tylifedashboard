@@ -130,6 +130,8 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     rankByIdForTree.set(r.id as string, r.rank as RankType);
     nameByIdForTree.set(r.id as string, r.name as string);
   }
+  const rankByMemberId: Record<string, string> = {};
+  for (const [id, rank] of rankByIdForTree.entries()) rankByMemberId[id] = rank;
 
   // parent -> children (preview UI용)
   const childrenByParent: Record<string, string[]> = {};
@@ -611,6 +613,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
         debugEnabled={debugEnabled}
         totalSales={totalSales}
         periodSales={periodSales}
+        rankByMemberId={rankByMemberId}
         selfIncludedInitialByTopId={selfIncludedInitialByTopId}
         splitOpenInitialByTopId={splitOpenInitialByTopId}
         childrenByParent={childrenByParent}
