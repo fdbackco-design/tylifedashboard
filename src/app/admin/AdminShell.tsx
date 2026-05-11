@@ -61,7 +61,7 @@ function SidebarContents(props: {
   }, [pathname, props.navItems]);
 
   return (
-    <aside className="h-full w-64 bg-slate-800 text-slate-200 flex flex-col">
+    <aside className="h-full w-full bg-slate-800 text-slate-200 flex flex-col">
       <div className="px-5 py-5 border-b border-slate-700">
         <h1 className="text-lg font-bold text-white">TY Life</h1>
         <p className="text-xs text-slate-400 mt-0.5">계약·정산 관리</p>

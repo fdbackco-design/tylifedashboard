@@ -358,17 +358,19 @@ export default async function ContractsPage({ searchParams }: PageProps) {
                       {c.join_date}
                     </td>
                     <td className="px-4 py-3 font-medium">
-                      <Link
-                        href={`/admin/contracts/${c.id}`}
-                        className="text-blue-600 hover:underline"
-                      >
-                        {customer?.name ?? '-'}
-                      </Link>
-                      {c.contract_count > 1 && (
-                        <span className="ml-2 text-xs text-gray-400">
-                          ({c.contract_count}건)
-                        </span>
-                      )}
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                        <Link
+                          href={`/admin/contracts/${c.id}`}
+                          className="text-blue-600 hover:underline break-keep"
+                        >
+                          {customer?.name ?? '-'}
+                        </Link>
+                        {c.contract_count > 1 && (
+                          <span className="text-xs text-gray-400 whitespace-nowrap">
+                            ({c.contract_count}건)
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
                       {c.affiliation_name ?? '-'}
