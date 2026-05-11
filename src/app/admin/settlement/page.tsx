@@ -10,6 +10,10 @@ import type { SettlementCalculationDetail } from '@/lib/types/settlement';
 import RecalcButton from './RecalcButton';
 import { isOrgDisplayHiddenMemberName } from '@/lib/organization/org-display-hidden';
 import SettlementLineTableClient, { type SettlementLineRow } from './SettlementLineTableClient';
+import {
+  computeSalesMemberPromotionThreshold,
+  type AttributedJoinContractRow,
+} from '@/lib/settlement/leader-promotion';
 
 export const metadata: Metadata = { title: '정산 현황' };
 export const dynamic = 'force-dynamic';
@@ -224,6 +228,37 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       is_self_customer_contract,
     };
   });
+
+  // 조직도 페이지와 동일한 "정책 승격(산하 가입 누적 20구좌)" 직급 보정(표시용)
+  // - 동기화/정산 재계산 없이도 조직도에서 리더로 보이는 케이스가 있어,
+  //   정산 현황에서도 같은 기준으로 effective rank를 맞춘다.
+  {
+    const rankByIdForThreshold = new Map<string, any>();
+    for (const m of membersRaw as any[]) {
+      rankByIdForThreshold.set(m.id as string, (m.rank === '리더' ? '영업사원' : m.rank) as any);
+    }
+    const joinAttributedForThreshold: AttributedJoinContractRow[] = eligibleContracts
+      .filter((c: any) => !c.is_cancelled)
+      .map((c: any) => ({
+        id: String(c.id ?? ''),
+        join_date: String(c.join_date ?? '').slice(0, 10),
+        unit_count: Number(c.unit_count ?? 0),
+        sales_member_id: String(c.sales_member_id ?? ''),
+      }))
+      .filter((c) => !!c.id && !!c.join_date && !!c.sales_member_id);
+
+    const promotionThresholdByMemberId = computeSalesMemberPromotionThreshold(
+      treeRows as any[],
+      joinAttributedForThreshold,
+      rankByIdForThreshold as any,
+    );
+
+    for (const [memberId, th] of promotionThresholdByMemberId.entries()) {
+      if (!th) continue;
+      // 승격자: 조직도와 동일하게 화면상 리더로 표시
+      rankByMemberId[memberId] = '리더';
+    }
+  }
 
   // 정산현황 표의 "직접계약/직접구좌"도 위 귀속 기준으로 재계산
   const directByMember = new Map<string, { contractIds: Set<string>; unitSum: number }>();
