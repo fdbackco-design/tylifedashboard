@@ -600,11 +600,11 @@ export default function SettlementLineTableClient(props: {
             <tbody className="divide-y divide-gray-100">
               {adjustedRows.map((r) => (
                 <tr key={r.topLineId} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium">
+                  <td className="px-4 py-3 font-medium whitespace-nowrap">
                     <div className="flex items-center gap-2">
                       <Link
                         href={`/admin/settlement/member?year_month=${props.yearMonth}&member_id=${r.topLineId}`}
-                        className="text-blue-600 hover:underline"
+                        className="text-blue-600 hover:underline whitespace-nowrap"
                       >
                         <span
                           className="inline-flex items-center"
@@ -672,9 +672,9 @@ export default function SettlementLineTableClient(props: {
                       })()}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-gray-600">{r.topRank}</td>
+                  <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{r.topRank}</td>
                   <td className="px-4 py-3 text-xs text-gray-700">-</td>
-                  <td className="px-4 py-3 text-xs text-gray-600 max-w-[200px] whitespace-normal">라인 합계</td>
+                  <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">라인 합계</td>
                   <td className="px-4 py-3 tabular-nums text-right">{r.directContractCount.toLocaleString()}건</td>
                   <td className="px-4 py-3 tabular-nums text-right">{r.directUnitSum.toLocaleString()}</td>
                   <td className="px-4 py-3 tabular-nums text-right">-</td>
