@@ -396,6 +396,15 @@ export default async function OrganizationMyTreePage({
         keepQuery={debugEnabled ? { debug: '1' } : { debug: null }}
       />
 
+      <div className="mb-4 flex justify-end">
+        <Link
+          href={`/organization/statement?year_month=${encodeURIComponent(yearMonth)}`}
+          className="inline-flex items-center px-3 py-2 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+        >
+          명세서 보기
+        </Link>
+      </div>
+
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
         <OrgTree
           roots={treeForDisplay as any}
