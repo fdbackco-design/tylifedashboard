@@ -443,6 +443,41 @@ export default async function OrganizationPage({
       // 승격자는 조직도 배지/정렬에서도 리더로 보이게(요구: 원본 rank가 아니라 effective rank 반영)
       return { ...r, rank: '리더' as any };
     });
+
+    // UI에서 '리더'로 보이게 되는 경우, DB의 organization_members.rank도 함께 승격 반영한다.
+    // - 안전을 위해 "승격(영업사원 → 리더)"만 수행하고, 조건이 풀렸다고 해서 강등은 하지 않는다.
+    // - 본사/특정 예외(안성준 본사 취급)는 DB에 쓰지 않는다.
+    try {
+      const promotedIds = treeRows
+        .filter((r) => r.rank === '리더')
+        .map((r) => r.id)
+        .filter((id) => {
+          const raw = rankByIdRaw.get(id) ?? null;
+          if (!raw) return false;
+          if (raw === '리더') return false;
+          if (raw === '본사') return false;
+          // 승격 대상은 기본적으로 영업사원에서 올라오는 케이스만
+          return raw === '영업사원';
+        });
+
+      // 안성준(본사) 예외는 DB 업데이트에서 제외
+      const ahnId = membersRaw.find((m: any) => m.name === '안성준')?.id ?? null;
+      const idsToUpdate = ahnId ? promotedIds.filter((id) => id !== ahnId) : promotedIds;
+
+      if (idsToUpdate.length > 0) {
+        const { error: rankUpdateErr } = await db
+          .from('organization_members')
+          .update({ rank: '리더' as any } as any)
+          .in('id', idsToUpdate);
+        if (rankUpdateErr) {
+          // 페이지 렌더는 막지 않는다.
+          // (서버 로그에서만 확인 가능)
+          console.error('organization_members.rank 업데이트 실패:', rankUpdateErr.message);
+        }
+      }
+    } catch (e) {
+      console.error('organization_members.rank 자동 승격 반영 실패:', e instanceof Error ? e.message : String(e));
+    }
   }
 
   for (const c of rawContractRows) {
