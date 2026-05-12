@@ -292,14 +292,21 @@ function calcDirectContractsWithLeaderPromotion(
   const items: ContractSettlementItem[] = eligible.map((c) => {
     const originMemberId = (c as any).__attributed_origin_member_id as string | undefined;
     const originRank = (c as any).__attributed_origin_rank as RankType | undefined;
-    const rate = commissionPerUnitForDirectContract(
-      originMemberId ?? member.id,
-      originRank ?? member.rank,
-      { id: c.id, join_date: c.join_date },
-      rules,
-      refDate,
-      promotionThresholdByMemberId,
-    );
+    // 요구(/admin/settlement):
+    // "직급이 리더인 담당자"의 기본수당은 항상 40만원/구좌.
+    // 정책 귀속 계약은 내부적으로 originRank='영업사원'로 표시될 수 있는데,
+    // 이 경우에도 실제 지급 주체(=member)가 리더이면 리더 단가를 적용해야 한다.
+    const rate =
+      member.rank === '리더'
+        ? getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit
+        : commissionPerUnitForDirectContract(
+            originMemberId ?? member.id,
+            originRank ?? member.rank,
+            { id: c.id, join_date: c.join_date },
+            rules,
+            refDate,
+            promotionThresholdByMemberId,
+          );
     const base = c.unit_count * rate;
     const penalty = commissionPenaltyWonForItemName((c as { item_name?: string }).item_name, c.unit_count);
     return {
