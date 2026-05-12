@@ -166,6 +166,14 @@ export default function OrgTreeNode({
                 {joinUnits.toLocaleString('ko-KR')}구좌
               </span>
             </div>
+            {nodeMetrics ? (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-gray-500 whitespace-nowrap">누적 구좌</span>
+                <span className="font-semibold text-gray-800 tabular-nums whitespace-nowrap">
+                  {nodeMetrics.cumulativeUnitCount.toLocaleString('ko-KR')}구좌
+                </span>
+              </div>
+            ) : null}
             <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
               <div className="h-2 rounded-full bg-emerald-600" style={{ width: `${progressPct}%` }} />
             </div>
