@@ -69,45 +69,47 @@ export default function YearMonthSelector(props: {
   };
 
   return (
-    <div className="flex gap-2 mb-4 sm:mb-5 items-center overflow-x-auto whitespace-nowrap -mx-3 px-3 sm:mx-0 sm:px-0">
-      <button
-        type="button"
-        onClick={() => push(todayValue)}
-        className={`px-2.5 py-1 rounded text-xs border ${
-          value === todayValue
-            ? 'bg-slate-800 text-white border-slate-800'
-            : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
-        }`}
-      >
-        {todayLabel ?? '오늘(기준월)'}
-      </button>
-
-      <div className="flex items-center gap-1">
-        <select
-          value={String(current.year)}
-          onChange={(e) => onChangeYear(e.target.value)}
-          className="h-7 px-2 rounded text-xs border bg-white text-gray-700 border-gray-300"
-          aria-label="연도 선택"
+    <div className="-mx-3 px-3 sm:mx-0 sm:px-0 mb-4 sm:mb-5">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+        <button
+          type="button"
+          onClick={() => push(todayValue)}
+          className={`w-full sm:w-auto px-2.5 py-1.5 rounded text-xs border ${
+            value === todayValue
+              ? 'bg-slate-800 text-white border-slate-800'
+              : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
+          }`}
         >
-          {years.map((y) => (
-            <option key={y} value={String(y)}>
-              {y}년
-            </option>
-          ))}
-        </select>
+          {todayLabel ?? '오늘(기준월)'}
+        </button>
 
-        <select
-          value={pad2(current.month)}
-          onChange={(e) => onChangeMonth(e.target.value)}
-          className="h-7 px-2 rounded text-xs border bg-white text-gray-700 border-gray-300"
-          aria-label="월 선택"
-        >
-          {monthOptions.map((m) => (
-            <option key={m} value={pad2(m)}>
-              {pad2(m)}월
-            </option>
-          ))}
-        </select>
+        <div className="grid grid-cols-2 gap-2 w-full sm:w-auto">
+          <select
+            value={String(current.year)}
+            onChange={(e) => onChangeYear(e.target.value)}
+            className="h-9 sm:h-7 w-full px-2 rounded text-xs border bg-white text-gray-700 border-gray-300"
+            aria-label="연도 선택"
+          >
+            {years.map((y) => (
+              <option key={y} value={String(y)}>
+                {y}년
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={pad2(current.month)}
+            onChange={(e) => onChangeMonth(e.target.value)}
+            className="h-9 sm:h-7 w-full px-2 rounded text-xs border bg-white text-gray-700 border-gray-300"
+            aria-label="월 선택"
+          >
+            {monthOptions.map((m) => (
+              <option key={m} value={pad2(m)}>
+                {pad2(m)}월
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
     </div>
   );
