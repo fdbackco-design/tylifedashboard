@@ -225,7 +225,7 @@ interface Props {
   showMetrics?: boolean;
   /** /organization 전용: 예상수당+목표 게이지 표시 */
   showForecast?: boolean;
-  /** 최상단 가상 '본사(__hq_root__)' 루트를 숨김. 기본 false */
+  /** /organization 전용: 최상단 가상 '본사(__hq_root__)' 카드를 숨김(레이아웃용 루트는 유지). 기본 false */
   hideHqRoot?: boolean;
   debug?: {
     enabled: boolean;
@@ -336,10 +336,6 @@ export default function OrgTree({
     // UI에서는 본사(person) 노드를 모두 제거하고 자식만 승격한다. (서버 직급 배지와 동일 로직)
     const cleanedRoots = stripOrgTreeNodesForDisplay(roots as OrgTreeNodeType[]);
 
-    if (hideHqRoot) {
-      return cleanedRoots;
-    }
-
     const hqRoot: OrgTreeNodeType = {
       id: '__hq_root__',
       name: '본사',
@@ -349,7 +345,7 @@ export default function OrgTree({
     } as OrgTreeNodeType;
 
     return [hqRoot];
-  }, [roots, hideHqRoot]);
+  }, [roots]);
 
   function handleSelect(id: string) {
     setSelectedId((prev) => (prev === id ? null : id));
@@ -443,7 +439,9 @@ export default function OrgTree({
     const children = node.children ?? [];
     const hasChildren = children.length > 0;
     const isHqRoot = node.id === '__hq_root__';
-    const hideCard = isHiddenLeafSalesMemberByContracts({
+    const hideCard =
+      (hideHqRoot && isHqRoot) ||
+      isHiddenLeafSalesMemberByContracts({
       node: node as any,
       contractsByMember: contractsByMember as any,
     });
