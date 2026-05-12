@@ -47,6 +47,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .limit(1);
 
     if (existing && existing.length > 0) {
+      // eslint-disable-next-line no-console
+      console.warn('[api/settlement/calculate] skipped: finalized (no recalculation)', {
+        year_month,
+        hint: 'Request with force=true to recalculate, or unset finalized in DB.',
+      });
       return NextResponse.json(
         { error: `${year_month} 정산이 이미 확정되었습니다. force=true로 재계산하세요.` },
         { status: 409 },
@@ -56,6 +61,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   try {
     const result = await calculateMonthlySettlement({ yearMonth: year_month, db });
+    // eslint-disable-next-line no-console
+    console.log('[api/settlement/calculate] finished', { year_month, updated_count: result.updated_count });
     return NextResponse.json({ success: true, result });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

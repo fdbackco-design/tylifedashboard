@@ -13,11 +13,17 @@ import {
 import type { Contract, OrganizationMember, SettlementRule } from '@/lib/types';
 import type { RankType } from '@/lib/types/organization';
 
+function isSettlementDebugEnabled(): boolean {
+  const v = process.env.SETTLEMENT_DEBUG;
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
 export async function calculateMonthlySettlement(params: {
   yearMonth: string;
   db: any;
 }): Promise<{ updated_count: number }> {
   const { yearMonth, db } = params;
+  const debug = isSettlementDebugEnabled();
   const { end_date } = getSettlementWindowForYearMonth(yearMonth);
 
   const { data: contracts, error: cErr } = await db
@@ -25,6 +31,15 @@ export async function calculateMonthlySettlement(params: {
     .select('*')
     .eq('year_month', yearMonth);
   if (cErr) throw new Error(`계약 조회 실패: ${cErr.message}`);
+
+  if (debug) {
+    // eslint-disable-next-line no-console
+    console.log('[settlement-debug] monthly-calculate start', {
+      yearMonth,
+      settlementWindowEnd: end_date,
+      contractsInMonth: (contracts ?? []).length,
+    });
+  }
 
   const normalizedContractsBase = ((contracts ?? []) as any[]).map((r) => ({
     id: String(r.contract_id ?? ''),
@@ -73,6 +88,16 @@ export async function calculateMonthlySettlement(params: {
   const membersRaw = ((membersRes.data ?? []) as unknown as OrganizationMember[]).map((m) =>
     m.name === '안성준' ? { ...m, rank: '본사' as const } : m,
   );
+
+  if (debug) {
+    const leaderIds = (membersRaw as OrganizationMember[]).filter((m) => m.rank === '리더').map((m) => m.id);
+    // eslint-disable-next-line no-console
+    console.log('[settlement-debug] members loaded', {
+      yearMonth,
+      activeMembers: membersRaw.length,
+      dbRankLeaderCount: leaderIds.length,
+    });
+  }
   const edgesRaw = (edgesRes.data ?? []) as Array<{ parent_id: string | null; child_id: string }>;
 
   const memberIdByCustomerId = new Map<string, string>();
@@ -218,24 +243,26 @@ export async function calculateMonthlySettlement(params: {
     );
 
     // 디버그(원인 파악용): 리더 기본수당이 30만원으로 떨어지는 케이스를 추적하기 위한 로그.
-    // - 환경변수 SETTLEMENT_DEBUG=1일 때만 출력한다.
-    // - direct_unit_count가 0이면 의미가 없어 스킵.
-    if (process.env.SETTLEMENT_DEBUG === '1' && member.rank === '리더' && (settlement.direct_unit_count ?? 0) > 0) {
+    // - SETTLEMENT_DEBUG=1|true|yes 일 때 출력.
+    // - DB rank가 리더인 모든 멤버에 대해 1줄(직접 실적 0 포함): Vercel에서 "invoked만 보인다" 혼동 방지.
+    if (debug && member.rank === '리더') {
+      const du = settlement.direct_unit_count ?? 0;
+      const perUnitApprox = du > 0 ? Math.round(settlement.base_commission / du) : null;
       // eslint-disable-next-line no-console
-      console.log('[settlement-debug] leader base', {
+      console.log('[settlement-debug] leader line', {
         yearMonth,
         memberId: member.id,
         memberName: (member.name ?? '').replace(/^\[고객\]\s*/, ''),
         dbRank: member.rank,
-        directUnitCount: settlement.direct_unit_count,
+        directUnitCount: du,
         baseCommission: settlement.base_commission,
-        perUnitApprox: settlement.direct_unit_count ? Math.round(settlement.base_commission / settlement.direct_unit_count) : null,
+        perUnitApprox,
       });
     }
 
     // 추가 디버그: "리더인데 1구좌당 40만원 미만"으로 떨어지는 경우를 별도로 경고 로그로 남긴다.
     if (
-      process.env.SETTLEMENT_DEBUG === '1' &&
+      debug &&
       member.rank === '리더' &&
       (settlement.direct_unit_count ?? 0) > 0
     ) {
@@ -258,6 +285,11 @@ export async function calculateMonthlySettlement(params: {
 
     const { error: uErr } = await db.from('monthly_settlements').upsert(settlement, { onConflict: 'year_month,member_id' });
     if (!uErr) updatedCount++;
+  }
+
+  if (debug) {
+    // eslint-disable-next-line no-console
+    console.log('[settlement-debug] monthly-calculate done', { yearMonth, updated_count: updatedCount });
   }
 
   return { updated_count: updatedCount };
