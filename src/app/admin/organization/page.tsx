@@ -423,12 +423,6 @@ export default async function OrganizationPage({
       const th = promotionThresholdByMemberId.get(r.id) ?? null;
       if (!th || !hqIdForTree) return r;
 
-      // 추가 규칙(UI 반영): 현재 parent가 리더이면, 정책 승격 시 본사 직속으로 보이게 한다.
-      const curParent = r.parent_id ?? null;
-      const curParentRank = curParent ? (rankByIdRaw.get(curParent) ?? null) : null;
-      if (curParent && curParentRank === '리더') {
-        return { ...r, parent_id: hqIdForTree, rank: '리더' as any };
-      }
       // 승격자는 조직도 배지/정렬에서도 리더로 보이게(요구: 원본 rank가 아니라 effective rank 반영)
       return { ...r, rank: '리더' as any };
     });
@@ -636,7 +630,17 @@ export default async function OrganizationPage({
 
   const orgMetricsById = calculateOrgNodeMetrics({
     roots: tree,
-    members,
+    // 정책 승격으로 treeRows에서 rank를 오버라이드한 경우,
+    // KPI/롤업 계산도 동일한 effective rank를 보도록 members의 rank도 함께 보정한다.
+    // (요구: 리더 산하에 리더가 있으면 하위로 보이고, 롤업은 직속 리더만 갖도록)
+    members: (() => {
+      const effectiveRankById = new Map<string, any>();
+      for (const r of treeRows) effectiveRankById.set(r.id, r.rank);
+      return (members as any[]).map((m) => ({
+        id: (m as any).id,
+        rank: (effectiveRankById.get((m as any).id) ?? (m as any).rank) as any,
+      }));
+    })(),
     edges: dedupedEdges as { parent_id: string | null; child_id: string }[],
     treeRows,
     previousLeaderByPromotedMemberId: prevLeaderByPromotedMemberId,
