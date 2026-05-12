@@ -259,6 +259,14 @@ export default async function ContractsPage({ searchParams }: PageProps) {
             총 {(count ?? 0).toLocaleString()}건 · 현재 페이지 표시 {aggregated.length.toLocaleString()}건
           </p>
         </div>
+        <div className="shrink-0">
+          <a
+            href="/api/admin/contracts/export"
+            className="inline-flex items-center px-3 py-2 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+          >
+            엑셀 다운로드
+          </a>
+        </div>
       </div>
 
       {/* 검색 */}
