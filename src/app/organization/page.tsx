@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import { unstable_cache } from 'next/cache';
 import OrgTree from '@/components/org-tree/OrgTree';
+import YearMonthSelector from '@/components/YearMonthSelector';
 import { createAdminSupabaseClient, createServerSupabaseClient } from '@/lib/supabase/server';
 import { buildOrgTree } from '@/lib/settlement/calculator';
 import { collectSubtreeMemberIdsDownstream } from '@/lib/settlement/settlement-org-tree';
@@ -108,23 +109,13 @@ export default async function OrganizationMyTreePage({
     );
   }
 
-  const months: string[] = [];
-  {
-    const [ys, ms] = label_year_month.split('-');
-    const baseY = parseInt(ys, 10);
-    const baseM = parseInt(ms, 10);
-    for (let i = 0; i < 12; i++) {
-      const d = new Date(baseY, baseM - 1 - i, 1);
-      months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-    }
-  }
-
-  const monthHref = (m: string): string => {
-    const qs = new URLSearchParams();
-    qs.set('year_month', m);
-    if (debugEnabled) qs.set('debug', '1');
-    return `/organization?${qs.toString()}`;
-  };
+  const yearsForPicker = (() => {
+    const base = parseInt(label_year_month.slice(0, 4), 10);
+    // UX: 최근 5년 정도면 충분 (필요 시 늘리기)
+    const out: number[] = [];
+    for (let y = base; y >= base - 4; y--) out.push(y);
+    return out;
+  })();
 
   // 공통: 조직 구성(월 무관)은 캐시된 스냅샷 사용 → 월 변경 시 지연 감소
   const snapshot = await getCachedOrgSnapshot();
@@ -377,28 +368,12 @@ export default async function OrganizationMyTreePage({
         </div>
       </div>
 
-      {/* 월 선택 */}
-      <div className="flex gap-1 mb-4 sm:mb-5 items-center overflow-x-auto whitespace-nowrap -mx-3 px-3 sm:mx-0 sm:px-0">
-        <Link
-          href={monthHref(defaultYearMonth)}
-          className={`px-2.5 py-1 rounded text-xs border ${
-            defaultYearMonth === yearMonth ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
-          }`}
-        >
-          오늘(기준월)
-        </Link>
-        {months.map((m) => (
-          <Link
-            key={m}
-            href={monthHref(m)}
-            className={`px-2.5 py-1 rounded text-xs border ${
-              m === yearMonth ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
-            }`}
-          >
-            {m.slice(5)}월
-          </Link>
-        ))}
-      </div>
+      <YearMonthSelector
+        value={yearMonth}
+        todayValue={defaultYearMonth}
+        years={yearsForPicker}
+        keepQuery={debugEnabled ? { debug: '1' } : { debug: null }}
+      />
 
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
         <OrgTree

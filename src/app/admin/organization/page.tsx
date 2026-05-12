@@ -8,6 +8,7 @@ import { calculateOrgNodeMetrics } from '@/lib/settlement/org-node-metrics';
 import { isSettlementEligibleContract } from '@/lib/settlement/settlement-eligibility';
 import { isContractJoinCompleted } from '@/lib/utils/contract-display-status';
 import OrgTree from '@/components/org-tree/OrgTree';
+import YearMonthSelector from '@/components/YearMonthSelector';
 import {
   flattenOrgTreeNodes,
   stripOrgTreeNodesForDisplay,
@@ -59,24 +60,12 @@ export default async function OrganizationPage({
   const yearMonth = /^\d{4}-\d{2}$/.test(requestedYearMonth) ? requestedYearMonth : defaultYearMonth;
   const { start_date, end_date, label_year_month } = getSettlementWindowForYearMonth(yearMonth);
 
-  // 월 목록: "기준 월(label_year_month)"을 맨 앞에 두고 -1개월씩 나열
-  // (오늘 날짜가 26일 이후면 기준월이 다음달로 넘어가므로, Date(now) 기반이면 UX가 어긋날 수 있음)
-  const months: string[] = [];
-  {
-    const [ys, ms] = label_year_month.split('-');
-    const baseY = parseInt(ys, 10);
-    const baseM = parseInt(ms, 10); // 1-12
-    for (let i = 0; i < 12; i++) {
-      const d = new Date(baseY, baseM - 1 - i, 1);
-      months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-    }
-  }
-  const monthHref = (m: string): string => {
-    const qs = new URLSearchParams();
-    qs.set('year_month', m);
-    if (debugEnabled) qs.set('debug', '1');
-    return `/admin/organization?${qs.toString()}`;
-  };
+  const yearsForPicker = (() => {
+    const base = parseInt(label_year_month.slice(0, 4), 10);
+    const out: number[] = [];
+    for (let y = base; y >= base - 4; y--) out.push(y);
+    return out;
+  })();
 
   const [membersRes, edgesRes, contractCountRes, lastSyncRes, contractsRes, kpiRes, rulesRes, promoEventsRes] =
     await Promise.all([
@@ -733,32 +722,12 @@ export default async function OrganizationPage({
         </div>
       </div>
 
-      {/* 월 선택 (조직도 계산 기준) */}
-      <div className="flex gap-1 mb-5 flex-wrap items-center">
-        <Link
-          href={monthHref(defaultYearMonth)}
-          className={`px-2.5 py-1 rounded text-xs border ${
-            label_year_month === defaultYearMonth
-              ? 'bg-slate-800 text-white border-slate-800'
-              : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
-          }`}
-        >
-          오늘(기준월)
-        </Link>
-        {months.map((m) => (
-          <Link
-            key={m}
-            href={monthHref(m)}
-            className={`px-2.5 py-1 rounded text-xs border ${
-              m === label_year_month
-                ? 'bg-slate-800 text-white border-slate-800'
-                : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
-            }`}
-          >
-            {m.slice(5)}월
-          </Link>
-        ))}
-      </div>
+      <YearMonthSelector
+        value={label_year_month}
+        todayValue={defaultYearMonth}
+        years={yearsForPicker}
+        keepQuery={debugEnabled ? { debug: '1' } : { debug: null }}
+      />
 
       {/* 마지막 동기화 상태 */}
       {lastSync ? (
