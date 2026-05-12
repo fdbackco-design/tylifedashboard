@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useTransition } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 function pad2(n: number): string {
@@ -37,13 +37,14 @@ export default function YearMonthSelector(props: {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const [, startTransition] = useTransition();
 
   const current = parseYearMonth(value) ?? parseYearMonth(todayValue) ?? { year: new Date().getFullYear(), month: 1 };
   const today = parseYearMonth(todayValue) ?? current;
 
   const monthOptions = useMemo(() => Array.from({ length: 12 }, (_, i) => i + 1), []);
 
-  const push = (nextYearMonth: string) => {
+  const buildUrl = (nextYearMonth: string) => {
     const qs = new URLSearchParams(searchParams?.toString() ?? '');
     qs.set('year_month', nextYearMonth);
     if (keepQuery) {
@@ -52,8 +53,27 @@ export default function YearMonthSelector(props: {
         else qs.set(k, v);
       }
     }
-    router.push(`${pathname}?${qs.toString()}`);
+    return `${pathname}?${qs.toString()}`;
   };
+
+  const push = (nextYearMonth: string) => {
+    const url = buildUrl(nextYearMonth);
+    // transition으로 UI 응답성은 유지하고, 실제 로딩 시간은 prefetch로 줄인다.
+    startTransition(() => {
+      router.push(url);
+    });
+  };
+
+  // 클릭 전 미리 로딩: "오늘(기준월)"은 가장 많이 누르는 동작이라 mount 시 prefetch.
+  // (Next.js가 내부적으로 캐시/프리패치 전략을 갖고 있어 과도한 네트워크는 제한된다.)
+  useEffect(() => {
+    try {
+      router.prefetch(buildUrl(todayValue));
+    } catch {
+      // ignore (prefetch 미지원 환경 방어)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [todayValue, pathname]);
 
   const onChangeYear = (yearStr: string) => {
     const y = Number(yearStr);
@@ -74,6 +94,8 @@ export default function YearMonthSelector(props: {
         <button
           type="button"
           onClick={() => push(todayValue)}
+          onMouseEnter={() => router.prefetch(buildUrl(todayValue))}
+          onFocus={() => router.prefetch(buildUrl(todayValue))}
           className={`w-full sm:w-auto px-2.5 py-1.5 rounded text-xs border ${
             value === todayValue
               ? 'bg-slate-800 text-white border-slate-800'
