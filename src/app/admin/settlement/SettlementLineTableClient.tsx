@@ -581,9 +581,6 @@ export default function SettlementLineTableClient(props: {
                 {[
                   '담당자',
                   '직급',
-                  '리더(정책)',
-                  '적용 단가',
-                  '직접계약',
                   '직접구좌',
                   '산하구좌',
                   '기본수당',
@@ -591,7 +588,6 @@ export default function SettlementLineTableClient(props: {
                   '유지장려(리더)',
                   '본인계약 인정',
                   '합계',
-                  '확정',
                 ].map((h) => (
                   <th
                     key={h}
@@ -678,9 +674,6 @@ export default function SettlementLineTableClient(props: {
                     </div>
                   </td>
                   <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{r.topRank}</td>
-                  <td className="px-4 py-3 text-xs text-gray-700">-</td>
-                  <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">라인 합계</td>
-                  <td className="px-4 py-3 tabular-nums text-right">{r.directContractCount.toLocaleString()}건</td>
                   <td className="px-4 py-3 tabular-nums text-right">{r.directUnitSum.toLocaleString()}</td>
                   <td className="px-4 py-3 tabular-nums text-right">-</td>
                   <td className="px-4 py-3 tabular-nums text-right text-gray-700">{formatKRW(r.base)}</td>
@@ -737,14 +730,13 @@ export default function SettlementLineTableClient(props: {
                   <td className="px-4 py-3 tabular-nums text-right font-bold text-gray-900">
                     {formatKRW(r.adjustedTotal)}
                   </td>
-                  <td className="px-4 py-3 text-center">-</td>
                 </tr>
               ))}
             </tbody>
 
             <tfoot className="border-t-2 border-gray-200 bg-gray-50">
               <tr>
-                <td colSpan={8} className="px-4 py-3 font-semibold text-gray-700">
+                <td colSpan={4} className="px-4 py-3 font-semibold text-gray-700">
                   합계
                 </td>
                 <td className="px-4 py-3 tabular-nums text-right font-semibold">
@@ -756,10 +748,10 @@ export default function SettlementLineTableClient(props: {
                 <td className="px-4 py-3 tabular-nums text-right font-semibold text-violet-700">
                   {formatKRW(leaderMaintSum)}
                 </td>
+                <td />
                 <td className="px-4 py-3 tabular-nums text-right font-bold text-gray-900">
                   {formatKRW(adjustedTotalAmount)}
                 </td>
-                <td />
               </tr>
             </tfoot>
           </table>
