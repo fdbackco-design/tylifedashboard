@@ -18,7 +18,7 @@
 
 import { createAdminSupabaseClient } from '../supabase/server';
 import { fetchContractList, fetchContractDetailHtml } from './client';
-import { parseContractListHtml, parseContractDetailHtml } from './html-parser';
+import { normalizeDate, parseContractListHtml, parseContractDetailHtml } from './html-parser';
 import {
   DEFAULT_ITEM_NAME_PLACEHOLDER,
   normalizeCustomerFromList,
@@ -73,6 +73,35 @@ function shouldExcludeRecruitmentName(name: string, relationship: string): boole
 
 /** 병렬 처리 최대 동시 요청 수 (환경변수로 조정 가능) */
 const CONCURRENCY = parseInt(process.env.TYLIFE_CONCURRENCY ?? '5', 10);
+
+function getSeoulTodayYmd(): string {
+  // 날짜 기준은 Asia/Seoul 고정 (정산/조직도 기준과 일관)
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const y = parseInt(parts.find((p) => p.type === 'year')?.value ?? '0', 10);
+  const m = parseInt(parts.find((p) => p.type === 'month')?.value ?? '0', 10);
+  const d = parseInt(parts.find((p) => p.type === 'day')?.value ?? '0', 10);
+  if (!y || !m || !d) return '';
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+function minusOneMonthYmd(ymd: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!m) return '';
+  const y = parseInt(m[1], 10);
+  const mo = parseInt(m[2], 10);
+  const d = parseInt(m[3], 10);
+  const dt = new Date(y, mo - 1, d);
+  dt.setMonth(dt.getMonth() - 1);
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
 
 function isTerminalContractStatus(status: string | null | undefined): boolean {
   return status === '가입' || status === '해약';
@@ -929,7 +958,32 @@ export async function syncContractPage(
 
   const apiRes = await fetchContractList(page, rowPerPage);
   const listHtml = apiRes.data?.listHtml ?? '';
-  const items = parseContractListHtml(listHtml);
+  const itemsAll = parseContractListHtml(listHtml);
+
+  // 성능 최적화(요구): 오늘(Seoul) 기준 최근 1개월보다 오래된 가입일(join_date)의 계약은 더 이상 수집하지 않는다.
+  // - 페이지 탐색 자체를 조기 종료해, UI 동기화 시간이 과도하게 늘어나는 것을 방지한다.
+  const todayYmd = getSeoulTodayYmd();
+  const cutoffYmd = todayYmd ? minusOneMonthYmd(todayYmd) : '';
+  const items =
+    cutoffYmd === ''
+      ? itemsAll
+      : itemsAll.filter((it) => {
+          const joined = normalizeDate(it.joined_at_raw ?? '');
+          // joined_at_raw가 비어있으면 안전상 수집(중단 판정도 하지 않음)
+          if (!joined) return true;
+          return joined >= cutoffYmd;
+        });
+
+  // 다음 페이지 탐색 조기 종료 판정:
+  // list가 가입일 내림차순이라고 가정할 때, 마지막(=가장 오래된) 가입일이 cutoff보다 작으면 이후 페이지는 전부 스킵 가능.
+  let reachedCutoff = false;
+  if (cutoffYmd) {
+    const lastWithDate = [...itemsAll]
+      .reverse()
+      .map((it) => normalizeDate(it.joined_at_raw ?? ''))
+      .find((v) => !!v);
+    if (lastWithDate && lastWithDate < cutoffYmd) reachedCutoff = true;
+  }
 
   let created = 0;
   let updated = 0;
@@ -966,7 +1020,7 @@ export async function syncContractPage(
     created,
     updated,
     errors,
-    hasMore: items.length >= rowPerPage,
+    hasMore: !reachedCutoff && itemsAll.length >= rowPerPage,
   };
 }
 
