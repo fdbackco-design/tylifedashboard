@@ -386,6 +386,7 @@ export default async function OrganizationMyTreePage({
           editable={false}
           showMetrics={false}
           showForecast={true}
+          hideHqRoot={true}
           debug={
             debugEnabled
               ? ({ enabled: true } as any)

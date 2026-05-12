@@ -225,6 +225,8 @@ interface Props {
   showMetrics?: boolean;
   /** /organization 전용: 예상수당+목표 게이지 표시 */
   showForecast?: boolean;
+  /** 최상단 가상 '본사(__hq_root__)' 루트를 숨김. 기본 false */
+  hideHqRoot?: boolean;
   debug?: {
     enabled: boolean;
     hqId: string | null;
@@ -271,6 +273,7 @@ export default function OrgTree({
   editable = true,
   showMetrics = true,
   showForecast = false,
+  hideHqRoot = false,
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
@@ -333,6 +336,10 @@ export default function OrgTree({
     // UI에서는 본사(person) 노드를 모두 제거하고 자식만 승격한다. (서버 직급 배지와 동일 로직)
     const cleanedRoots = stripOrgTreeNodesForDisplay(roots as OrgTreeNodeType[]);
 
+    if (hideHqRoot) {
+      return cleanedRoots;
+    }
+
     const hqRoot: OrgTreeNodeType = {
       id: '__hq_root__',
       name: '본사',
@@ -342,7 +349,7 @@ export default function OrgTree({
     } as OrgTreeNodeType;
 
     return [hqRoot];
-  }, [roots]);
+  }, [roots, hideHqRoot]);
 
   function handleSelect(id: string) {
     setSelectedId((prev) => (prev === id ? null : id));
