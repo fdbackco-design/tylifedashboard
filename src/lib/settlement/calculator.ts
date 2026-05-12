@@ -61,7 +61,15 @@ function getActiveRuleOrFallback(
   date: string, // 'YYYY-MM-DD'
 ): SettlementRule {
   const active = findActiveRule(rules, rank, date);
-  if (active) return active;
+  if (active) {
+    // 요구: /admin/settlement에서 "리더" 기본 수당은 구좌당 40만원을 보장한다.
+    // DB(settlement_rules)에 더 낮은 값이 들어있어도, 화면/계산이 40만원 아래로 내려가지 않도록 방어한다.
+    if (rank === '리더') {
+      const min = DEFAULT_COMMISSION_BY_RANK['리더'] ?? 0;
+      return { ...active, commission_per_unit: Math.max(active.commission_per_unit ?? 0, min) };
+    }
+    return active;
+  }
 
   const commission =
     (rank === '사업본부장' ? 600_000 : (DEFAULT_COMMISSION_BY_RANK[rank] ?? 0));
