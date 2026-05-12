@@ -32,3 +32,19 @@ Thumbs.db
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# TWA / Bubblewrap 서명 키 (절대 커밋하지 마세요)
+twa-android/android.keystore
+.claude/worktrees/
+
+# Claude local worktrees
+.claude/worktrees/
+
+# Android / Gradle generated files
+twa-android/.gradle/
+twa-android/build/
+twa-android/app/build/
+twa-android/app-release-*.apk
+twa-android/app-release-*.aab
+twa-android/*.idsig
+twa-android/android.keystore

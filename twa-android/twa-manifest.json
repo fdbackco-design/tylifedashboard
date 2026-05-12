@@ -1,0 +1,51 @@
+{
+  "packageId": "com.tylife.dashboard",
+  "host": "tylifedashboard.vercel.app",
+  "name": "TY Life Dashboard",
+  "launcherName": "TY Life",
+  "display": "standalone",
+  "themeColor": "#1E293B",
+  "themeColorDark": "#000000",
+  "navigationColor": "#000000",
+  "navigationColorDark": "#000000",
+  "navigationDividerColor": "#000000",
+  "navigationDividerColorDark": "#000000",
+  "backgroundColor": "#1E293B",
+  "enableNotifications": true,
+  "startUrl": "/",
+  "iconUrl": "https://tylifedashboard.vercel.app/icons/icon-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./android.keystore",
+    "alias": "android"
+  },
+  "appVersionName": "1",
+  "appVersionCode": 1,
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://tylifedashboard.vercel.app/manifest.json",
+  "fallbackType": "customtabs",
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "http://127.0.0.1:18765/",
+  "minSdkVersion": 21,
+  "orientation": "default",
+  "fingerprints": [
+    {
+      "name": "android release",
+      "value": "AE:53:70:B7:3C:82:32:20:56:12:2F:CC:CF:F3:0C:1D:F3:AB:82:35:73:67:4F:64:7F:6F:F2:80:82:FE:AD:FF"
+    }
+  ],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "protocolHandlers": [],
+  "fileHandlers": [],
+  "launchHandlerClientMode": "",
+  "displayOverride": [],
+  "appVersion": "1"
+}

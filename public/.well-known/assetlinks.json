@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "com.tylife.dashboard",
+        "sha256_cert_fingerprints": ["AE:53:70:B7:3C:82:32:20:56:12:2F:CC:CF:F3:0C:1D:F3:AB:82:35:73:67:4F:64:7F:6F:F2:80:82:FE:AD:FF"]
+      }
+    }]

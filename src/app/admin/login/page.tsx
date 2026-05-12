@@ -2,8 +2,9 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = { title: 'Admin 로그인' };
 
-export default function AdminLoginPage({ searchParams }: { searchParams?: { error?: string } }) {
-  const error = searchParams?.error;
+export default async function AdminLoginPage({ searchParams }: { searchParams?: Promise<{ error?: string }> }) {
+  const params = await searchParams;
+  const error = params?.error;
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50">
