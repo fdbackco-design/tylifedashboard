@@ -255,7 +255,7 @@ export default async function OrganizationMyTreePage({
 
   // 누적 가입 구좌: 월 제한 없이(서브트리 전체) 가입 완료(표시 상태) 합산
   const cumulativeContractsSelect =
-    'unit_count, status, rental_request_no, invoice_no, memo, is_cancelled, sales_member_id';
+    'join_date, unit_count, status, rental_request_no, invoice_no, memo, is_cancelled, sales_member_id, item_name';
   const cumulativeResList = await Promise.all(
     contractChunks.map((ids) =>
       adminDb
@@ -278,6 +278,23 @@ export default async function OrganizationMyTreePage({
       }) === '가입',
     )
     .reduce((sum: number, c: any) => sum + (c.unit_count ?? 0), 0);
+
+  // 노드별 "누적 구좌"는 선택 달이 아니라 전체 기간(서브트리 전체)의 가입 인정 계약 기준으로 계산해야 한다.
+  const eligibleContractsAllTimeForMetrics = cumulativeContractsRaw
+    .filter((c: any) => {
+      const joinDate = c.join_date ? String(c.join_date).slice(0, 10) : '';
+      if (!joinDate) return false;
+      return true;
+    })
+    .filter(isSettlementEligibleContract)
+    .map((c: any) => ({
+      contract_id: c.id ?? `${c.sales_member_id ?? 'unknown'}:${String(c.join_date ?? '')}`, // 방어: 최소 unique
+      join_date: String(c.join_date ?? '').slice(0, 10),
+      unit_count: c.unit_count ?? 0,
+      status: c.status as string,
+      item_name: c.item_name ?? null,
+      sales_member_id: c.sales_member_id as string,
+    }));
 
   const contractsByMember: Record<string, ContractItem[]> = {};
   for (const c of contractsRaw) {
@@ -320,7 +337,8 @@ export default async function OrganizationMyTreePage({
     edges: subtreeEdges.map((e) => ({ parent_id: e.parent_id, child_id: e.child_id })),
     treeRows: subtreeTreeRows,
     attributeCommissionToTopLineUnderHq: false,
-    contracts: eligibleContractsForMetrics as any[],
+    // 누적 구좌는 전체 기간 기준이어야 하므로 all-time 계약으로 계산한다.
+    contracts: eligibleContractsAllTimeForMetrics as any[],
     rules,
     settlementWindow: { start_date, end_date, label_year_month },
   });
