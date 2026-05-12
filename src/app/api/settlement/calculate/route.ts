@@ -18,6 +18,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const { year_month, force = false } = body;
 
+  // 런타임 로그(원인 파악용): Vercel Functions 로그에서 확인
+  // eslint-disable-next-line no-console
+  console.log('[api/settlement/calculate] invoked', {
+    year_month,
+    force,
+    SETTLEMENT_DEBUG: process.env.SETTLEMENT_DEBUG ?? null,
+    VERCEL_ENV: process.env.VERCEL_ENV ?? null,
+    VERCEL_REGION: process.env.VERCEL_REGION ?? null,
+  });
+
   if (!year_month || !/^\d{4}-\d{2}$/.test(year_month)) {
     return NextResponse.json(
       { error: 'year_month 필드가 필요합니다 (형식: YYYY-MM)' },
