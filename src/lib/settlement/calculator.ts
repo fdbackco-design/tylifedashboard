@@ -262,10 +262,17 @@ function commissionPerUnitForDirectContract(
   if (dbRank === '본사') return 0;
   const th = promotionThresholdByMemberId.get(memberId) ?? null;
 
+  // 요구(/admin/settlement):
+  // "직급이 리더인 담당자"는 계약 단위 승격 분기와 무관하게 항상 리더 단가(40만원/구좌)를 적용한다.
+  // 즉, DB rank가 '리더'인 경우에는 threshold가 있어도 30만으로 내려가지 않는다.
+  if (dbRank === '리더') {
+    return getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
+  }
+
   // 정책 승격(산하 가입 20구좌) 적용 대상:
-  // - DB가 영업사원이든 리더든(threshold로 승격된 경우) 계약 단위로 30만/40만을 나눈다.
+  // - DB가 영업사원인 경우(threshold 기반 승격) 계약 단위로 30만/40만을 나눈다.
   // - threshold가 없으면 DB rank 그대로 단가 적용(기존 리더 등).
-  if (th && (dbRank === '영업사원' || dbRank === '리더')) {
+  if (th && dbRank === '영업사원') {
     if (!isContractStrictlyAfterPromotionThreshold(contract.join_date, contract.id, th)) {
       return getActiveRuleOrFallback(rules, '영업사원', refDate).commission_per_unit;
     }

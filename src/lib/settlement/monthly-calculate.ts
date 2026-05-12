@@ -216,6 +216,23 @@ export async function calculateMonthlySettlement(params: {
       yearMonth,
       leaderOpts,
     );
+
+    // 디버그(원인 파악용): 리더 기본수당이 30만원으로 떨어지는 케이스를 추적하기 위한 로그.
+    // - 환경변수 SETTLEMENT_DEBUG=1일 때만 출력한다.
+    // - direct_unit_count가 0이면 의미가 없어 스킵.
+    if (process.env.SETTLEMENT_DEBUG === '1' && member.rank === '리더' && (settlement.direct_unit_count ?? 0) > 0) {
+      // eslint-disable-next-line no-console
+      console.log('[settlement-debug] leader base', {
+        yearMonth,
+        memberId: member.id,
+        memberName: (member.name ?? '').replace(/^\[고객\]\s*/, ''),
+        dbRank: member.rank,
+        directUnitCount: settlement.direct_unit_count,
+        baseCommission: settlement.base_commission,
+        perUnitApprox: settlement.direct_unit_count ? Math.round(settlement.base_commission / settlement.direct_unit_count) : null,
+      });
+    }
+
     const { error: uErr } = await db.from('monthly_settlements').upsert(settlement, { onConflict: 'year_month,member_id' });
     if (!uErr) updatedCount++;
   }
