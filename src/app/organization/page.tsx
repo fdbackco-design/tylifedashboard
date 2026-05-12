@@ -16,6 +16,7 @@ import type { SettlementRule } from '@/lib/types/settlement';
 import type { ContractItem } from '@/components/org-tree/OrgTreeNode';
 import { buildChildrenByParentFromRows } from '@/lib/settlement/settlement-org-tree';
 import AccountActionsClient from './AccountActionsClient';
+import { stripOrgTreeNodesForDisplay } from '@/lib/organization/org-tree-display';
 
 export const metadata: Metadata = { title: '내 조직도' };
 export const dynamic = 'force-dynamic';
@@ -198,6 +199,8 @@ export default async function OrganizationMyTreePage({
   debugStats.subtree_tree_rows_count = subtreeTreeRows.length;
 
   const tree = buildOrgTree(subtreeTreeRows);
+  // /organization에서는 최상단 본사(person) 노드는 숨기고, 자식들을 루트로 승격해서 보여준다.
+  const treeForDisplay = stripOrgTreeNodesForDisplay(tree as any);
   debugStats.tree_roots_count = tree.length;
   debugStats.tree_root_ids = tree.map((r: any) => r.id);
 
@@ -312,7 +315,7 @@ export default async function OrganizationMyTreePage({
   // edges/subtree는 calculateOrgNodeMetrics에 넣을 때도 서브트리만 유지
   const subtreeEdges = edgesRaw.filter((e) => e.child_id && subtreeIdSet.has(e.child_id) && e.parent_id && subtreeIdSet.has(e.parent_id));
   const orgMetricsById = calculateOrgNodeMetrics({
-    roots: tree as any[],
+    roots: treeForDisplay as any[],
     members: subtreeMembers.map((m) => ({ id: m.id, rank: m.rank })),
     edges: subtreeEdges.map((e) => ({ parent_id: e.parent_id, child_id: e.child_id })),
     treeRows: subtreeTreeRows,
@@ -377,7 +380,7 @@ export default async function OrganizationMyTreePage({
 
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
         <OrgTree
-          roots={tree as any}
+          roots={treeForDisplay as any}
           contractsByMember={contractsByMember}
           metricsById={orgMetricsById as any}
           editable={false}
