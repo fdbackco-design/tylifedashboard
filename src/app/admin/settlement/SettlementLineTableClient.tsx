@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { formatKRW } from '@/lib/settlement/calculator';
 
 const SELF_CONTRACT_COMMISSION_PER_UNIT_WON = 300_000;
+const LEADER_SELF_CONTRACT_COMMISSION_PER_UNIT_WON = 400_000;
 
 export type SettlementLineRow = {
   topLineId: string;
@@ -485,11 +486,14 @@ export default function SettlementLineTableClient(props: {
       const base = baseByRowIdx.get(idx) ?? 0;
       const totalBeforeSelfToggle = base + (r.rollup ?? 0) + (r.leaderMaint ?? 0);
       const included = selfIncludedByTopId[r.topLineId] ?? true;
-      const adjustWon = included ? 0 : (r.ownDirectUnitSum ?? 0) * SELF_CONTRACT_COMMISSION_PER_UNIT_WON;
+      const rank = props.rankByMemberId[r.topLineId] ?? r.topRank ?? '';
+      const perUnit = rank === '리더' ? LEADER_SELF_CONTRACT_COMMISSION_PER_UNIT_WON : SELF_CONTRACT_COMMISSION_PER_UNIT_WON;
+      const adjustWon = included ? 0 : (r.ownDirectUnitSum ?? 0) * perUnit;
       if (!included) excludedUnits += r.ownDirectUnitSum;
       return {
         ...r,
         base,
+        __selfContractPerUnitWon: perUnit,
         selfContractIncluded: included,
         selfContractAdjustWon: adjustWon,
         adjustedTotal: totalBeforeSelfToggle - adjustWon,
@@ -529,7 +533,7 @@ export default function SettlementLineTableClient(props: {
           <span className="ml-2 text-[11px] sm:text-xs text-amber-700">
             (본인계약 미인정{' '}
             <span className="whitespace-nowrap">{excludedUnitsTotal.toLocaleString('ko-KR')}구좌</span> ·{' '}
-            <span className="whitespace-nowrap">-{formatKRW(excludedUnitsTotal * SELF_CONTRACT_COMMISSION_PER_UNIT_WON)}</span>)
+            <span className="whitespace-nowrap">-(구좌당 차감 단가는 행별 직급 기준)</span>)
           </span>
         )}
         {saveError && (
