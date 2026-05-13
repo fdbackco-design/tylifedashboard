@@ -262,17 +262,10 @@ function commissionPerUnitForDirectContract(
   if (dbRank === '본사') return 0;
   const th = promotionThresholdByMemberId.get(memberId) ?? null;
 
-  // 요구(/admin/settlement):
-  // "직급이 리더인 담당자"는 계약 단위 승격 분기와 무관하게 항상 리더 단가(40만원/구좌)를 적용한다.
-  // 즉, DB rank가 '리더'인 경우에는 threshold가 있어도 30만으로 내려가지 않는다.
-  if (dbRank === '리더') {
-    return getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
-  }
-
-  // 정책 승격(산하 가입 20구좌) 적용 대상:
-  // - DB가 영업사원인 경우(threshold 기반 승격) 계약 단위로 30만/40만을 나눈다.
-  // - threshold가 없으면 DB rank 그대로 단가 적용(기존 리더 등).
-  if (th && dbRank === '영업사원') {
+  // 산하 가입 20구좌 기준 승격 계약(threshold)이 있으면, DB가 리더여도
+  // "승격 계약 이전" 직접 계약은 영업사원 단가, 이후는 리더 단가(롤업 차액 10만/구좌 등).
+  // threshold가 없으면 DB 직급 단가 그대로(기존 리더·미달성 등).
+  if (th && (dbRank === '영업사원' || dbRank === '리더')) {
     if (!isContractStrictlyAfterPromotionThreshold(contract.join_date, contract.id, th, contract.created_at)) {
       return getActiveRuleOrFallback(rules, '영업사원', refDate).commission_per_unit;
     }
@@ -292,21 +285,14 @@ function calcDirectContractsWithLeaderPromotion(
   const items: ContractSettlementItem[] = eligible.map((c) => {
     const originMemberId = (c as any).__attributed_origin_member_id as string | undefined;
     const originRank = (c as any).__attributed_origin_rank as RankType | undefined;
-    // 요구(/admin/settlement):
-    // "직급이 리더인 담당자"의 기본수당은 항상 40만원/구좌.
-    // 정책 귀속 계약은 내부적으로 originRank='영업사원'로 표시될 수 있는데,
-    // 이 경우에도 실제 지급 주체(=member)가 리더이면 리더 단가를 적용해야 한다.
-    const rate =
-      member.rank === '리더'
-        ? getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit
-        : commissionPerUnitForDirectContract(
-            originMemberId ?? member.id,
-            originRank ?? member.rank,
-            { id: c.id, join_date: c.join_date, created_at: (c as { created_at?: string | null }).created_at },
-            rules,
-            refDate,
-            promotionThresholdByMemberId,
-          );
+    const rate = commissionPerUnitForDirectContract(
+      originMemberId ?? member.id,
+      originRank ?? member.rank,
+      { id: c.id, join_date: c.join_date, created_at: (c as { created_at?: string | null }).created_at },
+      rules,
+      refDate,
+      promotionThresholdByMemberId,
+    );
     const base = c.unit_count * rate;
     const penalty = commissionPenaltyWonForItemName((c as { item_name?: string }).item_name, c.unit_count);
     return {
@@ -511,7 +497,8 @@ export function calculateMemberSettlement(
     !!leaderOpts &&
     (hasAttributedOrigin ||
       member.rank === '영업사원' ||
-      (member.rank === '리더' && thForMember !== null));
+      member.rank === '리더' ||
+      thForMember !== null);
 
   if (useLeaderRates) {
     ({ items: directItems, total: baseCommission } = calcDirectContractsWithLeaderPromotion(
@@ -591,14 +578,15 @@ export function calculateMemberSettlement(
     const ruLeader = getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
     let label = `${member.rank} 기준`;
     let applied: number | null = getActiveRuleOrFallback(rules, member.rank, refDate).commission_per_unit;
-    if (member.rank === '리더') {
-      // DB 리더: 직접 기본수당은 항상 리더 단가(40만/구좌). 승격 threshold 유무와 무관하게 메타도 동일하게 둔다.
-      label = `${(ruLeader / 10_000).toFixed(0)}만원/구좌(리더)`;
-      applied = ruLeader;
-    } else if (member.rank === '영업사원') {
+    if (member.rank === '영업사원' || member.rank === '리더') {
       if (!th) {
-        label = `${(ruSales / 10_000).toFixed(0)}만원/구좌(영업사원)`;
-        applied = ruSales;
+        if (member.rank === '리더') {
+          label = `${(ruLeader / 10_000).toFixed(0)}만원/구좌(리더)`;
+          applied = ruLeader;
+        } else {
+          label = `${(ruSales / 10_000).toFixed(0)}만원/구좌(영업사원)`;
+          applied = ruSales;
+        }
       } else {
         const hasBefore = eligible.some(
           (c) =>
@@ -631,7 +619,8 @@ export function calculateMemberSettlement(
     }
     leaderPromotion = {
       db_rank: member.rank,
-      effective_is_leader: member.rank === '리더' || (member.rank === '영업사원' && th !== null),
+      effective_is_leader:
+        (member.rank === '영업사원' || member.rank === '리더') && th !== null,
       leader_promotion_first_join_date:
         member.rank === '영업사원' || member.rank === '리더' ? th?.threshold_join_date ?? null : null,
       leader_promotion_threshold_contract_id:

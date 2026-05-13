@@ -148,7 +148,9 @@ export async function calculateMonthlySettlement(params: {
   const rankById = new Map<string, RankType>();
   for (const m of membersRaw) {
     const r = m.rank as RankType;
-    if (r === '리더' && policyPromotedLeaderIds.has(m.id as string)) rankById.set(m.id as string, '영업사원');
+    // 산하 20구좌 승격 계약(threshold) 계산: DB가 이미 '리더'여도 동일 기준으로 누적을 잡는다.
+    // (leader_promotion_events 없이도 리더 직전 계약=30만·롤업 차액 반영 가능)
+    if (r === '리더') rankById.set(m.id as string, '영업사원');
     else rankById.set(m.id as string, r);
   }
 
@@ -185,7 +187,14 @@ export async function calculateMonthlySettlement(params: {
     let assignTo = origin;
     const th = promotionThresholdByMemberId.get(origin) ?? null;
     const cCreated = (c as { created_at?: string | null }).created_at ?? null;
-    if (th && !isContractStrictlyAfterPromotionThreshold(c.join_date, c.id, th, cCreated)) {
+    const dbRankOrigin = rankByIdRaw.get(origin) ?? null;
+    // 승격 전 계약을 '상위 리더 직접'으로 귀속하는 것은 DB 영업사원일 때만(기존 정책).
+    // DB 리더의 승격 전 계약은 본인에게 두고 단가만 30만으로 계산한다.
+    if (
+      dbRankOrigin === '영업사원' &&
+      th &&
+      !isContractStrictlyAfterPromotionThreshold(c.join_date, c.id, th, cCreated)
+    ) {
       const recordedPrev = prevParentByMemberId.get(origin) ?? null;
       const parentId = recordedPrev ?? (parentByChild.get(origin) ?? null);
       const parentRank = parentId ? (rankByIdRaw.get(parentId) ?? null) : null;
