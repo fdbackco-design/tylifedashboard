@@ -430,7 +430,8 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
     bonusById.set(m.id, 0);
   }
 
-  // 1) 구좌(누적/월): 계약 단위로 effective 체인을 따라 상위에도 누적
+  // 1) 구좌(누적/월): 담당(origin) + 조직 트리(parentByChild) 상위(본사 제외)까지 합산.
+  // 수당 귀속용 effectiveParent(승격 후 HQ 직속 점프 등)와 분리한다 — 구좌는 /organization 조직도와 같이 트리를 탄다.
   for (const c of contracts) {
     const origin = c.sales_member_id;
     if (!origin) continue;
@@ -440,24 +441,33 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
     if (!jd || jd > endInclusive) continue;
 
     const inMonth = inWindow(jd, settlementWindow.start_date, settlementWindow.end_date);
-    cumUnits.set(origin, (cumUnits.get(origin) ?? 0) + unit);
-    if (inMonth) monUnits.set(origin, (monUnits.get(origin) ?? 0) + unit);
-
-    const contractKey = {
-      id: c.contract_id,
-      join_date: jd,
-      created_at: c.created_at ?? null,
+    const bumpUnits = (memberId: string) => {
+      cumUnits.set(memberId, (cumUnits.get(memberId) ?? 0) + unit);
+      if (inMonth) monUnits.set(memberId, (monUnits.get(memberId) ?? 0) + unit);
     };
-    const visited = new Set<string>();
-    let cur = origin;
-    while (true) {
-      const p = effectiveParent(cur, contractKey);
-      if (!p) break;
-      if (visited.has(p)) break;
-      visited.add(p);
-      cumUnits.set(p, (cumUnits.get(p) ?? 0) + unit);
-      if (inMonth) monUnits.set(p, (monUnits.get(p) ?? 0) + unit);
-      cur = p;
+
+    bumpUnits(origin);
+    for (const aid of getCommissionAncestorsExcludingHq(origin, parentByChild, rankById)) {
+      bumpUnits(aid);
+    }
+
+    const prev = previousLeaderByPromotedMemberId?.get(origin) ?? null;
+    const th = promotionThresholdByMemberId.get(origin) ?? null;
+    if (
+      prev &&
+      th &&
+      !isContractStrictlyAfterPromotionThreshold(jd, c.contract_id, th, c.created_at ?? null)
+    ) {
+      const originChain = new Set<string>([
+        origin,
+        ...getCommissionAncestorsExcludingHq(origin, parentByChild, rankById),
+      ]);
+      if (!originChain.has(prev)) {
+        bumpUnits(prev);
+        for (const aid of getCommissionAncestorsExcludingHq(prev, parentByChild, rankById)) {
+          bumpUnits(aid);
+        }
+      }
     }
   }
 
