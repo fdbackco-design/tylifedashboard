@@ -1,5 +1,6 @@
 'use client';
 
+import LoadingButton from '@/components/ui/LoadingButton';
 import { useEffect, useMemo, useState } from 'react';
 
 type CustomerRow = {
@@ -61,6 +62,7 @@ export default function AccountIssueClient() {
   const [password, setPassword] = useState('');
   const [isActive, setIsActive] = useState(true);
   const [isIssuing, setIsIssuing] = useState(false);
+  const [isLoadingIssuedList, setIsLoadingIssuedList] = useState(false);
 
   const [issuedAccounts, setIssuedAccounts] = useState<
     Array<{
@@ -222,6 +224,7 @@ export default function AccountIssueClient() {
   }
 
   async function loadIssuedAccounts() {
+    setIsLoadingIssuedList(true);
     try {
       const res = await fetch('/api/admin/account-issue/list', { credentials: 'include' });
       const json = (await res.json()) as ApiResult<
@@ -242,6 +245,8 @@ export default function AccountIssueClient() {
       setIssuedAccounts(json.data);
     } catch {
       // 로딩 실패해도 발급 UI는 유지
+    } finally {
+      setIsLoadingIssuedList(false);
     }
   }
 
@@ -424,13 +429,15 @@ export default function AccountIssueClient() {
             <div className="text-sm font-semibold text-gray-700">생성된 계정</div>
             <div className="text-xs text-gray-500 mt-0.5">최근 순 · 최대 200개</div>
           </div>
-          <button
+          <LoadingButton
             type="button"
-            className="px-3 py-1.5 rounded-md border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
-            onClick={loadIssuedAccounts}
+            className="px-3 py-1.5 rounded-md border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            isLoading={isLoadingIssuedList}
+            loadingText="불러오는 중…"
+            onClick={() => void loadIssuedAccounts()}
           >
             새로고침
-          </button>
+          </LoadingButton>
         </div>
         {issuedAccounts.length === 0 ? (
           <p className="text-sm text-gray-500">생성된 계정이 없습니다.</p>

@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import LoadingButton from '@/components/ui/LoadingButton';
 import Link from 'next/link';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatKRW } from '@/lib/settlement/calculator';
 
 const SELF_CONTRACT_COMMISSION_PER_UNIT_WON = 300_000;
@@ -65,6 +66,10 @@ export default function SettlementLineTableClient(props: {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [splitOpenByTopId, setSplitOpenByTopId] = useState<Record<string, boolean>>({});
   const [splitSaveError, setSplitSaveError] = useState<string | null>(null);
+  const [splitSavePendingByTopId, setSplitSavePendingByTopId] = useState<Record<string, boolean>>({});
+  const [selfPrefSavePendingByTopId, setSelfPrefSavePendingByTopId] = useState<Record<string, boolean>>({});
+  const splitSaveInFlightRef = useRef<Set<string>>(new Set());
+  const selfPrefSaveInFlightRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     // 초기값은 DB에서 내려온 맵을 우선 사용 (행이 분리되어도 child id에 대한 설정이 바로 반영될 수 있게)
@@ -494,48 +499,63 @@ export default function SettlementLineTableClient(props: {
                         // 월정산 결과에 존재하는 노드만(표시 가능한 노드만) 버튼 노출
                         const hasMeta = !!props.memberAggById[r.topLineId];
                         if (!hasMeta) return null;
+                        const topId = r.topLineId;
+                        const splitSaving = Boolean(splitSavePendingByTopId[topId]);
                         return (
-                          <button
+                          <LoadingButton
                             type="button"
                             disabled={!hasChildren}
+                            isLoading={splitSaving}
+                            loadingText="저장 중…"
                             onClick={() => {
                               if (!hasChildren) return;
-                              const nextVal = !((splitOpenByTopId[r.topLineId] ?? false) as boolean);
+                              if (splitSaveInFlightRef.current.has(topId)) return;
+                              splitSaveInFlightRef.current.add(topId);
+                              setSplitSavePendingByTopId((prev) => ({ ...prev, [topId]: true }));
+                              const nextVal = !((splitOpenByTopId[topId] ?? false) as boolean);
                               setSplitSaveError(null);
-                              setSplitOpenByTopId((prev) => ({ ...prev, [r.topLineId]: nextVal }));
+                              setSplitOpenByTopId((prev) => ({ ...prev, [topId]: nextVal }));
 
                               // DB 저장 (월/라인 단위)
-                              fetch('/api/settlement/line-split-preferences', {
+                              void fetch('/api/settlement/line-split-preferences', {
                                 method: 'PUT',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
                                   year_month: props.yearMonth,
-                                  top_line_id: r.topLineId,
+                                  top_line_id: topId,
                                   is_split: nextVal,
                                 }),
                               })
                                 .then(async (res) => {
-                                  const json = (await res.json()) as any;
+                                  const json = (await res.json()) as { success?: boolean; error?: string };
                                   if (!res.ok || !json?.success) {
                                     throw new Error(json?.error ?? `HTTP ${res.status}`);
                                   }
                                 })
                                 .catch((err) => {
                                   // 실패 시 롤백
-                                  setSplitOpenByTopId((prev) => ({ ...prev, [r.topLineId]: !nextVal }));
+                                  setSplitOpenByTopId((prev) => ({ ...prev, [topId]: !nextVal }));
                                   setSplitSaveError(err instanceof Error ? err.message : String(err));
+                                })
+                                .finally(() => {
+                                  splitSaveInFlightRef.current.delete(topId);
+                                  setSplitSavePendingByTopId((prev) => {
+                                    const next = { ...prev };
+                                    delete next[topId];
+                                    return next;
+                                  });
                                 });
                             }}
                             className={`px-2 py-0.5 rounded text-[11px] border ${
-                              !hasChildren
+                              !hasChildren || splitSaving
                                 ? 'bg-gray-50 text-gray-300 border-gray-200 cursor-not-allowed'
-                                : (splitOpenByTopId[r.topLineId] ?? false)
+                                : (splitOpenByTopId[topId] ?? false)
                                   ? 'bg-slate-800 text-white border-slate-800'
                                   : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
                             }`}
                           >
-                            {(splitOpenByTopId[r.topLineId] ?? false) ? '산하 합치기' : '산하 분리'}
-                          </button>
+                            {(splitOpenByTopId[topId] ?? false) ? '산하 합치기' : '산하 분리'}
+                          </LoadingButton>
                         );
                       })()}
                     </div>
@@ -547,45 +567,67 @@ export default function SettlementLineTableClient(props: {
                   <td className="px-4 py-3 tabular-nums text-right text-gray-700">{formatKRW(r.rollup)}</td>
                   <td className="px-4 py-3 tabular-nums text-right text-violet-700">{formatKRW(r.leaderMaint)}</td>
                   <td className="px-4 py-3 text-xs text-gray-700 whitespace-nowrap">
-                    <label className={`inline-flex items-center gap-2 select-none ${r.ownDirectUnitSum > 0 ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
+                    <label
+                      className={`inline-flex items-center gap-2 select-none ${
+                        r.ownDirectUnitSum > 0 && !selfPrefSavePendingByTopId[r.topLineId]
+                          ? 'cursor-pointer'
+                          : 'cursor-not-allowed opacity-60'
+                      }`}
+                    >
                       <input
                         type="checkbox"
                         checked={r.selfContractIncluded}
-                        disabled={r.ownDirectUnitSum <= 0}
+                        disabled={r.ownDirectUnitSum <= 0 || Boolean(selfPrefSavePendingByTopId[r.topLineId])}
+                        aria-busy={selfPrefSavePendingByTopId[r.topLineId] ? true : undefined}
                         onChange={(e) => {
                           if (r.ownDirectUnitSum <= 0) return;
+                          const topId = r.topLineId;
+                          if (selfPrefSaveInFlightRef.current.has(topId)) return;
+                          selfPrefSaveInFlightRef.current.add(topId);
+                          setSelfPrefSavePendingByTopId((prev) => ({ ...prev, [topId]: true }));
                           const nextVal = e.target.checked;
                           setSaveError(null);
                           setSelfIncludedByTopId((prev) => {
-                            const next = { ...prev, [r.topLineId]: nextVal };
+                            const next = { ...prev, [topId]: nextVal };
                             return next;
                           });
 
                           // DB 저장 (월/라인 단위)
-                          fetch('/api/settlement/self-contract-preferences', {
+                          void fetch('/api/settlement/self-contract-preferences', {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                               year_month: props.yearMonth,
-                              top_line_id: r.topLineId,
+                              top_line_id: topId,
                               included: nextVal,
                             }),
                           })
                             .then(async (res) => {
-                              const json = (await res.json()) as any;
+                              const json = (await res.json()) as { success?: boolean; error?: string };
                               if (!res.ok || !json?.success) {
                                 throw new Error(json?.error ?? `HTTP ${res.status}`);
                               }
                             })
                             .catch((err) => {
                               // 실패 시 롤백
-                              setSelfIncludedByTopId((prev) => ({ ...prev, [r.topLineId]: !nextVal }));
+                              setSelfIncludedByTopId((prev) => ({ ...prev, [topId]: !nextVal }));
                               setSaveError(err instanceof Error ? err.message : String(err));
+                            })
+                            .finally(() => {
+                              selfPrefSaveInFlightRef.current.delete(topId);
+                              setSelfPrefSavePendingByTopId((prev) => {
+                                const next = { ...prev };
+                                delete next[topId];
+                                return next;
+                              });
                             });
                         }}
                       />
                       <span className={r.selfContractIncluded ? 'text-emerald-700 font-medium' : 'text-amber-700 font-medium'}>
                         {r.selfContractIncluded ? '인정' : '미인정'}
+                        {selfPrefSavePendingByTopId[r.topLineId] ? (
+                          <span className="ml-1 text-[11px] font-normal text-gray-500">저장 중…</span>
+                        ) : null}
                       </span>
                       {!r.selfContractIncluded && r.ownDirectUnitSum > 0 && (
                         <span className="text-[11px] text-amber-700">

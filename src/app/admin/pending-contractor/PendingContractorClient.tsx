@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import LoadingButton from '@/components/ui/LoadingButton';
 import Link from 'next/link';
+import { useCallback, useEffect, useState } from 'react';
 
 type PendingRow = {
   id: string;
@@ -24,12 +25,12 @@ export default function PendingContractorClient() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    setErr(null);
     try {
       const res = await fetch('/api/contracts/pending-contractor-mapping');
       const json = (await res.json()) as { data?: PendingRow[]; error?: string };
       if (!res.ok) throw new Error(json.error ?? '조회 실패');
       setRows(json.data ?? []);
+      setErr(null);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -79,19 +80,25 @@ export default function PendingContractorClient() {
     }
   }
 
-  if (loading) {
-    return <p className="text-sm text-gray-500">불러오는 중…</p>;
-  }
-
   if (err) {
     return (
-      <p className="text-sm text-red-600">
-        {err}{' '}
-        <button type="button" onClick={() => void load()} className="underline">
+      <p className="text-sm text-red-600 inline-flex flex-wrap items-center gap-2">
+        <span>{err}</span>
+        <LoadingButton
+          type="button"
+          className="underline text-sm text-red-600 border-0 bg-transparent p-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          isLoading={loading}
+          loadingText="불러오는 중…"
+          onClick={() => void load()}
+        >
           다시 시도
-        </button>
+        </LoadingButton>
       </p>
     );
+  }
+
+  if (loading) {
+    return <p className="text-sm text-gray-500">불러오는 중…</p>;
   }
 
   if (rows.length === 0) {
@@ -151,15 +158,17 @@ export default function PendingContractorClient() {
             {candidates.length > 0 ? (
               <div className="flex flex-wrap gap-2">
                 {candidates.map((m, idx) => (
-                  <button
+                  <LoadingButton
                     key={m.id}
                     type="button"
                     disabled={busy}
+                    isLoading={busy}
+                    loadingText="연결 중…"
                     onClick={() => void linkContract(row.id, m.id)}
                     className="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-50"
                   >
                     {idx + 1}번 {m.name} ({m.rank})
-                  </button>
+                  </LoadingButton>
                 ))}
               </div>
             ) : (
