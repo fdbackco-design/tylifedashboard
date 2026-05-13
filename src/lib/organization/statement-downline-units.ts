@@ -37,7 +37,24 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
   rootMemberId: string,
   window: { start_date: string; end_date: string },
   directUnitCountFromSettlement: number,
-): Promise<number> {
+  opts?: { debug?: boolean },
+): Promise<
+  | number
+  | {
+      downline_units: number;
+      debug_rows: Array<{
+        contract_id: string;
+        contract_code: string | null;
+        join_date: string;
+        unit_count: number;
+        origin_member_id: string;
+        origin_member_name: string | null;
+        nearest_leader_id: string | null;
+        nearest_leader_name: string | null;
+        excluded_by_leader_after_promotion: boolean;
+      }>;
+    }
+> {
   const [membersRes, edgesRes, promoRes] = await Promise.all([
     db
       .from('organization_members')
@@ -86,6 +103,7 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
   const subtreeIds = collectSubtreeMemberIdsDownstream(rootMemberId, childrenByParent);
   const subtreeIdSet = subtreeIds;
   const rankById = new Map(membersFiltered.map((m) => [m.id, m.rank] as const));
+  const nameById = new Map(membersFiltered.map((m) => [m.id, m.name] as const));
   const rootRank = rankById.get(rootMemberId) ?? null;
   const parentByChild = new Map<string, string | null>(
     treeRows.map((r) => [r.id as string, (r.parent_id ?? null) as string | null]),
@@ -250,6 +268,17 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
   });
 
   let scopeAttributedTotal = 0;
+  const debugRows: Array<{
+    contract_id: string;
+    contract_code: string | null;
+    join_date: string;
+    unit_count: number;
+    origin_member_id: string;
+    origin_member_name: string | null;
+    nearest_leader_id: string | null;
+    nearest_leader_name: string | null;
+    excluded_by_leader_after_promotion: boolean;
+  }> = [];
   for (const c of contractsRaw) {
     if (!isSettlementEligibleContract(c as any)) continue;
     const origin = resolveContractOriginForSubtree(contractRemapInput(c), subtreeIdSet);
@@ -258,10 +287,12 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
     if (!subtreeIdSet.has(origin)) continue;
 
     // 리더일 때만: "하위 리더 발생 시점(승격 계약)" 기준으로 계약 단위 포함/제외
+    let excludedByPromotionAfter = false;
+    let nearestLeaderId: string | null = null;
     if (rootRank === '리더') {
-      const leaderId = nearestLeaderBelowRoot(origin);
-      if (leaderId) {
-        const thBase = promotionThresholdByMemberId.get(leaderId) ?? null;
+      nearestLeaderId = nearestLeaderBelowRoot(origin);
+      if (nearestLeaderId) {
+        const thBase = promotionThresholdByMemberId.get(nearestLeaderId) ?? null;
         const th: SalesMemberPromotionThreshold | null = thBase
           ? {
               ...thBase,
@@ -282,14 +313,49 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
           createdAt,
         );
         // 승격 계약 "이후"부터는 하위 리더 실적으로 귀속 → 상위 리더 산하에서 제외
-        if (after) continue;
+        if (after) {
+          excludedByPromotionAfter = true;
+          if (opts?.debug) {
+            debugRows.push({
+              contract_id: String(c.id),
+              contract_code: (c.contract_code as string | null | undefined) ?? null,
+              join_date: jd,
+              unit_count: Number((c.unit_count as number | null | undefined) ?? 0),
+              origin_member_id: origin,
+              origin_member_name: nameById.get(origin) ?? null,
+              nearest_leader_id: nearestLeaderId,
+              nearest_leader_name: nameById.get(nearestLeaderId) ?? null,
+              excluded_by_leader_after_promotion: true,
+            });
+          }
+          continue;
+        }
       }
     }
 
     const u = Number((c.unit_count as number | null | undefined) ?? 0);
-    if (Number.isFinite(u) && u > 0) scopeAttributedTotal += u;
+    if (Number.isFinite(u) && u > 0) {
+      scopeAttributedTotal += u;
+      if (opts?.debug) {
+        debugRows.push({
+          contract_id: String(c.id),
+          contract_code: (c.contract_code as string | null | undefined) ?? null,
+          join_date: String((c.join_date as string | null | undefined) ?? '').slice(0, 10),
+          unit_count: u,
+          origin_member_id: origin,
+          origin_member_name: nameById.get(origin) ?? null,
+          nearest_leader_id: nearestLeaderId,
+          nearest_leader_name: nearestLeaderId ? (nameById.get(nearestLeaderId) ?? null) : null,
+          excluded_by_leader_after_promotion: excludedByPromotionAfter,
+        });
+      }
+    }
   }
 
   const personal = Math.max(0, Math.floor(Number(directUnitCountFromSettlement) || 0));
-  return Math.max(0, scopeAttributedTotal - personal);
+  const downline = Math.max(0, scopeAttributedTotal - personal);
+  if (opts?.debug) {
+    return { downline_units: downline, debug_rows: debugRows };
+  }
+  return downline;
 }

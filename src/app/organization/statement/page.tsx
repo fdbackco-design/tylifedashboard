@@ -20,9 +20,10 @@ function formatWon(value: number): string {
 export default async function OrganizationStatementPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ year_month?: string }>;
+  searchParams?: Promise<{ year_month?: string; debug?: string }>;
 }) {
   const sp = (await searchParams) ?? {};
+  const debug = String(sp.debug ?? '').trim() === '1';
   const defaultYearMonth = getSettlementWindowSeoul().label_year_month;
   const requestedYearMonthRaw =
     coalesceYearMonthSearchParam(sp.year_month as string | string[] | undefined) ?? defaultYearMonth;
@@ -121,12 +122,15 @@ export default async function OrganizationStatementPage({
     );
   }
 
-  const downlineAttributedUnits = await sumDownlineAttributedUnitsInSettlementWindow(
+  const downlineRes = await sumDownlineAttributedUnitsInSettlementWindow(
     db,
     memberId,
     { start_date, end_date },
     s.direct_unit_count ?? 0,
+    { debug },
   );
+  const downlineAttributedUnits =
+    typeof downlineRes === 'number' ? downlineRes : downlineRes.downline_units;
 
   const no = `${label_year_month}-${String(memberId).slice(0, 4)}`;
   const statementTotalUnits = (s.direct_unit_count ?? 0) + downlineAttributedUnits;
@@ -181,6 +185,67 @@ export default async function OrganizationStatementPage({
               </div>
             </div>
           </div>
+
+          {debug && typeof downlineRes !== 'number' ? (
+            <div className="rounded-lg border border-gray-200 overflow-hidden mb-5">
+              <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                <div className="text-sm font-semibold text-gray-800">산하 실적 집계 디버그</div>
+                <div className="text-xs text-gray-500 mt-0.5">
+                  포함된 계약(및 제외된 계약 일부)을 확인합니다.
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr className="text-left text-xs text-gray-600">
+                      {['가입일', '계약', '구좌', '귀속 담당자', '가까운 하위 리더', '비고'].map((h) => (
+                        <th key={h} className="px-3 py-2 font-semibold whitespace-nowrap">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {downlineRes.debug_rows.slice(0, 300).map((r) => (
+                      <tr key={r.contract_id} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-700">
+                          {r.join_date}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <span className="font-mono text-xs text-gray-800">
+                            {r.contract_code ?? r.contract_id}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap tabular-nums text-right">
+                          {Number(r.unit_count ?? 0).toLocaleString('ko-KR')}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-700">
+                          {(r.origin_member_name ?? r.origin_member_id).replace(/^\[고객\]\s*/, '')}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-700">
+                          {r.nearest_leader_id
+                            ? (r.nearest_leader_name ?? r.nearest_leader_id).replace(/^\[고객\]\s*/, '')
+                            : '-'}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-xs">
+                          {r.excluded_by_leader_after_promotion ? (
+                            <span className="text-amber-700">승격 이후 제외</span>
+                          ) : (
+                            <span className="text-emerald-700">포함</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {downlineRes.debug_rows.length > 300 ? (
+                <div className="px-4 py-2 text-xs text-gray-500">
+                  {downlineRes.debug_rows.length.toLocaleString('ko-KR')}건 중 300건만 표시했습니다.
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="text-sm font-semibold text-orange-800 mb-2">지급 내역</div>
           <div className="rounded-lg border border-gray-200 overflow-hidden mb-5">
