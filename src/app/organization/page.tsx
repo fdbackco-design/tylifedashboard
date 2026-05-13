@@ -70,10 +70,12 @@ const getCachedOrgSnapshot = unstable_cache(
 export default async function OrganizationMyTreePage({
   searchParams,
 }: {
-  searchParams?: Promise<{ year_month?: string; debug?: string }>;
+  searchParams?: Promise<{ year_month?: string; debug?: string; debug_customer?: string }>;
 }) {
   const sp = (await searchParams) ?? {};
   const debugEnabled = sp.debug === '1';
+  const debugCustomerNeedle =
+    typeof sp.debug_customer === 'string' ? sp.debug_customer.trim() : '';
 
   const defaultYearMonth = getSettlementWindowSeoul().label_year_month;
   const requestedYearMonthRaw =
@@ -154,6 +156,7 @@ export default async function OrganizationMyTreePage({
     remapMemberId,
     remapCustomerMemberId,
     resolveContractOriginForSubtree,
+    explainContractOriginForSubtree,
     hqIds: hqIdsForContracts,
     membersFiltered,
   } = buildOrgContractSalesRemap(membersRaw as any);
@@ -260,6 +263,24 @@ export default async function OrganizationMyTreePage({
 
   let contractsRaw = contractResList.flatMap((r) => r.data ?? []);
 
+  const hqWindowRemapInput = (row: any) =>
+    ({
+      sales_member_id: String(row.sales_member_id ?? ''),
+      customer_id: String(row.customer_id ?? ''),
+      status: row.status,
+      rental_request_no: row.rental_request_no ?? null,
+      invoice_no: row.invoice_no ?? null,
+      memo: row.memo ?? null,
+      customer_phone: row.customers?.phone ?? null,
+      contract_code: row.contract_code ?? null,
+      customer_name: row.customers?.name ?? null,
+    }) as const;
+
+  let hqWindowFetched = 0;
+  let hqWindowIncluded = 0;
+  let hqWindowDroppedSubtree = 0;
+  const hqWindowDroppedSamples: Array<Record<string, unknown>> = [];
+
   if (hqSalesMemberIds.length > 0) {
     const { data: hqWindowRows } = await adminDb
       .from('contracts')
@@ -269,27 +290,52 @@ export default async function OrganizationMyTreePage({
       .lte('join_date', end_date)
       .order('join_date', { ascending: false })
       .limit(20000);
+    hqWindowFetched = (hqWindowRows ?? []).length;
     const seenWin = new Set(contractsRaw.map((c: any) => c.id as string));
     for (const row of (hqWindowRows ?? []) as any[]) {
       if (!row?.id || seenWin.has(row.id)) continue;
-      const eff = resolveContractOriginForSubtree(
-        {
-          sales_member_id: String(row.sales_member_id ?? ''),
-          customer_id: String(row.customer_id ?? ''),
-          status: row.status,
-          rental_request_no: row.rental_request_no ?? null,
-          invoice_no: row.invoice_no ?? null,
-          memo: row.memo ?? null,
-          customer_phone: row.customers?.phone ?? null,
-          contract_code: row.contract_code ?? null,
-          customer_name: row.customers?.name ?? null,
-        },
-        subtreeIdSet,
-      );
-      if (!subtreeIdSet.has(eff)) continue;
+      const winInput = hqWindowRemapInput(row);
+      const eff = resolveContractOriginForSubtree(winInput, subtreeIdSet);
+      if (!subtreeIdSet.has(eff)) {
+        hqWindowDroppedSubtree += 1;
+        const name = String(row?.customers?.name ?? '');
+        const matchNeedle =
+          !debugCustomerNeedle ||
+          name.includes(debugCustomerNeedle) ||
+          String(row.customer_id ?? '').includes(debugCustomerNeedle);
+        if (debugEnabled && matchNeedle && hqWindowDroppedSamples.length < 40) {
+          hqWindowDroppedSamples.push({
+            contract_id: row.id,
+            join_date: row.join_date,
+            customer_name: row.customers?.name ?? null,
+            customer_id: row.customer_id,
+            sales_member_id: row.sales_member_id,
+            display_status: getContractDisplayStatus({
+              status: row.status,
+              rental_request_no: row.rental_request_no ?? null,
+              invoice_no: row.invoice_no ?? null,
+              memo: row.memo ?? null,
+            }),
+            explain: explainContractOriginForSubtree(winInput, subtreeIdSet),
+          });
+        }
+        continue;
+      }
+      hqWindowIncluded += 1;
       seenWin.add(row.id);
       contractsRaw.push(row);
     }
+  }
+
+  if (debugEnabled) {
+    debugStats.hq_sales_member_ids = hqSalesMemberIds;
+    debugStats.hq_window_contracts = {
+      fetched_row_count: hqWindowFetched,
+      merged_into_subtree_count: hqWindowIncluded,
+      dropped_subtree_filter_count: hqWindowDroppedSubtree,
+      dropped_samples_needle: debugCustomerNeedle || null,
+      dropped_samples: hqWindowDroppedSamples,
+    };
   }
 
   // Supabase 필터 누락/비정상 응답이 있어도 카드·조직도 계약 목록은 정산 윈도우 밖을 제외
@@ -480,6 +526,75 @@ export default async function OrganizationMyTreePage({
   debugStats.contracts_by_member_keys = Object.keys(contractsByMember).slice(0, 30);
   debugStats.contracts_by_member_total_rows = Object.values(contractsByMember).reduce((s, arr) => s + arr.length, 0);
 
+  if (debugEnabled) {
+    debugStats.debug_customer_param = debugCustomerNeedle || null;
+    debugStats.contracts_raw_in_window_count = contractsRaw.length;
+    debugStats.subtree_member_sample = subtreeMembers.slice(0, 20).map((m) => ({
+      id: m.id,
+      name: m.name,
+      rank: m.rank,
+      external_id: m.external_id,
+      source_customer_id: m.source_customer_id,
+    }));
+    if (debugCustomerNeedle) {
+      debugStats.subtree_members_name_match = subtreeMembers
+        .filter((m) => (m.name ?? '').includes(debugCustomerNeedle))
+        .map((m) => ({ id: m.id, name: m.name, rank: m.rank, external_id: m.external_id }));
+    }
+    const explainSamples: Array<Record<string, unknown>> = [];
+    for (const c of contractsRaw) {
+      if (explainSamples.length >= 35) break;
+      const custName = String((c as any).customers?.name ?? '');
+      const match =
+        !debugCustomerNeedle ||
+        custName.includes(debugCustomerNeedle) ||
+        String((c as any).customer_id ?? '').includes(debugCustomerNeedle);
+      if (!match) continue;
+      const ri = contractRemapInput(c);
+      const o = originInSubtree(c);
+      explainSamples.push({
+        contract_id: (c as any).id,
+        join_date: (c as any).join_date,
+        customer_name: custName || null,
+        customer_id: (c as any).customer_id,
+        sales_member_id: (c as any).sales_member_id,
+        origin_key: o,
+        in_subtree_bucket: subtreeIdSet.has(o),
+        explain: explainContractOriginForSubtree(ri, subtreeIdSet),
+      });
+    }
+    debugStats.window_contract_explain_samples = explainSamples;
+    if (debugCustomerNeedle && explainSamples.length === 0) {
+      debugStats.window_contract_explain_note =
+        '이 달 contracts_raw(서브트리+HQ병합 후, 날짜창 필터 적용)에서 debug_customer 문자열과 일치하는 고객/ID가 없습니다. HQ에서 걸러진 경우 hq_window_contracts.dropped_samples를 보세요.';
+    }
+
+    const hqSalesSet = new Set(hqSalesMemberIds);
+    const hqInWindowSamples: Array<Record<string, unknown>> = [];
+    for (const c of contractsRaw) {
+      if (hqInWindowSamples.length >= 20) break;
+      if (!hqSalesSet.has(String((c as any).sales_member_id ?? ''))) continue;
+      const ri = contractRemapInput(c);
+      hqInWindowSamples.push({
+        contract_id: (c as any).id,
+        customer_name: (c as any).customers?.name ?? null,
+        origin_key: originInSubtree(c),
+        explain: explainContractOriginForSubtree(ri, subtreeIdSet),
+      });
+    }
+    debugStats.window_hq_attributed_contract_samples = hqInWindowSamples;
+
+    console.log('[organization:debug]', {
+      memberId,
+      yearMonth,
+      debug_customer: debugCustomerNeedle || null,
+      contracts_raw_in_window: contractsRaw.length,
+      hq_window: debugStats.hq_window_contracts,
+      first_drop_reason: (hqWindowDroppedSamples[0] as { explain?: { reason?: string } } | undefined)?.explain
+        ?.reason,
+    });
+  }
+
   const periodPendingTreeContractCount = (treeForDisplay as any[]).reduce((sum: number, root: any) => {
     const ids = collectSubtreeIds(root);
     const c = countByStatus(ids, contractsByMember);
@@ -515,6 +630,12 @@ export default async function OrganizationMyTreePage({
       {debugEnabled ? (
         <div className="mb-4 bg-slate-50 border border-slate-200 rounded-lg p-4">
           <div className="text-sm font-semibold text-slate-800 mb-2">[organization debug] stats</div>
+          <p className="text-[11px] text-slate-600 mb-2">
+            URL 예: <code className="bg-slate-200 px-1 rounded">?debug=1</code> · 특정 고객만 샘플링:{' '}
+            <code className="bg-slate-200 px-1 rounded">?debug=1&amp;debug_customer=신희석</code> · 터미널(
+            <code className="bg-slate-200 px-1 rounded">npm run dev</code>)에는{' '}
+            <code className="bg-slate-200 px-1 rounded">[organization:debug]</code> 로그가 출력됩니다.
+          </p>
           <pre className="text-[11px] leading-4 text-slate-700 whitespace-pre-wrap">
             {JSON.stringify(debugStats, null, 2)}
           </pre>
@@ -562,7 +683,14 @@ export default async function OrganizationMyTreePage({
         value={yearMonth}
         todayValue={defaultYearMonth}
         years={yearsForPicker}
-        keepQuery={debugEnabled ? { debug: '1' } : { debug: null }}
+        keepQuery={
+          debugEnabled
+            ? {
+                debug: '1',
+                ...(debugCustomerNeedle ? { debug_customer: debugCustomerNeedle } : {}),
+              }
+            : { debug: null, debug_customer: null }
+        }
       />
 
       <div className="mb-4 flex justify-end">
