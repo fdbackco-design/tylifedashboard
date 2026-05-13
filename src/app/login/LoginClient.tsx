@@ -89,6 +89,13 @@ export default function LoginClient(props: { redirect: string }) {
             {loading ? '로그인 중' : '로그인'}
           </button>
         </form>
+
+        <div className="mt-5 pt-4 border-t border-gray-200 text-xs text-gray-500 flex items-center justify-between gap-3">
+          <a href="/privacy" className="text-blue-600 hover:underline">
+            개인정보처리방침
+          </a>
+          <span className="whitespace-nowrap">© TY Life Dashboard</span>
+        </div>
       </div>
     </div>
   );

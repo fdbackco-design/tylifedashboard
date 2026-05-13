@@ -79,6 +79,12 @@ export default function AccountActionsClient(props: { redirectAfterLogout?: stri
       {message ? (
         <span className={`text-xs ${message.ok ? 'text-emerald-700' : 'text-red-600'}`}>{message.text}</span>
       ) : null}
+      <a
+        href="/privacy"
+        className="px-3 py-1.5 rounded text-xs border bg-white text-gray-700 border-gray-300 hover:border-gray-400"
+      >
+        개인정보처리방침
+      </a>
       {showChangePassword ? (
         <button
           type="button"
