@@ -153,7 +153,7 @@ export default async function OrganizationMyTreePage({
   const {
     remapMemberId,
     remapCustomerMemberId,
-    resolveContractSalesMemberId,
+    resolveContractOriginForSubtree,
     hqIds: hqIdsForContracts,
     membersFiltered,
   } = buildOrgContractSalesRemap(membersRaw as any);
@@ -272,17 +272,20 @@ export default async function OrganizationMyTreePage({
     const seenWin = new Set(contractsRaw.map((c: any) => c.id as string));
     for (const row of (hqWindowRows ?? []) as any[]) {
       if (!row?.id || seenWin.has(row.id)) continue;
-      const eff = resolveContractSalesMemberId({
-        sales_member_id: row.sales_member_id,
-        customer_id: row.customer_id,
-        status: row.status,
-        rental_request_no: row.rental_request_no ?? null,
-        invoice_no: row.invoice_no ?? null,
-        memo: row.memo ?? null,
-        customer_phone: row.customers?.phone ?? null,
-        contract_code: row.contract_code ?? null,
-        customer_name: row.customers?.name ?? null,
-      });
+      const eff = resolveContractOriginForSubtree(
+        {
+          sales_member_id: String(row.sales_member_id ?? ''),
+          customer_id: String(row.customer_id ?? ''),
+          status: row.status,
+          rental_request_no: row.rental_request_no ?? null,
+          invoice_no: row.invoice_no ?? null,
+          memo: row.memo ?? null,
+          customer_phone: row.customers?.phone ?? null,
+          contract_code: row.contract_code ?? null,
+          customer_name: row.customers?.name ?? null,
+        },
+        subtreeIdSet,
+      );
       if (!subtreeIdSet.has(eff)) continue;
       seenWin.add(row.id);
       contractsRaw.push(row);
@@ -321,6 +324,8 @@ export default async function OrganizationMyTreePage({
     customer_name: (c.customers?.name ?? null) as string | null,
   });
 
+  const originInSubtree = (c: any) => resolveContractOriginForSubtree(contractRemapInput(c), subtreeIdSet);
+
   const eligibleContractsForMetrics = contractsRaw
     .filter((c) => {
       const joinDate = (c as any).join_date ? String((c as any).join_date).slice(0, 10) : '';
@@ -330,7 +335,7 @@ export default async function OrganizationMyTreePage({
     })
     .filter(isSettlementEligibleContract)
     .map((c) => {
-      const resolved = resolveContractSalesMemberId(contractRemapInput(c));
+      const resolved = originInSubtree(c);
       if (!subtreeIdSet.has(resolved)) return null;
       return {
         contract_id: (c as any).id as string,
@@ -349,7 +354,7 @@ export default async function OrganizationMyTreePage({
   // - 선택달 준비·대기: 표시 트리 루트별로 노드 카드와 동일한 countByStatus(준비+대기 건) 합산
   // - 선택달 가입 구좌: (정산 윈도우) + 가입 완료(표시 상태 기준) + 취소 제외, unit_count 합
   const periodJoinUnits = contractsRaw
-    .filter((c: any) => subtreeIdSet.has(resolveContractSalesMemberId(contractRemapInput(c))))
+    .filter((c: any) => subtreeIdSet.has(originInSubtree(c)))
     .filter((c: any) => !c.is_cancelled)
     .filter((c: any) =>
       getContractDisplayStatus({
@@ -388,24 +393,27 @@ export default async function OrganizationMyTreePage({
     const seenC = new Set(cumulativeContractsRaw.map((c: any) => c.id as string));
     for (const row of (hqCumRows ?? []) as any[]) {
       if (!row?.id || seenC.has(row.id)) continue;
-      const eff = resolveContractSalesMemberId({
-        sales_member_id: row.sales_member_id,
-        customer_id: row.customer_id,
-        status: row.status,
-        rental_request_no: row.rental_request_no ?? null,
-        invoice_no: row.invoice_no ?? null,
-        memo: row.memo ?? null,
-        customer_phone: row.customers?.phone ?? null,
-        contract_code: row.contract_code ?? null,
-        customer_name: null,
-      });
+      const eff = resolveContractOriginForSubtree(
+        {
+          sales_member_id: String(row.sales_member_id ?? ''),
+          customer_id: String(row.customer_id ?? ''),
+          status: row.status,
+          rental_request_no: row.rental_request_no ?? null,
+          invoice_no: row.invoice_no ?? null,
+          memo: row.memo ?? null,
+          customer_phone: row.customers?.phone ?? null,
+          contract_code: row.contract_code ?? null,
+          customer_name: null,
+        },
+        subtreeIdSet,
+      );
       if (!subtreeIdSet.has(eff)) continue;
       seenC.add(row.id);
       cumulativeContractsRaw.push(row);
     }
   }
   const totalJoinUnits = cumulativeContractsRaw
-    .filter((c: any) => subtreeIdSet.has(resolveContractSalesMemberId(contractRemapInput(c))))
+    .filter((c: any) => subtreeIdSet.has(originInSubtree(c)))
     .filter((c: any) => !c.is_cancelled)
     .filter((c: any) =>
       getContractDisplayStatus({
@@ -426,7 +434,7 @@ export default async function OrganizationMyTreePage({
     })
     .filter(isSettlementEligibleContract)
     .map((c: any) => {
-      const resolved = resolveContractSalesMemberId(contractRemapInput(c));
+      const resolved = originInSubtree(c);
       if (!subtreeIdSet.has(resolved)) return null;
       return {
         contract_id: String(c.id ?? `${c.sales_member_id ?? 'unknown'}:${String(c.join_date ?? '')}`),
@@ -442,7 +450,7 @@ export default async function OrganizationMyTreePage({
 
   const contractsByMember: Record<string, ContractItem[]> = {};
   for (const c of contractsRaw) {
-    const key = resolveContractSalesMemberId(contractRemapInput(c));
+    const key = originInSubtree(c);
     if (!subtreeIdSet.has(key)) continue;
 
     const item = {

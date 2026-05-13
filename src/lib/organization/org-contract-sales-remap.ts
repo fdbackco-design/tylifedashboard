@@ -31,6 +31,8 @@ export function buildOrgContractSalesRemap(
 ): {
   remapMemberId: (id: string) => string;
   resolveContractSalesMemberId: (c: ContractSalesRemapInput) => string;
+  /** 내 조직도 등: 귀속 id가 서브트리 밖(HQ)이면 가입 인정+고객 매핑으로 서브트리 내 id를 한 번 더 시도 */
+  resolveContractOriginForSubtree: (c: ContractSalesRemapInput, subtreeMemberIds: Set<string>) => string;
   remapCustomerMemberId: (customerId: string) => string;
   hqIds: Set<string>;
   membersFiltered: OrgMemberForContractRemap[];
@@ -145,12 +147,36 @@ export function buildOrgContractSalesRemap(
     return remapMemberId(c.sales_member_id);
   };
 
+  const resolveContractOriginForSubtree = (
+    c: ContractSalesRemapInput,
+    subtreeMemberIds: Set<string>,
+  ): string => {
+    const primary = resolveContractSalesMemberId(c);
+    if (subtreeMemberIds.has(primary)) return primary;
+    if (hqIds.size === 0 || !hqIds.has(c.sales_member_id)) return primary;
+    const joinEligible = isContractJoinCompleted({
+      status: c.status,
+      rental_request_no: c.rental_request_no ?? null,
+      invoice_no: c.invoice_no ?? null,
+      memo: c.memo ?? null,
+    });
+    if (!joinEligible) return primary;
+    const customerNodeId = findCustomerNodeId({
+      customer_id: c.customer_id,
+      customer_phone: c.customer_phone ?? null,
+    });
+    if (!customerNodeId) return primary;
+    const merged = remapMemberId(customerNodeId);
+    return subtreeMemberIds.has(merged) ? merged : primary;
+  };
+
   const remapCustomerMemberId = (customerId: string) =>
     remapMemberId(customerMemberIdByCustomerId.get(customerId) ?? '');
 
   return {
     remapMemberId,
     resolveContractSalesMemberId,
+    resolveContractOriginForSubtree,
     remapCustomerMemberId,
     hqIds,
     membersFiltered,
