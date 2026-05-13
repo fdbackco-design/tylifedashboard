@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import YearMonthSelector from '@/components/YearMonthSelector';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { buildOrgTree, formatKRW } from '@/lib/settlement/calculator';
 import { getSettlementWindowForYearMonth, getSettlementWindowSeoul } from '@/lib/settlement/settlement-window';
@@ -27,11 +28,6 @@ interface PageProps {
     member_id?: string;
     debug?: string;
   }>;
-}
-
-function getCurrentYearMonth(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
 function nextDay(dateYmd: string): string {
@@ -557,18 +553,12 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const periodSales = periodJoinUnits * BASE_AMOUNT_PER_UNIT;
   const profit = periodSales - totalAmount;
 
-  // 월 목록: 현재 선택된 기준월(yearMonth)을 맨 앞에 두고 -1개월씩 나열
-  // (정산 기준이 26~25라 "오늘 달"과 기준월이 어긋날 수 있음)
-  const months: string[] = [];
-  {
-    const [ys, ms] = yearMonth.split('-');
-    const baseY = parseInt(ys, 10);
-    const baseM = parseInt(ms, 10); // 1-12
-    for (let i = 0; i < 12; i++) {
-      const d = new Date(baseY, baseM - 1 - i, 1);
-      months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-    }
-  }
+  const yearsForPicker = (() => {
+    const base = parseInt(todayYearMonth.slice(0, 4), 10);
+    const out: number[] = [];
+    for (let y = base; y >= base - 4; y--) out.push(y);
+    return out;
+  })();
 
   return (
     <div className="p-4 sm:p-6">
@@ -601,30 +591,15 @@ export default async function SettlementPage({ searchParams }: PageProps) {
 
       {/* 필터 */}
       <div className="flex flex-col gap-3 mb-5">
-        {/* 월 선택: 모바일은 가로 스크롤 */}
-        <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
-          <div className="flex gap-1 whitespace-nowrap w-max">
-          <Link
-            href={`/admin/settlement?year_month=${todayYearMonth}${rankFilter ? `&rank=${rankFilter}` : ''}${debugEnabled ? '&debug=1' : ''}`}
-            className={`px-2.5 py-1 rounded text-xs border ${
-              yearMonth === todayYearMonth
-                ? 'bg-slate-800 text-white border-slate-800'
-                : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
-            }`}
-          >
-            오늘(기준월)
-          </Link>
-          {months.map((m) => (
-            <Link
-              key={m}
-              href={`/admin/settlement?year_month=${m}${rankFilter ? `&rank=${rankFilter}` : ''}${debugEnabled ? '&debug=1' : ''}`}
-              className={`px-2.5 py-1 rounded text-xs border ${m === yearMonth ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'}`}
-            >
-              {m.slice(5)}월
-            </Link>
-          ))}
-          </div>
-        </div>
+        <YearMonthSelector
+          value={yearMonth}
+          todayValue={todayYearMonth}
+          years={yearsForPicker}
+          keepQuery={{
+            ...(rankFilter ? { rank: rankFilter } : {}),
+            ...(debugEnabled ? { debug: '1' } : {}),
+          }}
+        />
 
         {/* 직급 필터 */}
         <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
