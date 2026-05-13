@@ -204,6 +204,14 @@ export default async function OrganizationMyTreePage({
 
   const subtreeMembers = membersForTree.filter((m) => subtreeIds.has(m.id));
   const subtreeIdSet = new Set(subtreeMembers.map((m) => m.id));
+  /** 조직원 본인 customers.id — HQ id 불일치 등으로 HQ 전용 쿼리가 0건일 때도 직접 가입 계약을 불러온다 */
+  const subtreeMemberOwnCustomerIds = [
+    ...new Set(
+      subtreeMembers
+        .map((m) => m.source_customer_id)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0),
+    ),
+  ];
   debugStats.subtree_ids_count = subtreeIds.size;
   debugStats.subtree_members_count = subtreeMembers.length;
 
@@ -324,6 +332,32 @@ export default async function OrganizationMyTreePage({
       hqWindowIncluded += 1;
       seenWin.add(row.id);
       contractsRaw.push(row);
+    }
+  }
+
+  let ownCustomerWindowFetched = 0;
+  let ownCustomerWindowMerged = 0;
+  if (subtreeMemberOwnCustomerIds.length > 0) {
+    const seenOwn = new Set(contractsRaw.map((c: any) => c.id as string));
+    for (const custChunk of chunk(subtreeMemberOwnCustomerIds, 120)) {
+      const { data: ownWinRows } = await adminDb
+        .from('contracts')
+        .select(contractSelect)
+        .in('customer_id', custChunk)
+        .gte('join_date', start_date)
+        .lte('join_date', end_date)
+        .order('join_date', { ascending: false })
+        .limit(20000);
+      ownCustomerWindowFetched += (ownWinRows ?? []).length;
+      for (const row of (ownWinRows ?? []) as any[]) {
+        if (!row?.id || seenOwn.has(row.id)) continue;
+        const winInput = hqWindowRemapInput(row);
+        const eff = resolveContractOriginForSubtree(winInput, subtreeIdSet);
+        if (!subtreeIdSet.has(eff)) continue;
+        seenOwn.add(row.id);
+        ownCustomerWindowMerged += 1;
+        contractsRaw.push(row);
+      }
     }
   }
 
@@ -458,6 +492,42 @@ export default async function OrganizationMyTreePage({
       cumulativeContractsRaw.push(row);
     }
   }
+
+  let ownCustomerCumulativeFetched = 0;
+  let ownCustomerCumulativeMerged = 0;
+  if (subtreeMemberOwnCustomerIds.length > 0) {
+    const seenOwnC = new Set(cumulativeContractsRaw.map((c: any) => c.id as string));
+    for (const custChunk of chunk(subtreeMemberOwnCustomerIds, 120)) {
+      const { data: ownCumRows } = await adminDb
+        .from('contracts')
+        .select(cumulativeContractsSelect)
+        .in('customer_id', custChunk)
+        .not('sales_member_id', 'is', null)
+        .limit(50000);
+      ownCustomerCumulativeFetched += (ownCumRows ?? []).length;
+      for (const row of (ownCumRows ?? []) as any[]) {
+        if (!row?.id || seenOwnC.has(row.id)) continue;
+        const eff = resolveContractOriginForSubtree(
+          {
+            sales_member_id: String(row.sales_member_id ?? ''),
+            customer_id: String(row.customer_id ?? ''),
+            status: row.status,
+            rental_request_no: row.rental_request_no ?? null,
+            invoice_no: row.invoice_no ?? null,
+            memo: row.memo ?? null,
+            customer_phone: row.customers?.phone ?? null,
+            contract_code: row.contract_code ?? null,
+            customer_name: null,
+          },
+          subtreeIdSet,
+        );
+        if (!subtreeIdSet.has(eff)) continue;
+        seenOwnC.add(row.id);
+        ownCustomerCumulativeMerged += 1;
+        cumulativeContractsRaw.push(row);
+      }
+    }
+  }
   const totalJoinUnits = cumulativeContractsRaw
     .filter((c: any) => subtreeIdSet.has(originInSubtree(c)))
     .filter((c: any) => !c.is_cancelled)
@@ -529,6 +599,17 @@ export default async function OrganizationMyTreePage({
   if (debugEnabled) {
     debugStats.debug_customer_param = debugCustomerNeedle || null;
     debugStats.contracts_raw_in_window_count = contractsRaw.length;
+    debugStats.subtree_own_customer_contracts = {
+      own_customer_id_count: subtreeMemberOwnCustomerIds.length,
+      window: {
+        fetched_row_count_sum: ownCustomerWindowFetched,
+        merged_into_subtree_count: ownCustomerWindowMerged,
+      },
+      cumulative: {
+        fetched_row_count_sum: ownCustomerCumulativeFetched,
+        merged_into_subtree_count: ownCustomerCumulativeMerged,
+      },
+    };
     debugStats.subtree_member_sample = subtreeMembers.slice(0, 20).map((m) => ({
       id: m.id,
       name: m.name,
