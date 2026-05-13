@@ -131,7 +131,9 @@ export async function calculateMonthlySettlement(params: {
 
   const { data: promoEvents } = await db
     .from('leader_promotion_events')
-    .select('member_id, previous_parent_id, leader_maintenance_bonus_paid_year_month');
+    .select(
+      'member_id, previous_parent_id, leader_maintenance_bonus_paid_year_month, threshold_contract_id, threshold_join_date',
+    );
   const prevParentByMemberId = new Map<string, string | null>();
   const leaderMaintBlockByMemberId = new Map<string, boolean>();
   const prevLeaderByPromotedMemberId = new Map<string, string | null>();
@@ -155,6 +157,38 @@ export async function calculateMonthlySettlement(params: {
   }
 
   const promotionThresholdByMemberId = computeSalesMemberPromotionThreshold(treeRows, joinAttributed, rankById);
+
+  // leader_promotion_events에 기록된 승격 계약이 단일 출처(SSOT).
+  // 월정산의 join 귀속은 조직도(고객 노드/HQ 치환)와 다를 수 있어 재계산 threshold가 이벤트와 어긋나면
+  // 30만/40만 분기가 틀어진다 → 이벤트의 threshold_*로 덮어쓴다.
+  const eventRowsWithThreshold = ((promoEvents ?? []) as any[]).filter(
+    (r) => r?.member_id && r?.threshold_contract_id && r?.threshold_join_date,
+  );
+  const thresholdContractIds = [
+    ...new Set(eventRowsWithThreshold.map((r) => String(r.threshold_contract_id))),
+  ];
+  const thresholdCreatedAtByContractId = new Map<string, string | null>();
+  if (thresholdContractIds.length > 0) {
+    const { data: thContractRows, error: thCErr } = await db
+      .from('contracts')
+      .select('id, created_at')
+      .in('id', thresholdContractIds);
+    if (thCErr) throw new Error(`승격 계약(created_at) 조회 실패: ${thCErr.message}`);
+    for (const row of (thContractRows ?? []) as any[]) {
+      if (!row?.id) continue;
+      thresholdCreatedAtByContractId.set(String(row.id), (row.created_at ?? null) as string | null);
+    }
+  }
+  for (const r of eventRowsWithThreshold) {
+    const mid = String(r.member_id);
+    const cid = String(r.threshold_contract_id);
+    const jd = String(r.threshold_join_date).slice(0, 10);
+    promotionThresholdByMemberId.set(mid, {
+      threshold_contract_id: cid,
+      threshold_join_date: jd,
+      threshold_created_at: thresholdCreatedAtByContractId.get(cid) ?? null,
+    });
+  }
 
   const leaderRankEffectiveAtByMemberId = new Map<string, string | null>();
   for (const m of membersRaw as OrganizationMember[]) {
