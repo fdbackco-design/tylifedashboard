@@ -1,30 +1,43 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
-const ADMIN_COOKIE_NAME = 'admin_session';
-const ADMIN_COOKIE_VALUE = 'admin_authed_v1';
+function hasSupabaseSessionCookie(req: NextRequest): boolean {
+  // supabase/ssr 쿠키 이름은 프로젝트마다 prefix가 달라질 수 있어 패턴으로 탐지한다.
+  // 예: sb-<project-ref>-auth-token
+  for (const c of req.cookies.getAll()) {
+    const name = c.name ?? '';
+    if (name.endsWith('-auth-token') && name.startsWith('sb-')) return true;
+    if (name === 'sb-access-token' || name === 'sb-refresh-token') return true;
+  }
+  return false;
+}
 
 export function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
-  // /admin/login 같은 공개 페이지는 보호에서 제외
-  if (pathname === '/admin/login' || pathname.startsWith('/admin/login/')) {
+  // 공개 페이지
+  if (pathname === '/login' || pathname.startsWith('/login/')) {
+    return NextResponse.next();
+  }
+  if (pathname === '/privacy' || pathname.startsWith('/privacy/')) {
     return NextResponse.next();
   }
 
-  // 보호 대상: /admin/*
-  if (!pathname.startsWith('/admin')) return NextResponse.next();
+  // API/정적 리소스는 제외
+  if (pathname.startsWith('/api')) return NextResponse.next();
+  if (pathname.startsWith('/_next')) return NextResponse.next();
+  if (pathname.startsWith('/icons') || pathname === '/manifest.json' || pathname === '/sw.js') return NextResponse.next();
 
-  const cookieVal = req.cookies.get(ADMIN_COOKIE_NAME)?.value;
-  if (cookieVal === ADMIN_COOKIE_VALUE) return NextResponse.next();
+  // 로그인 필요: /privacy, /login 외 전부
+  if (hasSupabaseSessionCookie(req)) return NextResponse.next();
 
   const redirectTo = `${pathname}${search}`;
-  const loginUrl = new URL('/admin/login', req.url);
+  const loginUrl = new URL('/login', req.url);
   loginUrl.searchParams.set('redirect', redirectTo);
   return NextResponse.redirect(loginUrl);
 }
 
 export const config = {
-  matcher: ['/admin/:path*'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 };
 

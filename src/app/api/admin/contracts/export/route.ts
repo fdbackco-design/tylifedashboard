@@ -31,7 +31,7 @@ function formatDate(d: Date): string {
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  if (!isAdminAuthed(req)) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  if (!(await isAdminAuthed(req))) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
   const db = createAdminSupabaseClient();
 

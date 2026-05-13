@@ -12,7 +12,7 @@ type Body = {
 };
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  if (!isAdminAuthed(req)) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  if (!(await isAdminAuthed(req))) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
   let body: Body;
   try {

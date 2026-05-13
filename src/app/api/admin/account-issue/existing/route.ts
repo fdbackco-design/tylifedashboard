@@ -3,7 +3,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { isAdminAuthed } from '@/lib/admin-auth';
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  if (!isAdminAuthed(req)) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  if (!(await isAdminAuthed(req))) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
   const memberId = String(req.nextUrl.searchParams.get('member_id') ?? '').trim();
   if (!memberId) return NextResponse.json({ success: false, error: 'member_id required' }, { status: 400 });

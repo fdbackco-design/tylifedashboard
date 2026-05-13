@@ -14,7 +14,7 @@ function memberToCustomerId(m: { source_customer_id: string | null; external_id:
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  if (!isAdminAuthed(req)) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  if (!(await isAdminAuthed(req))) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
   const q = req.nextUrl.searchParams.get('query')?.trim() ?? '';
   if (!q) return NextResponse.json({ success: true, data: [] as any[] });

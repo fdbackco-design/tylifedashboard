@@ -28,7 +28,12 @@ export default function LoginClient(props: { redirect: string }) {
       if (signErr) throw signErr;
       // SSR이 세션 쿠키를 즉시 인식하도록, 클라이언트 라우팅 대신 full navigation 사용
       navigated = true;
-      window.location.assign(redirect);
+      // 로그인 진입점은 /login 하나로 통일하고, 로그인 성공 후에는 권한에 따라 서버에서 분기한다.
+      // (redirect 쿼리가 있더라도 /admin은 admin만 접근 가능하므로 최종 분기는 서버에서 결정)
+      const qs = new URLSearchParams();
+      if (redirect) qs.set('redirect', redirect);
+      const to = qs.toString() ? `/login/redirect?${qs.toString()}` : '/login/redirect';
+      window.location.assign(to);
       return;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
