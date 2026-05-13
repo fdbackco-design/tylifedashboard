@@ -8,11 +8,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const db = createAdminSupabaseClient();
 
   try {
-    const { data } = await db
+    const { data, error } = await db
       .from('user_profiles')
       .select('id, customer_id, member_id, login_code, display_name, phone, role, is_active, must_change_password, created_at, updated_at')
       .order('created_at', { ascending: false })
       .limit(200);
+
+    if (error) {
+      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    }
 
     return NextResponse.json({ success: true, data: data ?? [] });
   } catch (e) {

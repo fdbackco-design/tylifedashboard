@@ -63,6 +63,7 @@ export default function AccountIssueClient() {
   const [isActive, setIsActive] = useState(true);
   const [isIssuing, setIsIssuing] = useState(false);
   const [isLoadingIssuedList, setIsLoadingIssuedList] = useState(false);
+  const [issuedListError, setIssuedListError] = useState<string | null>(null);
 
   const [issuedAccounts, setIssuedAccounts] = useState<
     Array<{
@@ -133,6 +134,9 @@ export default function AccountIssueClient() {
       // 이제 검색 결과는 organization_members 기반이다.
       // id=member_id, customer_id는 (있으면) source_customer_id/external_id(customer:...)로 채워진다.
       const json = (await res.json()) as ApiResult<CustomerRow[]>;
+      if (res.status === 401) {
+        throw new Error('관리자 로그인이 필요합니다. /admin/login 에서 다시 로그인해 주세요.');
+      }
       if (!res.ok || !json.success) throw new Error('검색 실패');
       setCustomers(json.data);
     } catch (e) {
@@ -241,10 +245,17 @@ export default function AccountIssueClient() {
           created_at: string;
         }>
       >;
+      if (res.status === 401) {
+        setIssuedListError('관리자 세션이 없습니다. /admin/login 에서 다시 로그인하거나, PWA 사용 시 사이트 데이터를 비운 뒤 새로고침해 보세요.');
+        setIssuedAccounts([]);
+        return;
+      }
       if (!res.ok || !json.success) throw new Error(json.success ? 'error' : json.error);
       setIssuedAccounts(json.data);
-    } catch {
-      // 로딩 실패해도 발급 UI는 유지
+      setIssuedListError(null);
+    } catch (e) {
+      setIssuedListError(e instanceof Error ? e.message : '목록을 불러오지 못했습니다.');
+      setIssuedAccounts([]);
     } finally {
       setIsLoadingIssuedList(false);
     }
@@ -439,7 +450,9 @@ export default function AccountIssueClient() {
             새로고침
           </LoadingButton>
         </div>
-        {issuedAccounts.length === 0 ? (
+        {issuedListError ? (
+          <p className="text-sm text-red-600">{issuedListError}</p>
+        ) : issuedAccounts.length === 0 ? (
           <p className="text-sm text-gray-500">생성된 계정이 없습니다.</p>
         ) : (
           <div className="overflow-x-auto">
