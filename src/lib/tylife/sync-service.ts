@@ -1104,7 +1104,7 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
           db
             .from('contracts')
             .select(
-              'id, join_date, unit_count, sales_member_id, customer_id, sales_link_status, status, is_cancelled, rental_request_no, invoice_no, memo',
+              'id, join_date, unit_count, sales_member_id, customer_id, sales_link_status, status, is_cancelled, rental_request_no, invoice_no, memo, created_at',
             )
             .eq('is_cancelled', false),
         ]);
@@ -1165,6 +1165,7 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
             join_date: String(row.join_date ?? '').slice(0, 10),
             unit_count: row.unit_count ?? 0,
             sales_member_id: sid,
+            created_at: (row.created_at ?? null) as string | null,
           });
         }
 

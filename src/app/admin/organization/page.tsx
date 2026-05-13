@@ -85,7 +85,7 @@ export default async function OrganizationPage({
     db
       .from('contracts')
       .select(
-        'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, customer_id, sales_member_id, is_cancelled, sales_link_status, customers(name, phone)',
+        'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, customer_id, sales_member_id, is_cancelled, sales_link_status, created_at, customers(name, phone)',
       )
       .not('sales_member_id', 'is', null)
       .order('join_date', { ascending: false })
@@ -266,6 +266,7 @@ export default async function OrganizationPage({
     is_cancelled?: boolean | null;
     sales_link_status?: string | null;
     customers: { name: string; phone: string | null } | null;
+    created_at?: string | null;
   }>;
 
   // treeRows는 기본적으로 DB edges + 표시 규칙으로 구성하되,
@@ -407,6 +408,7 @@ export default async function OrganizationPage({
             customer_name: c.customers?.name ?? '',
           }),
         ),
+        created_at: (c as { created_at?: string | null }).created_at ?? null,
       }));
 
     const promotionThresholdByMemberId = computeSalesMemberPromotionThreshold(
@@ -541,6 +543,7 @@ export default async function OrganizationPage({
         contract_code: c.contract_code,
         customer_name: c.customers?.name ?? '',
       })),
+      created_at: (c as { created_at?: string | null }).created_at ?? null,
     }));
 
   // 조직도 페이지 전용 예외 대상(안성준 직속 1단계 영업사원/리더) 계산 + 디버그용 요약

@@ -171,13 +171,20 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const contractIds = baseRows.map((r) => r.contract_id);
   const { data: contractCustomerRows } = await db
     .from('contracts')
-    .select('id, customer_id, item_name')
+    .select('id, customer_id, item_name, created_at')
     .in('id', contractIds);
   const customerIdByContractId = new Map<string, string>();
   const itemNameByContractId = new Map<string, string | null>();
-  for (const r of (contractCustomerRows ?? []) as Array<{ id: string; customer_id: string; item_name?: string | null }>) {
+  const createdAtByContractId = new Map<string, string | null>();
+  for (const r of (contractCustomerRows ?? []) as Array<{
+    id: string;
+    customer_id: string;
+    item_name?: string | null;
+    created_at?: string | null;
+  }>) {
     customerIdByContractId.set(r.id, r.customer_id);
     itemNameByContractId.set(r.id, (r as any).item_name ?? null);
+    createdAtByContractId.set(r.id, (r.created_at ?? null) as string | null);
   }
 
   // customer_id -> member_id (source_customer_id 우선, 없으면 external_id=customer:* 사용)
@@ -200,6 +207,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const eligibleContracts = baseRows.map((r) => {
     const customer_id = customerIdByContractId.get(r.contract_id) ?? null;
     const item_name = itemNameByContractId.get(r.contract_id) ?? null;
+    const created_at = createdAtByContractId.get(r.contract_id) ?? null;
     const raw_sales_member_id = r.sales_member_id;
     let sales_member_id = r.sales_member_id;
     const mappedCustomerMemberId = customer_id ? (memberIdByCustomerId.get(customer_id) ?? null) : null;
@@ -225,6 +233,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       sales_member_id,
       unit_count: r.unit_count ?? 0,
       item_name,
+      created_at,
       is_self_customer_contract,
     };
   });
@@ -244,6 +253,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
         join_date: String(c.join_date ?? '').slice(0, 10),
         unit_count: Number(c.unit_count ?? 0),
         sales_member_id: String(c.sales_member_id ?? ''),
+        created_at: (c.created_at ?? null) as string | null,
       }))
       .filter((c) => !!c.id && !!c.join_date && !!c.sales_member_id);
 

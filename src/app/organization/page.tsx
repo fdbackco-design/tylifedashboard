@@ -170,7 +170,7 @@ export default async function OrganizationMyTreePage({
   };
 
   const contractSelect =
-    'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, is_cancelled, customers(name, phone)';
+    'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, is_cancelled, customers(name, phone), created_at';
 
   const contractChunks = chunk(subtreeMemberIds, 500);
   const contractResList = await Promise.all(
@@ -219,6 +219,7 @@ export default async function OrganizationMyTreePage({
       status: (c as any).status as string,
       item_name: (c as any).item_name ?? null,
       sales_member_id: (c as any).sales_member_id as string,
+      created_at: ((c as any).created_at ?? null) as string | null,
     }));
   debugStats.eligible_contracts_for_metrics_count = eligibleContractsForMetrics.length;
 

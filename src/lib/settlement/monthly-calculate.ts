@@ -54,16 +54,18 @@ export async function calculateMonthlySettlement(params: {
   const contractIds = normalizedContractsBase.map((c) => c.id).filter(Boolean);
   const { data: contractCustomerRows, error: ccErr } = await db
     .from('contracts')
-    .select('id, customer_id, item_name')
+    .select('id, customer_id, item_name, created_at')
     .in('id', contractIds);
   if (ccErr) throw new Error(`contracts(customer_id, item_name) 조회 실패: ${ccErr.message}`);
 
   const customerIdByContractId = new Map<string, string>();
   const itemNameByContractId = new Map<string, string | null>();
+  const createdAtByContractId = new Map<string, string | null>();
   for (const r of (contractCustomerRows ?? []) as any[]) {
     if (!r?.id) continue;
     const id = String(r.id);
     itemNameByContractId.set(id, (r.item_name ?? null) as string | null);
+    createdAtByContractId.set(id, (r.created_at ?? null) as string | null);
     if (r.customer_id) customerIdByContractId.set(id, String(r.customer_id));
   }
 
@@ -78,7 +80,9 @@ export async function calculateMonthlySettlement(params: {
     db.from('organization_edges').select('parent_id, child_id'),
     db
       .from('contracts')
-      .select('id, join_date, unit_count, sales_member_id, customer_id, sales_link_status, status, is_cancelled')
+      .select(
+        'id, join_date, unit_count, sales_member_id, customer_id, sales_link_status, status, is_cancelled, created_at',
+      )
       .eq('status', '가입')
       .eq('is_cancelled', false),
   ]);
@@ -116,7 +120,8 @@ export async function calculateMonthlySettlement(params: {
 
   const normalizedContracts = normalizedContractsBase.map((c) => {
     const item_name = itemNameByContractId.get(c.id) ?? null;
-    const withMeta = { ...c, item_name };
+    const created_at = createdAtByContractId.get(c.id) ?? null;
+    const withMeta = { ...c, item_name, created_at };
     const customerId = customerIdByContractId.get(c.id) ?? null;
     if (customerId) {
       const mapped = memberIdByCustomerId.get(customerId) ?? null;
@@ -140,6 +145,7 @@ export async function calculateMonthlySettlement(params: {
       join_date: String(row.join_date ?? '').slice(0, 10),
       unit_count: row.unit_count ?? 0,
       sales_member_id: sid,
+      created_at: (row.created_at ?? null) as string | null,
     });
   }
 
@@ -203,7 +209,8 @@ export async function calculateMonthlySettlement(params: {
 
     let assignTo = origin;
     const th = promotionThresholdByMemberId.get(origin) ?? null;
-    if (th && !isContractStrictlyAfterPromotionThreshold(c.join_date, c.id, th)) {
+    const cCreated = (c as { created_at?: string | null }).created_at ?? null;
+    if (th && !isContractStrictlyAfterPromotionThreshold(c.join_date, c.id, th, cCreated)) {
       const recordedPrev = prevParentByMemberId.get(origin) ?? null;
       const parentId = recordedPrev ?? (parentByChild.get(origin) ?? null);
       const parentRank = parentId ? (rankByIdRaw.get(parentId) ?? null) : null;
