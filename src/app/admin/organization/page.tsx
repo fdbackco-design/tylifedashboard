@@ -3,7 +3,12 @@ import Link from 'next/link';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { buildOrgTree } from '@/lib/settlement/calculator';
 import { BASE_AMOUNT_PER_UNIT } from '@/lib/settlement/constants';
-import { getSettlementWindowForYearMonth, getSettlementWindowSeoul } from '@/lib/settlement/settlement-window';
+import {
+  coalesceYearMonthSearchParam,
+  contractJoinYmdInInclusiveWindow,
+  getSettlementWindowForYearMonth,
+  getSettlementWindowSeoul,
+} from '@/lib/settlement/settlement-window';
 import { calculateOrgNodeMetrics } from '@/lib/settlement/org-node-metrics';
 import { isSettlementEligibleContract } from '@/lib/settlement/settlement-eligibility';
 import { isContractJoinCompleted } from '@/lib/utils/contract-display-status';
@@ -56,7 +61,8 @@ export default async function OrganizationPage({
   const db = createAdminSupabaseClient();
 
   const defaultYearMonth = getSettlementWindowSeoul().label_year_month;
-  const requestedYearMonth = sp.year_month ?? defaultYearMonth;
+  const requestedYearMonth =
+    coalesceYearMonthSearchParam(sp.year_month as string | string[] | undefined) ?? defaultYearMonth;
   const yearMonth = /^\d{4}-\d{2}$/.test(requestedYearMonth) ? requestedYearMonth : defaultYearMonth;
   const { start_date, end_date, label_year_month } = getSettlementWindowForYearMonth(yearMonth);
 
@@ -744,15 +750,11 @@ export default async function OrganizationPage({
   const totalJoinUnits = kpiRow?.total_join_units ?? 0;
   const periodJoinUnits = kpiRow?.period_join_units ?? 0;
 
-  // 이번달(정산 윈도우) 준비+대기 구좌 수
+  // 이번달(정산 윈도우) 준비+대기 구좌 수 — join_date는 문자열/ISO/Date 혼재에 대비해 서울 YYYY-MM-DD로 맞춘 뒤 비교
   const periodPendingUnits = rawContractRows
-    .filter((c) => {
-      const jd = (c.join_date ?? '').slice(0, 10);
-      if (!jd) return false;
-      return jd >= start_date && jd <= end_date;
-    })
+    .filter((c) => contractJoinYmdInInclusiveWindow(c.join_date, start_date, end_date))
     .filter((c) => !c.is_cancelled)
-    .filter((c) => c.status !== '해약')
+    .filter((c) => String(c.status ?? '').trim() !== '해약')
     .filter((c) => {
       // 조직도 계약 리스트와 동일하게 "렌탈 미충족" 표시 상태는 제외
       const displayStatus = getContractDisplayStatus({
@@ -762,7 +764,8 @@ export default async function OrganizationPage({
         memo: c.memo ?? null,
       });
       if (displayStatus === '렌탈 미충족') return false;
-      return c.status === '준비' || c.status === '대기';
+      const st = String(c.status ?? '').trim();
+      return st === '준비' || st === '대기';
     })
     .reduce((sum, c) => sum + (c.unit_count ?? 0), 0);
 

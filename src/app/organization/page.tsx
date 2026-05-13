@@ -7,7 +7,12 @@ import YearMonthSelector from '@/components/YearMonthSelector';
 import { createAdminSupabaseClient, createServerSupabaseClient } from '@/lib/supabase/server';
 import { buildOrgTree } from '@/lib/settlement/calculator';
 import { collectSubtreeMemberIdsDownstream } from '@/lib/settlement/settlement-org-tree';
-import { getSettlementWindowForYearMonth, getSettlementWindowSeoul } from '@/lib/settlement/settlement-window';
+import {
+  coalesceYearMonthSearchParam,
+  contractJoinYmdInInclusiveWindow,
+  getSettlementWindowForYearMonth,
+  getSettlementWindowSeoul,
+} from '@/lib/settlement/settlement-window';
 import { calculateOrgNodeMetrics } from '@/lib/settlement/org-node-metrics';
 import { isSettlementEligibleContract } from '@/lib/settlement/settlement-eligibility';
 import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
@@ -66,7 +71,8 @@ export default async function OrganizationMyTreePage({
   const debugEnabled = sp.debug === '1';
 
   const defaultYearMonth = getSettlementWindowSeoul().label_year_month;
-  const requestedYearMonth = sp.year_month ?? defaultYearMonth;
+  const requestedYearMonth =
+    coalesceYearMonthSearchParam(sp.year_month as string | string[] | undefined) ?? defaultYearMonth;
   const yearMonth = /^\d{4}-\d{2}$/.test(requestedYearMonth) ? requestedYearMonth : defaultYearMonth;
   const { start_date, end_date, label_year_month } = getSettlementWindowForYearMonth(yearMonth);
 
@@ -334,9 +340,10 @@ export default async function OrganizationMyTreePage({
   // - 이번달 준비 구좌: (정산 윈도우) + 준비/대기 + 해약 제외 + 취소 제외 + 렌탈 미충족 제외
   // - 이번달 가입 구좌: (정산 윈도우) + 가입 완료(표시 상태 기준) + 취소 제외
   const periodPendingUnits = contractsRaw
+    .filter((c: any) => contractJoinYmdInInclusiveWindow(c.join_date, start_date, end_date))
     .filter((c: any) => subtreeIdSet.has(resolveContractSalesMemberId(contractRemapInput(c))))
     .filter((c: any) => !c.is_cancelled)
-    .filter((c: any) => c.status !== '해약')
+    .filter((c: any) => String(c.status ?? '').trim() !== '해약')
     .filter((c: any) => {
       const displayStatus = getContractDisplayStatus({
         status: c.status,
@@ -345,11 +352,13 @@ export default async function OrganizationMyTreePage({
         memo: c.memo ?? null,
       });
       if (displayStatus === '렌탈 미충족') return false;
-      return c.status === '준비' || c.status === '대기';
+      const st = String(c.status ?? '').trim();
+      return st === '준비' || st === '대기';
     })
     .reduce((sum: number, c: any) => sum + (c.unit_count ?? 0), 0);
 
   const periodJoinUnits = contractsRaw
+    .filter((c: any) => contractJoinYmdInInclusiveWindow(c.join_date, start_date, end_date))
     .filter((c: any) => subtreeIdSet.has(resolveContractSalesMemberId(contractRemapInput(c))))
     .filter((c: any) => !c.is_cancelled)
     .filter((c: any) =>

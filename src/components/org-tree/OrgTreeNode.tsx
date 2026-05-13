@@ -78,8 +78,9 @@ export function countByStatus(
       ) {
         continue;
       }
+      const st = String(c.status ?? '').trim();
       const bucket: CardStatus =
-        (c.status as CardStatus) in counts ? (c.status as CardStatus) : '준비';
+        st === '해약' ? '해약' : st === '대기' ? '대기' : st === '준비' ? '준비' : '준비';
       counts[bucket] += 1;
     }
   }

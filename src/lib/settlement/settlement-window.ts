@@ -72,3 +72,69 @@ export function getSettlementWindowForYearMonth(
   return { start_date, end_date, label_year_month };
 }
 
+/** Next.js searchParams 등에서 `year_month` 단일 값만 안전히 꺼낸다. */
+export function coalesceYearMonthSearchParam(
+  raw: string | string[] | undefined | null,
+): string | undefined {
+  if (raw == null) return undefined;
+  if (typeof raw === 'string') {
+    const t = raw.trim();
+    return t || undefined;
+  }
+  if (Array.isArray(raw)) {
+    for (const x of raw) {
+      if (typeof x !== 'string') continue;
+      const t = x.trim();
+      if (t) return t;
+    }
+  }
+  return undefined;
+}
+
+const JOIN_YMD_PREFIX_RE = /^(\d{4}-\d{2}-\d{2})/;
+
+/**
+ * contracts.join_date (DATE/문자/타임존 포함 ISO)를 정산 윈도우 비교용 `YYYY-MM-DD`로 통일.
+ * DB가 DATE만 주는 경우 그대로, ISO+UTC인 경우 서울 달력 기준으로 맞춘다.
+ */
+export function contractJoinYmdForWindow(joinDate: unknown): string | null {
+  if (joinDate == null) return null;
+  if (typeof joinDate === 'string') {
+    const t = joinDate.trim();
+    if (!t) return null;
+    // Postgres DATE 등 순수 날짜 문자열은 그대로 비교(UTC 자정 ISO로 잘못 밀리는 것 방지)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+    const d = new Date(t);
+    if (!Number.isNaN(d.getTime())) {
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Seoul',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(d);
+    }
+    const m = JOIN_YMD_PREFIX_RE.exec(t);
+    if (m) return m[1];
+    return null;
+  }
+  if (joinDate instanceof Date) {
+    if (Number.isNaN(joinDate.getTime())) return null;
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Seoul',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(joinDate);
+  }
+  return null;
+}
+
+export function contractJoinYmdInInclusiveWindow(
+  joinDate: unknown,
+  startYmd: string,
+  endYmd: string,
+): boolean {
+  const jd = contractJoinYmdForWindow(joinDate);
+  if (!jd) return false;
+  return jd >= startYmd && jd <= endYmd;
+}
