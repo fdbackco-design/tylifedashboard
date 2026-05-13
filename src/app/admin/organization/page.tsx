@@ -432,7 +432,30 @@ export default async function OrganizationPage({
     // UI에서 '리더'로 보이게 되는 경우, DB의 organization_members.rank도 함께 승격 반영한다.
     // - 안전을 위해 "승격(영업사원 → 리더)"만 수행하고, 조건이 풀렸다고 해서 강등은 하지 않는다.
     // - 본사/특정 예외(안성준 본사 취급)는 DB에 쓰지 않는다.
+    // - leader_promotion_events: 정산에서 승격 전 상위 리더·policy 플래그를 복원하므로, rank 업데이트와 함께 기록한다.
     try {
+      const existingPromoMemberIds = new Set(
+        ((promoEventsRes.data ?? []) as any[]).map((r) => String(r.member_id)),
+      );
+
+      const buildLeaderPromoEventRow = (
+        memberId: string,
+      ): {
+        member_id: string;
+        previous_parent_id: string | null;
+        threshold_contract_id: string;
+        threshold_join_date: string;
+      } | null => {
+        const th = promotionThresholdByMemberId.get(memberId) ?? null;
+        if (!th) return null;
+        return {
+          member_id: memberId,
+          previous_parent_id: edgeMap.get(memberId) ?? null,
+          threshold_contract_id: th.threshold_contract_id,
+          threshold_join_date: th.threshold_join_date,
+        };
+      };
+
       const promotedIds = treeRows
         .filter((r) => r.rank === '리더')
         .map((r) => r.id)
@@ -449,15 +472,44 @@ export default async function OrganizationPage({
       const ahnId = membersRaw.find((m: any) => m.name === '안성준')?.id ?? null;
       const idsToUpdate = ahnId ? promotedIds.filter((id) => id !== ahnId) : promotedIds;
 
+      let rankUpdateErr: { message: string } | null = null;
       if (idsToUpdate.length > 0) {
-        const { error: rankUpdateErr } = await db
+        const { error } = await db
           .from('organization_members')
           .update({ rank: '리더' as any } as any)
           .in('id', idsToUpdate);
-        if (rankUpdateErr) {
+        rankUpdateErr = error ?? null;
+        if (error) {
           // 페이지 렌더는 막지 않는다.
           // (서버 로그에서만 확인 가능)
-          console.error('organization_members.rank 업데이트 실패:', rankUpdateErr.message);
+          console.error('organization_members.rank 업데이트 실패:', error.message);
+        }
+      }
+
+      const memberIdsNeedingPromoRow = new Set<string>();
+      if (!rankUpdateErr && idsToUpdate.length > 0) {
+        for (const id of idsToUpdate) memberIdsNeedingPromoRow.add(id);
+      }
+      // 이미 DB에 리더인데 이전 코드 때문에 leader_promotion_events 가 비어 있는 경우 보정
+      for (const m of members as any[]) {
+        const id = String(m.id);
+        if (ahnId && id === ahnId) continue;
+        if (existingPromoMemberIds.has(id)) continue;
+        const raw = rankByIdRaw.get(id) ?? '';
+        if (raw !== '리더') continue;
+        if (!buildLeaderPromoEventRow(id)) continue;
+        memberIdsNeedingPromoRow.add(id);
+      }
+
+      const promoRows = [...memberIdsNeedingPromoRow]
+        .map((id) => buildLeaderPromoEventRow(id))
+        .filter((row): row is NonNullable<typeof row> => row != null)
+        .filter((row) => !existingPromoMemberIds.has(row.member_id));
+
+      if (promoRows.length > 0) {
+        const { error: promoErr } = await db.from('leader_promotion_events').insert(promoRows as any);
+        if (promoErr) {
+          console.error('leader_promotion_events 삽입 실패:', promoErr.message);
         }
       }
     } catch (e) {
