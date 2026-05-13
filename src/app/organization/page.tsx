@@ -17,6 +17,7 @@ import type { ContractItem } from '@/components/org-tree/OrgTreeNode';
 import { buildChildrenByParentFromRows } from '@/lib/settlement/settlement-org-tree';
 import AccountActionsClient from './AccountActionsClient';
 import { stripOrgTreeNodesForDisplay } from '@/lib/organization/org-tree-display';
+import { buildOrgContractSalesRemap } from '@/lib/organization/org-contract-sales-remap';
 
 export const metadata: Metadata = { title: '내 조직도' };
 export const dynamic = 'force-dynamic';
@@ -138,6 +139,13 @@ export default async function OrganizationMyTreePage({
   const edgesRaw = (snapshot.edges ?? []) as Array<{ parent_id: string | null; child_id: string }>;
   const rules = (snapshot.rules ?? []) as SettlementRule[];
 
+  const {
+    remapCustomerMemberId,
+    resolveContractSalesMemberId,
+    hqIds: hqIdsForContracts,
+  } = buildOrgContractSalesRemap(membersRaw as any);
+  const hqSalesMemberIds = [...hqIdsForContracts];
+
   debugStats.members_raw_count = membersRaw.length;
   debugStats.edges_raw_count = edgesRaw.length;
 
@@ -201,24 +209,54 @@ export default async function OrganizationMyTreePage({
   }
 
   const contractSelect =
-    'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, is_cancelled, customers(name, phone), created_at';
+    'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, customer_id, is_cancelled, customers(name, phone), created_at';
 
   const contractChunks = chunk(subtreeMemberIds, 500);
   const contractResList = await Promise.all(
     contractChunks.map((ids) =>
-      adminDb
-        .from('contracts')
-        .select(contractSelect)
-        .in('sales_member_id', ids)
-        .gte('join_date', start_date)
-        // endExclusive 계산은 프론트/기존 util과 동일하게 더 엄격히 맞추지 않고, join_date<=end_date 방식으로 처리
-        .lte('join_date', end_date)
-        .order('join_date', { ascending: false })
-        .limit(20000),
+      ids.length === 0
+        ? Promise.resolve({ data: [] as any[] })
+        : adminDb
+            .from('contracts')
+            .select(contractSelect)
+            .in('sales_member_id', ids)
+            .gte('join_date', start_date)
+            .lte('join_date', end_date)
+            .order('join_date', { ascending: false })
+            .limit(20000),
     ),
   );
 
-  const contractsRaw = contractResList.flatMap((r) => r.data ?? []);
+  let contractsRaw = contractResList.flatMap((r) => r.data ?? []);
+
+  if (hqSalesMemberIds.length > 0) {
+    const { data: hqWindowRows } = await adminDb
+      .from('contracts')
+      .select(contractSelect)
+      .in('sales_member_id', hqSalesMemberIds)
+      .gte('join_date', start_date)
+      .lte('join_date', end_date)
+      .order('join_date', { ascending: false })
+      .limit(20000);
+    const seenWin = new Set(contractsRaw.map((c: any) => c.id as string));
+    for (const row of (hqWindowRows ?? []) as any[]) {
+      if (!row?.id || seenWin.has(row.id)) continue;
+      const eff = resolveContractSalesMemberId({
+        sales_member_id: row.sales_member_id,
+        customer_id: row.customer_id,
+        status: row.status,
+        rental_request_no: row.rental_request_no ?? null,
+        invoice_no: row.invoice_no ?? null,
+        memo: row.memo ?? null,
+        customer_phone: row.customers?.phone ?? null,
+        contract_code: row.contract_code ?? null,
+        customer_name: row.customers?.name ?? null,
+      });
+      if (!subtreeIdSet.has(eff)) continue;
+      seenWin.add(row.id);
+      contractsRaw.push(row);
+    }
+  }
 
   // subtree parent는 “parent가 subtree 밖이면 root 처리(=parent null)”
   const subtreeTreeRows: OrgTreeRow[] = treeRows
@@ -235,6 +273,18 @@ export default async function OrganizationMyTreePage({
   debugStats.tree_roots_count = tree.length;
   debugStats.tree_root_ids = tree.map((r: any) => r.id);
 
+  const contractRemapInput = (c: any) => ({
+    sales_member_id: String(c.sales_member_id ?? ''),
+    customer_id: String(c.customer_id ?? ''),
+    status: c.status as string,
+    rental_request_no: (c.rental_request_no ?? null) as string | null,
+    invoice_no: (c.invoice_no ?? null) as string | null,
+    memo: (c.memo ?? null) as string | null,
+    customer_phone: (c.customers?.phone ?? null) as string | null,
+    contract_code: (c.contract_code ?? null) as string | null,
+    customer_name: (c.customers?.name ?? null) as string | null,
+  });
+
   const eligibleContractsForMetrics = contractsRaw
     .filter((c) => {
       const joinDate = (c as any).join_date ? String((c as any).join_date).slice(0, 10) : '';
@@ -243,15 +293,20 @@ export default async function OrganizationMyTreePage({
       return true;
     })
     .filter(isSettlementEligibleContract)
-    .map((c) => ({
-      contract_id: (c as any).id as string,
-      join_date: String((c as any).join_date ?? '').slice(0, 10),
-      unit_count: (c as any).unit_count ?? 0,
-      status: (c as any).status as string,
-      item_name: (c as any).item_name ?? null,
-      sales_member_id: (c as any).sales_member_id as string,
-      created_at: ((c as any).created_at ?? null) as string | null,
-    }));
+    .map((c) => {
+      const resolved = resolveContractSalesMemberId(contractRemapInput(c));
+      if (!subtreeIdSet.has(resolved)) return null;
+      return {
+        contract_id: (c as any).id as string,
+        join_date: String((c as any).join_date ?? '').slice(0, 10),
+        unit_count: (c as any).unit_count ?? 0,
+        status: (c as any).status as string,
+        item_name: (c as any).item_name ?? null,
+        sales_member_id: resolved,
+        created_at: ((c as any).created_at ?? null) as string | null,
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => x != null);
   debugStats.eligible_contracts_for_metrics_count = eligibleContractsForMetrics.length;
 
   // ── 개인 대시 카드(서브트리 KPI) ─────────────────────────────
@@ -259,6 +314,7 @@ export default async function OrganizationMyTreePage({
   // - 이번달 준비 구좌: (정산 윈도우) + 준비/대기 + 해약 제외 + 취소 제외 + 렌탈 미충족 제외
   // - 이번달 가입 구좌: (정산 윈도우) + 가입 완료(표시 상태 기준) + 취소 제외
   const periodPendingUnits = contractsRaw
+    .filter((c: any) => subtreeIdSet.has(resolveContractSalesMemberId(contractRemapInput(c))))
     .filter((c: any) => !c.is_cancelled)
     .filter((c: any) => c.status !== '해약')
     .filter((c: any) => {
@@ -274,6 +330,7 @@ export default async function OrganizationMyTreePage({
     .reduce((sum: number, c: any) => sum + (c.unit_count ?? 0), 0);
 
   const periodJoinUnits = contractsRaw
+    .filter((c: any) => subtreeIdSet.has(resolveContractSalesMemberId(contractRemapInput(c))))
     .filter((c: any) => !c.is_cancelled)
     .filter((c: any) =>
       getContractDisplayStatus({
@@ -287,19 +344,49 @@ export default async function OrganizationMyTreePage({
 
   // 누적 가입 구좌: 월 제한 없이(서브트리 전체) 가입 완료(표시 상태) 합산
   const cumulativeContractsSelect =
-    'id, join_date, unit_count, status, rental_request_no, invoice_no, memo, is_cancelled, sales_member_id, item_name, created_at';
+    'id, join_date, unit_count, status, rental_request_no, invoice_no, memo, is_cancelled, sales_member_id, customer_id, item_name, created_at, customers(phone)';
   const cumulativeResList = await Promise.all(
     contractChunks.map((ids) =>
-      adminDb
-        .from('contracts')
-        .select(cumulativeContractsSelect)
-        .in('sales_member_id', ids)
-        .not('sales_member_id', 'is', null)
-        .limit(50000),
+      ids.length === 0
+        ? Promise.resolve({ data: [] as any[] })
+        : adminDb
+            .from('contracts')
+            .select(cumulativeContractsSelect)
+            .in('sales_member_id', ids)
+            .not('sales_member_id', 'is', null)
+            .limit(50000),
     ),
   );
-  const cumulativeContractsRaw = cumulativeResList.flatMap((r) => r.data ?? []);
+  let cumulativeContractsRaw = cumulativeResList.flatMap((r) => r.data ?? []);
+
+  if (hqSalesMemberIds.length > 0) {
+    const { data: hqCumRows } = await adminDb
+      .from('contracts')
+      .select(cumulativeContractsSelect)
+      .in('sales_member_id', hqSalesMemberIds)
+      .not('sales_member_id', 'is', null)
+      .limit(50000);
+    const seenC = new Set(cumulativeContractsRaw.map((c: any) => c.id as string));
+    for (const row of (hqCumRows ?? []) as any[]) {
+      if (!row?.id || seenC.has(row.id)) continue;
+      const eff = resolveContractSalesMemberId({
+        sales_member_id: row.sales_member_id,
+        customer_id: row.customer_id,
+        status: row.status,
+        rental_request_no: row.rental_request_no ?? null,
+        invoice_no: row.invoice_no ?? null,
+        memo: row.memo ?? null,
+        customer_phone: row.customers?.phone ?? null,
+        contract_code: row.contract_code ?? null,
+        customer_name: null,
+      });
+      if (!subtreeIdSet.has(eff)) continue;
+      seenC.add(row.id);
+      cumulativeContractsRaw.push(row);
+    }
+  }
   const totalJoinUnits = cumulativeContractsRaw
+    .filter((c: any) => subtreeIdSet.has(resolveContractSalesMemberId(contractRemapInput(c))))
     .filter((c: any) => !c.is_cancelled)
     .filter((c: any) =>
       getContractDisplayStatus({
@@ -319,33 +406,27 @@ export default async function OrganizationMyTreePage({
       return true;
     })
     .filter(isSettlementEligibleContract)
-    .map((c: any) => ({
-      contract_id: String(c.id ?? `${c.sales_member_id ?? 'unknown'}:${String(c.join_date ?? '')}`),
-      join_date: String(c.join_date ?? '').slice(0, 10),
-      unit_count: c.unit_count ?? 0,
-      status: c.status as string,
-      item_name: c.item_name ?? null,
-      sales_member_id: c.sales_member_id as string,
-      created_at: (c.created_at ?? null) as string | null,
-    }));
+    .map((c: any) => {
+      const resolved = resolveContractSalesMemberId(contractRemapInput(c));
+      if (!subtreeIdSet.has(resolved)) return null;
+      return {
+        contract_id: String(c.id ?? `${c.sales_member_id ?? 'unknown'}:${String(c.join_date ?? '')}`),
+        join_date: String(c.join_date ?? '').slice(0, 10),
+        unit_count: c.unit_count ?? 0,
+        status: c.status as string,
+        item_name: c.item_name ?? null,
+        sales_member_id: resolved,
+        created_at: (c.created_at ?? null) as string | null,
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => x != null);
 
   const contractsByMember: Record<string, ContractItem[]> = {};
   for (const c of contractsRaw) {
-    const salesMid = (c as any).sales_member_id as string | null;
-    if (!salesMid) continue;
-    // 이미 in(sales_member_id, subtreeIds)로 좁혔지만, 혹시 모를 방어
-    if (!subtreeIdSet.has(salesMid)) continue;
+    const key = resolveContractSalesMemberId(contractRemapInput(c));
+    if (!subtreeIdSet.has(key)) continue;
 
-    const displayStatus = getContractDisplayStatus({
-      status: (c as any).status as string,
-      rental_request_no: (c as any).rental_request_no ?? null,
-      invoice_no: (c as any).invoice_no ?? null,
-      memo: (c as any).memo ?? null,
-    });
-
-    // OrgTree는 화면 상태를 직접 판단하진 않기 때문에, item.status를 그대로 전달(=DB status)
-    if (!contractsByMember[salesMid]) contractsByMember[salesMid] = [];
-    contractsByMember[salesMid].push({
+    const item = {
       id: (c as any).id as string,
       contract_code: (c as any).contract_code as string,
       join_date: (c as any).join_date ? String((c as any).join_date).slice(0, 10) : null,
@@ -357,7 +438,17 @@ export default async function OrganizationMyTreePage({
       status: (c as any).status as string,
       unit_count: (c as any).unit_count ?? null,
       customer_name: (c as any).customers?.name ?? '',
-    });
+    };
+
+    if (!contractsByMember[key]) contractsByMember[key] = [];
+    contractsByMember[key].push(item);
+
+    const customerKeyRaw = remapCustomerMemberId((c as any).customer_id as string);
+    const customerKey = customerKeyRaw && subtreeIdSet.has(customerKeyRaw) ? customerKeyRaw : '';
+    if (customerKey && customerKey !== key) {
+      if (!contractsByMember[customerKey]) contractsByMember[customerKey] = [];
+      contractsByMember[customerKey].push(item);
+    }
   }
   debugStats.contracts_by_member_keys = Object.keys(contractsByMember).slice(0, 30);
   debugStats.contracts_by_member_total_rows = Object.values(contractsByMember).reduce((s, arr) => s + arr.length, 0);
