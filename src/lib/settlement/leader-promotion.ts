@@ -129,6 +129,30 @@ export function computeSalesMemberPromotionThreshold(
   return out;
 }
 
+/**
+ * `leader_promotion_events`에 기록된 승격 계약을 threshold 맵의 단일 출처(SSOT)로 덮어쓴다.
+ * 월정산·조직 KPI에서 `joinAttributed` 귀속 차이로 재계산된 threshold가 이벤트와 어긋나는 것을 맞춘다.
+ */
+export function mergeLeaderPromotionEventThresholds(
+  promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>,
+  events: ReadonlyArray<{
+    member_id?: string | null;
+    threshold_contract_id?: string | null;
+    threshold_join_date?: string | null;
+  }>,
+  thresholdContractCreatedAtById: ReadonlyMap<string, string | null>,
+): void {
+  for (const r of events) {
+    if (!r?.member_id || !r.threshold_contract_id || !r.threshold_join_date) continue;
+    const cid = String(r.threshold_contract_id);
+    promotionThresholdByMemberId.set(String(r.member_id), {
+      threshold_contract_id: cid,
+      threshold_join_date: String(r.threshold_join_date).slice(0, 10),
+      threshold_created_at: thresholdContractCreatedAtById.get(cid) ?? null,
+    });
+  }
+}
+
 /** @deprecated 날짜만으로는 같은 일자 계약을 구분할 수 없음 — computeSalesMemberPromotionThreshold 사용 */
 export function computeSalesMemberPromotionFirstJoinDate(
   treeRows: OrgTreeRow[],

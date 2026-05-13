@@ -7,6 +7,7 @@ import {
 import { buildSettlementTreeRows } from '@/lib/settlement/settlement-org-tree';
 import {
   computeSalesMemberPromotionThreshold,
+  mergeLeaderPromotionEventThresholds,
   type AttributedJoinContractRow,
   isContractStrictlyAfterPromotionThreshold,
 } from '@/lib/settlement/leader-promotion';
@@ -158,9 +159,6 @@ export async function calculateMonthlySettlement(params: {
 
   const promotionThresholdByMemberId = computeSalesMemberPromotionThreshold(treeRows, joinAttributed, rankById);
 
-  // leader_promotion_events에 기록된 승격 계약이 단일 출처(SSOT).
-  // 월정산의 join 귀속은 조직도(고객 노드/HQ 치환)와 다를 수 있어 재계산 threshold가 이벤트와 어긋나면
-  // 30만/40만 분기가 틀어진다 → 이벤트의 threshold_*로 덮어쓴다.
   const eventRowsWithThreshold = ((promoEvents ?? []) as any[]).filter(
     (r) => r?.member_id && r?.threshold_contract_id && r?.threshold_join_date,
   );
@@ -179,16 +177,11 @@ export async function calculateMonthlySettlement(params: {
       thresholdCreatedAtByContractId.set(String(row.id), (row.created_at ?? null) as string | null);
     }
   }
-  for (const r of eventRowsWithThreshold) {
-    const mid = String(r.member_id);
-    const cid = String(r.threshold_contract_id);
-    const jd = String(r.threshold_join_date).slice(0, 10);
-    promotionThresholdByMemberId.set(mid, {
-      threshold_contract_id: cid,
-      threshold_join_date: jd,
-      threshold_created_at: thresholdCreatedAtByContractId.get(cid) ?? null,
-    });
-  }
+  mergeLeaderPromotionEventThresholds(
+    promotionThresholdByMemberId,
+    (promoEvents ?? []) as any[],
+    thresholdCreatedAtByContractId,
+  );
 
   const leaderRankEffectiveAtByMemberId = new Map<string, string | null>();
   for (const m of membersRaw as OrganizationMember[]) {

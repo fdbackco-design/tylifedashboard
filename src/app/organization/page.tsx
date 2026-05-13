@@ -173,6 +173,33 @@ export default async function OrganizationMyTreePage({
     return out;
   };
 
+  const { data: promoRows } = await adminDb
+    .from('leader_promotion_events')
+    .select('member_id, previous_parent_id, threshold_contract_id, threshold_join_date');
+
+  const policyPromotedMemberIdSet = new Set((promoRows ?? []).map((r: { member_id: string }) => String(r.member_id)));
+  const previousLeaderByPromotedMemberId = new Map<string, string | null>();
+  for (const r of (promoRows ?? []) as { member_id: string; previous_parent_id?: string | null }[]) {
+    previousLeaderByPromotedMemberId.set(String(r.member_id), (r.previous_parent_id ?? null) as string | null);
+  }
+
+  const thPromoContractIds = [
+    ...new Set(
+      (promoRows ?? [])
+        .filter((r: any) => r?.threshold_contract_id && r?.threshold_join_date)
+        .map((r: any) => String(r.threshold_contract_id)),
+    ),
+  ];
+  const leaderPromotionThresholdContractCreatedAtById = new Map<string, string | null>();
+  if (thPromoContractIds.length > 0) {
+    const { data: thRows } = await adminDb.from('contracts').select('id, created_at').in('id', thPromoContractIds);
+    for (const row of (thRows ?? []) as { id: string; created_at?: string | null }[]) {
+      if (row?.id) {
+        leaderPromotionThresholdContractCreatedAtById.set(String(row.id), (row.created_at ?? null) as string | null);
+      }
+    }
+  }
+
   const contractSelect =
     'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, is_cancelled, customers(name, phone), created_at';
 
@@ -260,7 +287,7 @@ export default async function OrganizationMyTreePage({
 
   // 누적 가입 구좌: 월 제한 없이(서브트리 전체) 가입 완료(표시 상태) 합산
   const cumulativeContractsSelect =
-    'join_date, unit_count, status, rental_request_no, invoice_no, memo, is_cancelled, sales_member_id, item_name';
+    'id, join_date, unit_count, status, rental_request_no, invoice_no, memo, is_cancelled, sales_member_id, item_name, created_at';
   const cumulativeResList = await Promise.all(
     contractChunks.map((ids) =>
       adminDb
@@ -293,12 +320,13 @@ export default async function OrganizationMyTreePage({
     })
     .filter(isSettlementEligibleContract)
     .map((c: any) => ({
-      contract_id: c.id ?? `${c.sales_member_id ?? 'unknown'}:${String(c.join_date ?? '')}`, // 방어: 최소 unique
+      contract_id: String(c.id ?? `${c.sales_member_id ?? 'unknown'}:${String(c.join_date ?? '')}`),
       join_date: String(c.join_date ?? '').slice(0, 10),
       unit_count: c.unit_count ?? 0,
       status: c.status as string,
       item_name: c.item_name ?? null,
       sales_member_id: c.sales_member_id as string,
+      created_at: (c.created_at ?? null) as string | null,
     }));
 
   const contractsByMember: Record<string, ContractItem[]> = {};
@@ -345,6 +373,10 @@ export default async function OrganizationMyTreePage({
     })),
     edges: subtreeEdges.map((e) => ({ parent_id: e.parent_id, child_id: e.child_id })),
     treeRows: subtreeTreeRows,
+    previousLeaderByPromotedMemberId,
+    policyPromotedMemberIdSet,
+    leaderPromotionEventsForThreshold: (promoRows ?? []) as any[],
+    leaderPromotionThresholdContractCreatedAtById,
     attributeCommissionToTopLineUnderHq: false,
     // 누적 구좌는 전체 기간 기준이어야 하므로 all-time 계약으로 계산한다.
     contracts: eligibleContractsAllTimeForMetrics as any[],

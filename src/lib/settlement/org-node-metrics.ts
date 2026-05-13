@@ -8,6 +8,7 @@ import {
 import type { OrgTreeRow } from '@/lib/types';
 import {
   computeSalesMemberPromotionThreshold,
+  mergeLeaderPromotionEventThresholds,
   isContractStrictlyAfterPromotionThreshold,
   type AttributedJoinContractRow,
   type SalesMemberPromotionThreshold,
@@ -241,6 +242,17 @@ export function calculateOrgNodeMetrics(params: {
   /** 정책 승격 이벤트가 기록된 멤버 id set (리더를 승격 threshold 계산에 포함시키기 위함) */
   policyPromotedMemberIdSet?: Set<string>;
   /**
+   * 월정산과 동일 SSOT: `leader_promotion_events`의 threshold로 계산된 map을 덮어쓴다.
+   * (조직도 join 귀속과 월정산 전체 계약 목록이 달라 `computeSalesMemberPromotionThreshold`만으로는 어긋날 수 있음)
+   */
+  leaderPromotionEventsForThreshold?: ReadonlyArray<{
+    member_id: string;
+    threshold_contract_id?: string | null;
+    threshold_join_date?: string | null;
+  }>;
+  /** 승격 계약 id → `contracts.created_at` (동일 가입일 단가 분기용) */
+  leaderPromotionThresholdContractCreatedAtById?: ReadonlyMap<string, string | null>;
+  /**
    * true면 인정수당/실지급액을 \"본사(HQ) 직속 최상위 라인\"으로 귀속(집계)한다.
    * - 본사(HQ) 노드 자체는 0 유지
    * - HQ 직속 라인장(=parent가 HQ인 노드)에게 라인 전체 금액을 몰아준다
@@ -263,6 +275,8 @@ export function calculateOrgNodeMetrics(params: {
     hqId,
     leaderMaintenanceBonusBlockedByMemberId,
     policyPromotedMemberIdSet,
+    leaderPromotionEventsForThreshold,
+    leaderPromotionThresholdContractCreatedAtById,
     attributeCommissionToTopLineUnderHq = false,
   } = params;
   const parentByChild = treeRowsParam?.length
@@ -298,6 +312,12 @@ export function calculateOrgNodeMetrics(params: {
     treeRowsForThreshold,
     joinAttributed,
     rankByIdForThreshold,
+  );
+
+  mergeLeaderPromotionEventThresholds(
+    promotionThresholdByMemberId,
+    leaderPromotionEventsForThreshold ?? [],
+    leaderPromotionThresholdContractCreatedAtById ?? new Map(),
   );
 
   const leaderRankEffectiveAtByMemberId = new Map<string, string | null>();

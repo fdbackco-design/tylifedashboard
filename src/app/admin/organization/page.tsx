@@ -94,7 +94,9 @@ export default async function OrganizationPage({
     db.from('settlement_rules').select('*'),
     db
       .from('leader_promotion_events')
-      .select('member_id, previous_parent_id, leader_maintenance_bonus_paid_year_month'),
+      .select(
+        'member_id, previous_parent_id, leader_maintenance_bonus_paid_year_month, threshold_contract_id, threshold_join_date',
+      ),
   ]);
 
   // 안성준은 TY Life 시스템상 영업사원이지만 실제로는 본사(최상위)로 취급
@@ -683,6 +685,28 @@ export default async function OrganizationPage({
     leaderMaintBlockByMemberId.set(mid, paidYm != null && paidYm !== label_year_month);
   }
 
+  const thresholdPromoContractIds = [
+    ...new Set(
+      ((promoEventsRes.data ?? []) as any[])
+        .filter((r) => r?.threshold_contract_id && r?.threshold_join_date)
+        .map((r) => String(r.threshold_contract_id)),
+    ),
+  ];
+  const leaderPromotionThresholdContractCreatedAtById = new Map<string, string | null>();
+  if (thresholdPromoContractIds.length > 0) {
+    const { data: thContractRows } = await db
+      .from('contracts')
+      .select('id, created_at')
+      .in('id', thresholdPromoContractIds);
+    for (const row of (thContractRows ?? []) as any[]) {
+      if (!row?.id) continue;
+      leaderPromotionThresholdContractCreatedAtById.set(
+        String(row.id),
+        (row.created_at ?? null) as string | null,
+      );
+    }
+  }
+
   const orgMetricsById = calculateOrgNodeMetrics({
     roots: tree,
     // 정책 승격으로 treeRows에서 rank를 오버라이드한 경우,
@@ -710,6 +734,8 @@ export default async function OrganizationPage({
     contracts: kpiEligibleForMetrics,
     rules: (rulesRes.data ?? []) as any[],
     settlementWindow: { start_date, end_date, label_year_month },
+    leaderPromotionEventsForThreshold: (promoEventsRes.data ?? []) as any[],
+    leaderPromotionThresholdContractCreatedAtById,
   });
 
   const kpiRow = ((kpiRes.data ?? [])[0] ?? null) as
