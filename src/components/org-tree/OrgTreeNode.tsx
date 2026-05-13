@@ -74,6 +74,8 @@ interface Props {
   contractsByMember: Record<string, ContractItem[]>;
   extraSubtreeIds?: string[];
   showMetrics?: boolean;
+  /** showMetrics일 때 인정수당·실지급액 표시. false면 누적/월 구좌만 */
+  showCommissionMetrics?: boolean;
   showForecast?: boolean;
   nodeMetrics: null | {
     cumulativeUnitCount: number;
@@ -98,6 +100,7 @@ export default function OrgTreeNode({
   contractsByMember,
   extraSubtreeIds,
   showMetrics = true,
+  showCommissionMetrics = true,
   showForecast = false,
   nodeMetrics,
   selectedId,
@@ -197,18 +200,22 @@ export default function OrgTreeNode({
                 {nodeMetrics.monthlyUnitCount.toLocaleString('ko-KR')}
               </span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">인정수당</span>
-              <span className="font-semibold text-gray-800 tabular-nums">
-                {formatManwon(nodeMetrics.recognizedCommissionWon)}만원
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">실지급액</span>
-              <span className="font-semibold text-gray-800 tabular-nums">
-                {formatManwon(nodeMetrics.paidCommissionWon)}만원
-              </span>
-            </div>
+            {showCommissionMetrics ? (
+              <>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">인정수당</span>
+                  <span className="font-semibold text-gray-800 tabular-nums">
+                    {formatManwon(nodeMetrics.recognizedCommissionWon)}만원
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">실지급액</span>
+                  <span className="font-semibold text-gray-800 tabular-nums">
+                    {formatManwon(nodeMetrics.paidCommissionWon)}만원
+                  </span>
+                </div>
+              </>
+            ) : null}
           </div>
         )}
       </div>

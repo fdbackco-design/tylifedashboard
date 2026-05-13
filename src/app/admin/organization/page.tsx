@@ -909,6 +909,7 @@ export default async function OrganizationPage({
           roots={tree}
           contractsByMember={contractsByMember}
           metricsById={orgMetricsById}
+          showCommissionMetrics={false}
           debug={
             debugEnabled
               ? {

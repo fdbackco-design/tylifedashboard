@@ -223,6 +223,8 @@ interface Props {
   editable?: boolean;
   /** 노드 카드의 수당/실지급액(지표) 노출 여부. 기본 true */
   showMetrics?: boolean;
+  /** showMetrics가 true일 때 인정수당·실지급액만 표시할지. false면 누적/월 구좌만 표시. 기본 true */
+  showCommissionMetrics?: boolean;
   /** /organization 전용: 예상수당+목표 게이지 표시 */
   showForecast?: boolean;
   /** /organization 전용: 최상단 가상 '본사(__hq_root__)' 카드를 숨김(레이아웃용 루트는 유지). 기본 false */
@@ -272,6 +274,7 @@ export default function OrgTree({
   debug,
   editable = true,
   showMetrics = true,
+  showCommissionMetrics = true,
   showForecast = false,
   hideHqRoot = false,
 }: Props) {
@@ -510,6 +513,7 @@ export default function OrgTree({
               contractsByMember={contractsByMember}
               extraSubtreeIds={isHqRoot ? strippedNodeIds : undefined}
               showMetrics={showMetrics}
+              showCommissionMetrics={showCommissionMetrics}
               showForecast={showForecast}
               nodeMetrics={metricsById?.[node.id] ?? null}
               selectedId={selectedId}
