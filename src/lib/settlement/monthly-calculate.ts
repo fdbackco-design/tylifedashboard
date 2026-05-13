@@ -251,29 +251,6 @@ export async function calculateMonthlySettlement(params: {
       });
     }
 
-    // 추가 디버그: "리더인데 1구좌당 40만원 미만"으로 떨어지는 경우를 별도로 경고 로그로 남긴다.
-    if (
-      debug &&
-      member.rank === '리더' &&
-      (settlement.direct_unit_count ?? 0) > 0
-    ) {
-      const approx = settlement.direct_unit_count
-        ? Math.round(settlement.base_commission / settlement.direct_unit_count)
-        : null;
-      if (approx != null && approx < 400_000) {
-        // eslint-disable-next-line no-console
-        console.warn('[settlement-debug] leader base under 400k detected', {
-          yearMonth,
-          memberId: member.id,
-          memberName: (member.name ?? '').replace(/^\[고객\]\s*/, ''),
-          dbRank: member.rank,
-          directUnitCount: settlement.direct_unit_count,
-          baseCommission: settlement.base_commission,
-          perUnitApprox: approx,
-        });
-      }
-    }
-
     const { error: uErr } = await db.from('monthly_settlements').upsert(settlement, { onConflict: 'year_month,member_id' });
     if (!uErr) updatedCount++;
   }

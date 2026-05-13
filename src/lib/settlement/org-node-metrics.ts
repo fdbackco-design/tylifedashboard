@@ -105,7 +105,12 @@ function effectiveRankForContract(params: {
     th,
     params.contract.created_at,
   );
-  return after ? '리더' : '영업사원';
+  if (after) return '리더';
+  if (params.dbRank === '리더') {
+    const jd = params.contract.join_date.slice(0, 10);
+    if (jd > th.threshold_join_date) return '리더';
+  }
+  return '영업사원';
 }
 
 function computeDirectUnits(

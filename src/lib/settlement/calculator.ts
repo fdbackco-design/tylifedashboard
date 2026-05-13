@@ -266,10 +266,18 @@ function commissionPerUnitForDirectContract(
   // "승격 계약 이전" 직접 계약은 영업사원 단가, 이후는 리더 단가(롤업 차액 10만/구좌 등).
   // threshold가 없으면 DB 직급 단가 그대로(기존 리더·미달성 등).
   if (th && (dbRank === '영업사원' || dbRank === '리더')) {
-    if (!isContractStrictlyAfterPromotionThreshold(contract.join_date, contract.id, th, contract.created_at)) {
-      return getActiveRuleOrFallback(rules, '영업사원', refDate).commission_per_unit;
+    if (isContractStrictlyAfterPromotionThreshold(contract.join_date, contract.id, th, contract.created_at)) {
+      return getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
     }
-    return getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
+    // DB 직급이 이미 리더인 경우: 직급 전환 후에 맺은 계약이 '20구좌 승격 계약'보다 달력상 뒤인데,
+    // 같은 날·id 정렬만으로는 strictly-after가 false가 되는 경우가 있어 가입일 기준으로 보정한다.
+    if (dbRank === '리더') {
+      const jd = contract.join_date.slice(0, 10);
+      if (jd > th.threshold_join_date) {
+        return getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
+      }
+    }
+    return getActiveRuleOrFallback(rules, '영업사원', refDate).commission_per_unit;
   }
 
   return getActiveRuleOrFallback(rules, dbRank, refDate).commission_per_unit;
