@@ -180,10 +180,6 @@ export default async function OrganizationStatementPage({
                 {downlineAttributedUnits.toLocaleString('ko-KR')} 구좌
               </div>
             </div>
-            <div className="px-4 py-2 text-[11px] text-gray-500 leading-relaxed">
-              내 서브트리에 귀속된 계약 구좌 합에서, 위 개인 실적 구좌(정산 기준)를 뺀 값입니다. 본사 담당 등은
-              내 산하 고객으로 귀속된 경우만 서브트리 합에 포함됩니다.
-            </div>
           </div>
 
           <div className="text-sm font-semibold text-orange-800 mb-2">지급 내역</div>
