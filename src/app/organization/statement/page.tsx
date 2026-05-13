@@ -60,7 +60,11 @@ export default async function OrganizationStatementPage({
   const db = createAdminSupabaseClient();
 
   const [memberRes, settlementRes] = await Promise.all([
-    db.from('organization_members').select('id,name,rank').eq('id', memberId).maybeSingle(),
+    db
+      .from('organization_members')
+      .select('id,name,rank,leader_rank_effective_at')
+      .eq('id', memberId)
+      .maybeSingle(),
     db
       .from('monthly_settlements')
       .select(
@@ -71,7 +75,12 @@ export default async function OrganizationStatementPage({
       .maybeSingle(),
   ]);
 
-  const member = (memberRes.data ?? null) as { id: string; name: string; rank: string } | null;
+  const member = (memberRes.data ?? null) as {
+    id: string;
+    name: string;
+    rank: string;
+    leader_rank_effective_at?: string | null;
+  } | null;
   const s = (settlementRes.data ?? null) as
     | {
         year_month: string;
@@ -127,6 +136,7 @@ export default async function OrganizationStatementPage({
     memberId,
     { start_date, end_date },
     s.direct_unit_count ?? 0,
+    member?.leader_rank_effective_at ?? null,
     { debug },
   );
   const downlineAttributedUnits =
@@ -228,8 +238,10 @@ export default async function OrganizationStatementPage({
                             : '-'}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap text-xs">
-                          {r.excluded_by_leader_after_promotion ? (
-                            <span className="text-amber-700">승격 이후 제외</span>
+                          {r.excluded_by_root_leader_effective_at ? (
+                            <span className="text-amber-700">리더 전 계약 제외</span>
+                          ) : r.excluded_by_leader_after_promotion ? (
+                            <span className="text-amber-700">하위 리더 승격 이후 제외</span>
                           ) : (
                             <span className="text-emerald-700">포함</span>
                           )}

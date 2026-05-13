@@ -37,6 +37,7 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
   rootMemberId: string,
   window: { start_date: string; end_date: string },
   directUnitCountFromSettlement: number,
+  rootLeaderRankEffectiveAt: string | null,
   opts?: { debug?: boolean },
 ): Promise<
   | number
@@ -52,6 +53,7 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
         nearest_leader_id: string | null;
         nearest_leader_name: string | null;
         excluded_by_leader_after_promotion: boolean;
+        excluded_by_root_leader_effective_at: boolean;
       }>;
     }
 > {
@@ -105,6 +107,10 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
   const rankById = new Map(membersFiltered.map((m) => [m.id, m.rank] as const));
   const nameById = new Map(membersFiltered.map((m) => [m.id, m.name] as const));
   const rootRank = rankById.get(rootMemberId) ?? null;
+  const rootLeaderEffectiveAt =
+    rootRank === '리더' && rootLeaderRankEffectiveAt && String(rootLeaderRankEffectiveAt).trim() !== ''
+      ? String(rootLeaderRankEffectiveAt).trim()
+      : null;
   const parentByChild = new Map<string, string | null>(
     treeRows.map((r) => [r.id as string, (r.parent_id ?? null) as string | null]),
   );
@@ -278,6 +284,7 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
     nearest_leader_id: string | null;
     nearest_leader_name: string | null;
     excluded_by_leader_after_promotion: boolean;
+    excluded_by_root_leader_effective_at: boolean;
   }> = [];
   for (const c of contractsRaw) {
     if (!isSettlementEligibleContract(c as any)) continue;
@@ -285,6 +292,37 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
 
     // 기본: 내 서브트리 귀속만 집계
     if (!subtreeIdSet.has(origin)) continue;
+
+    // root가 리더인 경우: "리더가 된 이후" 계약만 포함
+    let excludedByRootLeaderEffectiveAt = false;
+    if (rootLeaderEffectiveAt) {
+      const createdAt = (c.created_at as string | null | undefined) ?? null;
+      if (createdAt && createdAt < rootLeaderEffectiveAt) {
+        excludedByRootLeaderEffectiveAt = true;
+      } else if (!createdAt) {
+        const jd = String((c.join_date as string | null | undefined) ?? '').slice(0, 10);
+        const effYmd = rootLeaderEffectiveAt.slice(0, 10);
+        if (jd && effYmd && jd < effYmd) excludedByRootLeaderEffectiveAt = true;
+      }
+      if (excludedByRootLeaderEffectiveAt) {
+        if (opts?.debug) {
+          const jd = String((c.join_date as string | null | undefined) ?? '').slice(0, 10);
+          debugRows.push({
+            contract_id: String(c.id),
+            contract_code: (c.contract_code as string | null | undefined) ?? null,
+            join_date: jd,
+            unit_count: Number((c.unit_count as number | null | undefined) ?? 0),
+            origin_member_id: origin,
+            origin_member_name: nameById.get(origin) ?? null,
+            nearest_leader_id: null,
+            nearest_leader_name: null,
+            excluded_by_leader_after_promotion: false,
+            excluded_by_root_leader_effective_at: true,
+          });
+        }
+        continue;
+      }
+    }
 
     // 리더일 때만: "하위 리더 발생 시점(승격 계약)" 기준으로 계약 단위 포함/제외
     let excludedByPromotionAfter = false;
@@ -326,6 +364,7 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
               nearest_leader_id: nearestLeaderId,
               nearest_leader_name: nameById.get(nearestLeaderId) ?? null,
               excluded_by_leader_after_promotion: true,
+              excluded_by_root_leader_effective_at: false,
             });
           }
           continue;
@@ -347,6 +386,7 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
           nearest_leader_id: nearestLeaderId,
           nearest_leader_name: nearestLeaderId ? (nameById.get(nearestLeaderId) ?? null) : null,
           excluded_by_leader_after_promotion: excludedByPromotionAfter,
+          excluded_by_root_leader_effective_at: excludedByRootLeaderEffectiveAt,
         });
       }
     }
