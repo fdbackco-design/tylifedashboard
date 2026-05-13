@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 
 export const metadata: Metadata = { title: '개인정보처리방침' };
 export const dynamic = 'force-dynamic';
@@ -28,6 +29,14 @@ export default function PrivacyPage() {
     <main className="min-h-screen bg-slate-50">
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
         <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-5 sm:p-8">
+          <div className="flex items-center justify-end mb-3">
+            <Link
+              href="/login"
+              className="inline-flex items-center px-3 py-2 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+            >
+              로그인 페이지로
+            </Link>
+          </div>
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">개인정보처리방침</h1>
           <p className="text-sm text-gray-700 mt-4 leading-relaxed">
             <span className="font-semibold">TY Life Dashboard</span>는 「개인정보 보호법」 등 관련 법령에 따라 이용자의 개인정보를 보호하고,
@@ -440,6 +449,15 @@ export default function PrivacyPage() {
           <div className="mt-10 pt-4 border-t border-gray-200 text-sm text-gray-700">
             <div>공고일자: 2026년 5월 13일</div>
             <div>시행일자: 2026년 5월 13일</div>
+          </div>
+
+          <div className="mt-6 flex items-center justify-end">
+            <Link
+              href="/login"
+              className="inline-flex items-center px-3 py-2 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+            >
+              로그인 페이지로
+            </Link>
           </div>
         </div>
       </div>
