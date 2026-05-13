@@ -8,6 +8,7 @@ import { contractJoinYmdInInclusiveWindow } from '@/lib/settlement/settlement-wi
 import type { OrgTreeRow } from '@/lib/types';
 import { buildOrgContractSalesRemap } from '@/lib/organization/org-contract-sales-remap';
 import {
+  isContractAtOrAfterPromotionThreshold,
   isContractStrictlyAfterPromotionThreshold,
   type SalesMemberPromotionThreshold,
 } from '@/lib/settlement/leader-promotion';
@@ -142,6 +143,16 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
       leaderPromotionThresholdContractCreatedAtById.set(String(row.id), (row.created_at ?? null) as string | null);
     }
   }
+
+  // leader_rank_effective_at이 없으면, 승격 이벤트(threshold)로 “리더 시작 시점”을 추론한다.
+  const rootPromotionThresholdBase = promotionThresholdByMemberId.get(rootMemberId) ?? null;
+  const rootPromotionThreshold: SalesMemberPromotionThreshold | null = rootPromotionThresholdBase
+    ? {
+        ...rootPromotionThresholdBase,
+        threshold_created_at:
+          leaderPromotionThresholdContractCreatedAtById.get(rootPromotionThresholdBase.threshold_contract_id) ?? null,
+      }
+    : null;
 
   // 요구: 명세서의 “산하 실적 구좌”는 오버라이드(롤업) 계산 기준과 동일하게,
   // 리더 산하에서 또 다른 리더가 있는 경우 그 하위 리더 subtree 실적은 상위 리더 산하에 포함하지 않는다.
@@ -296,17 +307,29 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
 
     // root가 리더인 경우: "리더가 된 이후" 계약만 포함
     let excludedByRootLeaderEffectiveAt = false;
-    if (rootLeaderEffectiveAt && rootLeaderEffectiveYmd) {
-      // 요구: “리더가 되기 전의 산하 계약”은 제외 → 기본 기준은 join_date(업무 시점).
-      // (created_at은 적재/수정 시각일 수 있어 join_date보다 늦게 들어오면 오탐 가능)
+    if (rootRank === '리더') {
+      // 요구: “리더가 되기 전의 산하 계약”은 제외.
+      // 1) leader_rank_effective_at이 있으면 join_date 우선으로 필터하고, 같은 날만 created_at으로 경계 처리
+      // 2) leader_rank_effective_at이 없으면 leader_promotion_events(threshold) 기준으로 "승격 계약부터" 포함
       const jd = String((c.join_date as string | null | undefined) ?? '').slice(0, 10);
-      if (jd && jd < rootLeaderEffectiveYmd) {
-        excludedByRootLeaderEffectiveAt = true;
-      } else if (jd && jd === rootLeaderEffectiveYmd) {
-        // 같은 가입일이면 leader_rank_effective_at(시각) 이후만 포함
-        const createdAt = (c.created_at as string | null | undefined) ?? null;
-        if (createdAt && createdAt < rootLeaderEffectiveAt) excludedByRootLeaderEffectiveAt = true;
+      const createdAt = (c.created_at as string | null | undefined) ?? null;
+
+      if (rootLeaderEffectiveAt && rootLeaderEffectiveYmd) {
+        if (jd && jd < rootLeaderEffectiveYmd) {
+          excludedByRootLeaderEffectiveAt = true;
+        } else if (jd && jd === rootLeaderEffectiveYmd) {
+          if (createdAt && createdAt < rootLeaderEffectiveAt) excludedByRootLeaderEffectiveAt = true;
+        }
+      } else if (rootPromotionThreshold) {
+        const atOrAfter = isContractAtOrAfterPromotionThreshold(
+          jd,
+          String(c.id),
+          rootPromotionThreshold,
+          createdAt,
+        );
+        if (!atOrAfter) excludedByRootLeaderEffectiveAt = true;
       }
+
       if (excludedByRootLeaderEffectiveAt) {
         if (opts?.debug) {
           debugRows.push({
