@@ -54,11 +54,10 @@ export async function calculateMonthlySettlement(params: {
   const contractIds = normalizedContractsBase.map((c) => c.id).filter(Boolean);
   const { data: contractCustomerRows, error: ccErr } = await db
     .from('contracts')
-    .select('id, customer_id, item_name, created_at')
+    .select('id, item_name, created_at')
     .in('id', contractIds);
-  if (ccErr) throw new Error(`contracts(customer_id, item_name) 조회 실패: ${ccErr.message}`);
+  if (ccErr) throw new Error(`contracts(item_name) 조회 실패: ${ccErr.message}`);
 
-  const customerIdByContractId = new Map<string, string>();
   const itemNameByContractId = new Map<string, string | null>();
   const createdAtByContractId = new Map<string, string | null>();
   for (const r of (contractCustomerRows ?? []) as any[]) {
@@ -66,7 +65,6 @@ export async function calculateMonthlySettlement(params: {
     const id = String(r.id);
     itemNameByContractId.set(id, (r.item_name ?? null) as string | null);
     createdAtByContractId.set(id, (r.created_at ?? null) as string | null);
-    if (r.customer_id) customerIdByContractId.set(id, String(r.customer_id));
   }
 
   const { data: rules, error: rErr } = await db.from('settlement_rules').select('*');
@@ -81,7 +79,7 @@ export async function calculateMonthlySettlement(params: {
     db
       .from('contracts')
       .select(
-        'id, join_date, unit_count, sales_member_id, customer_id, sales_link_status, status, is_cancelled, created_at',
+        'id, join_date, unit_count, sales_member_id, sales_link_status, status, is_cancelled, created_at',
       )
       .eq('status', '가입')
       .eq('is_cancelled', false),
@@ -104,42 +102,19 @@ export async function calculateMonthlySettlement(params: {
   }
   const edgesRaw = (edgesRes.data ?? []) as Array<{ parent_id: string | null; child_id: string }>;
 
-  const memberIdByCustomerId = new Map<string, string>();
-  for (const m of membersRaw as any[]) {
-    const sid = (m.source_customer_id ?? null) as string | null;
-    if (sid && m.rank !== '본사') {
-      memberIdByCustomerId.set(sid, m.id as string);
-      continue;
-    }
-    const ext = (m.external_id ?? null) as string | null;
-    if (ext && ext.startsWith('customer:') && m.rank !== '본사') {
-      const customerId = ext.slice('customer:'.length);
-      if (!memberIdByCustomerId.has(customerId)) memberIdByCustomerId.set(customerId, m.id as string);
-    }
-  }
-
+  // 월정산 직접 계약 귀속은 v_contract_settlement_base의 sales_member_id와 동일하게 둔다.
+  // customer_id → 조직원 치환을 하면 Supabase 뷰와 정산 결과가 어긋날 수 있다.
   const normalizedContracts = normalizedContractsBase.map((c) => {
     const item_name = itemNameByContractId.get(c.id) ?? null;
     const created_at = createdAtByContractId.get(c.id) ?? null;
-    const withMeta = { ...c, item_name, created_at };
-    const customerId = customerIdByContractId.get(c.id) ?? null;
-    if (customerId) {
-      const mapped = memberIdByCustomerId.get(customerId) ?? null;
-      if (mapped) return { ...withMeta, sales_member_id: mapped };
-    }
-    return withMeta;
+    return { ...c, item_name, created_at };
   });
 
   const joinAttributed: AttributedJoinContractRow[] = [];
   for (const row of (joinContractsRes.data ?? []) as any[]) {
     if ((row.sales_link_status ?? 'linked') !== 'linked') continue;
     if (!row.sales_member_id) continue;
-    let sid = row.sales_member_id as string;
-    const cid = row.customer_id as string | null;
-    if (cid) {
-      const mapped = memberIdByCustomerId.get(cid);
-      if (mapped) sid = mapped;
-    }
+    const sid = row.sales_member_id as string;
     joinAttributed.push({
       id: row.id,
       join_date: String(row.join_date ?? '').slice(0, 10),
