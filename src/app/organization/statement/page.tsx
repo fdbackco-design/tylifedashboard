@@ -241,7 +241,7 @@ export default async function OrganizationStatementPage({
                           {r.excluded_by_root_leader_effective_at ? (
                             <span className="text-amber-700">리더 전 계약 제외</span>
                           ) : r.excluded_by_leader_after_promotion ? (
-                            <span className="text-amber-700">하위 리더 승격 이후 제외</span>
+                            <span className="text-amber-700">하위 리더 승격(당일 포함) 이후 제외</span>
                           ) : (
                             <span className="text-emerald-700">포함</span>
                           )}
