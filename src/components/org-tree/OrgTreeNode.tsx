@@ -1,7 +1,10 @@
 'use client';
 
 import type { OrgTreeNode as OrgTreeNodeType } from '@/lib/types';
-import { isContractJoinCompleted as isJoinCompleted } from '@/lib/utils/contract-display-status';
+import {
+  getContractDisplayStatus,
+  isContractJoinCompleted as isJoinCompleted,
+} from '@/lib/utils/contract-display-status';
 
 // ── 타입 ─────────────────────────────────────────────────
 export interface ContractItem {
@@ -60,8 +63,23 @@ export function countByStatus(
   const counts: Record<CardStatus, number> = { 준비: 0, 대기: 0, 해약: 0, 가입: 0 };
   for (const id of ids) {
     for (const c of map[id] ?? []) {
+      if (isJoinCompleted(c)) {
+        counts.가입 += 1;
+        continue;
+      }
+      // 조직도 계약 목록·헤더 KPI와 동일: 표시 상태 "렌탈 미충족"은 준비/대기 건수에 넣지 않음
+      if (
+        getContractDisplayStatus({
+          status: c.status,
+          rental_request_no: c.rental_request_no ?? null,
+          invoice_no: c.invoice_no ?? null,
+          memo: c.memo ?? null,
+        }) === '렌탈 미충족'
+      ) {
+        continue;
+      }
       const bucket: CardStatus =
-        isJoinCompleted(c) ? '가입' : ((c.status as CardStatus) in counts ? (c.status as CardStatus) : '준비');
+        (c.status as CardStatus) in counts ? (c.status as CardStatus) : '준비';
       counts[bucket] += 1;
     }
   }
