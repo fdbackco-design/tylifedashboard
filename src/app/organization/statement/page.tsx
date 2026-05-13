@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createAdminSupabaseClient, createServerSupabaseClient } from '@/lib/supabase/server';
+import { sumDownlineAttributedUnitsInSettlementWindow } from '@/lib/organization/statement-downline-units';
 import {
   coalesceYearMonthSearchParam,
   getSettlementWindowForYearMonth,
@@ -62,7 +63,7 @@ export default async function OrganizationStatementPage({
     db
       .from('monthly_settlements')
       .select(
-        'year_month, member_id, rank, direct_unit_count, subordinate_unit_count, total_unit_count, base_commission, rollup_commission, incentive_amount, total_amount',
+        'year_month, member_id, rank, direct_unit_count, base_commission, rollup_commission, incentive_amount, total_amount',
       )
       .eq('year_month', label_year_month)
       .eq('member_id', memberId)
@@ -76,8 +77,6 @@ export default async function OrganizationStatementPage({
         member_id: string;
         rank: string;
         direct_unit_count: number;
-        subordinate_unit_count: number;
-        total_unit_count: number;
         base_commission: number;
         rollup_commission: number;
         incentive_amount: number;
@@ -122,7 +121,13 @@ export default async function OrganizationStatementPage({
     );
   }
 
+  const downlineAttributedUnits = await sumDownlineAttributedUnitsInSettlementWindow(db, memberId, {
+    start_date,
+    end_date,
+  });
+
   const no = `${label_year_month}-${String(memberId).slice(0, 4)}`;
+  const statementTotalUnits = (s.direct_unit_count ?? 0) + downlineAttributedUnits;
 
   return (
     <div className="p-4 sm:p-6">
@@ -167,9 +172,15 @@ export default async function OrganizationStatementPage({
               <div className="text-sm text-gray-600">개인 실적 구좌</div>
               <div className="text-sm text-right font-semibold tabular-nums">{s.direct_unit_count.toLocaleString('ko-KR')} 구좌</div>
             </div>
-            <div className="grid grid-cols-2 px-4 py-3">
+            <div className="grid grid-cols-2 px-4 py-3 border-b border-gray-100">
               <div className="text-sm text-gray-600">산하 실적 구좌</div>
-              <div className="text-sm text-right font-semibold tabular-nums">{s.subordinate_unit_count.toLocaleString('ko-KR')} 구좌</div>
+              <div className="text-sm text-right font-semibold tabular-nums">
+                {downlineAttributedUnits.toLocaleString('ko-KR')} 구좌
+              </div>
+            </div>
+            <div className="px-4 py-2 text-[11px] text-gray-500 leading-relaxed">
+              본인을 제외한 산하 조직원(및 고객 노드)이 담당으로 귀속된 계약 구좌입니다. 본사 담당 등은 내
+              산하 고객으로 귀속된 경우만 포함합니다.
             </div>
           </div>
 
@@ -197,7 +208,7 @@ export default async function OrganizationStatementPage({
             <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
               <div className="text-xs text-orange-800 mb-1">총 합계 구좌</div>
               <div className="text-xl font-semibold text-orange-950 tabular-nums">
-                {s.total_unit_count.toLocaleString('ko-KR')} 구좌
+                {statementTotalUnits.toLocaleString('ko-KR')} 구좌
               </div>
             </div>
           </div>
