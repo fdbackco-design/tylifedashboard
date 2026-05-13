@@ -78,6 +78,33 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
   const childrenByParent = buildChildrenByParentFromRows(treeRows);
   const subtreeIds = collectSubtreeMemberIdsDownstream(rootMemberId, childrenByParent);
   const subtreeIdSet = subtreeIds;
+  const rankById = new Map(membersFiltered.map((m) => [m.id, m.rank] as const));
+  const rootRank = rankById.get(rootMemberId) ?? null;
+
+  // 요구: 명세서의 “산하 실적 구좌”는 오버라이드(롤업) 계산 기준과 동일하게,
+  // 리더 산하에서 또 다른 리더가 있는 경우 그 하위 리더 subtree 실적은 상위 리더 산하에 포함하지 않는다.
+  // 따라서 root가 리더면: root 아래의 "다른 리더" 노드들은 해당 노드 및 subtree 전체를 산하 집계에서 제외한다.
+  const excludedSubtreeIds = new Set<string>();
+  if (rootRank === '리더') {
+    const stack = [...(childrenByParent.get(rootMemberId) ?? [])];
+    while (stack.length) {
+      const id = stack.pop()!;
+      if (excludedSubtreeIds.has(id)) continue;
+      const r = rankById.get(id) ?? null;
+      if (r === '리더') {
+        // 이 리더 노드 및 전체 subtree 제외
+        const leaderSubtree = collectSubtreeMemberIdsDownstream(id, childrenByParent);
+        for (const sid of leaderSubtree) excludedSubtreeIds.add(sid);
+        continue;
+      }
+      for (const ch of childrenByParent.get(id) ?? []) stack.push(ch);
+    }
+  }
+  const scopeIds = new Set<string>();
+  for (const id of subtreeIdSet) {
+    if (excludedSubtreeIds.has(id)) continue;
+    scopeIds.add(id);
+  }
   const subtreeMemberIds = [...subtreeIdSet];
   const subtreeMembers = membersFiltered.filter((m) => subtreeIdSet.has(m.id));
   const subtreeMemberOwnCustomerIds = [
@@ -190,15 +217,15 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
     customer_name: ((c.customers as { name?: string | null } | null)?.name ?? null) as string | null,
   });
 
-  let subtreeAttributedTotal = 0;
+  let scopeAttributedTotal = 0;
   for (const c of contractsRaw) {
     if (!isSettlementEligibleContract(c as any)) continue;
     const origin = resolveContractOriginForSubtree(contractRemapInput(c), subtreeIdSet);
-    if (!subtreeIdSet.has(origin)) continue;
+    if (!scopeIds.has(origin)) continue;
     const u = Number((c.unit_count as number | null | undefined) ?? 0);
-    if (Number.isFinite(u) && u > 0) subtreeAttributedTotal += u;
+    if (Number.isFinite(u) && u > 0) scopeAttributedTotal += u;
   }
 
   const personal = Math.max(0, Math.floor(Number(directUnitCountFromSettlement) || 0));
-  return Math.max(0, subtreeAttributedTotal - personal);
+  return Math.max(0, scopeAttributedTotal - personal);
 }
