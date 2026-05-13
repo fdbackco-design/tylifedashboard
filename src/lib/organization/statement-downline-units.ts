@@ -8,7 +8,7 @@ import { contractJoinYmdInInclusiveWindow } from '@/lib/settlement/settlement-wi
 import type { OrgTreeRow } from '@/lib/types';
 import { buildOrgContractSalesRemap } from '@/lib/organization/org-contract-sales-remap';
 import {
-  isContractAtOrAfterPromotionThreshold,
+  isContractStrictlyAfterPromotionThreshold,
   type SalesMemberPromotionThreshold,
 } from '@/lib/settlement/leader-promotion';
 
@@ -111,6 +111,7 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
     rootRank === '리더' && rootLeaderRankEffectiveAt && String(rootLeaderRankEffectiveAt).trim() !== ''
       ? String(rootLeaderRankEffectiveAt).trim()
       : null;
+  const rootLeaderEffectiveYmd = rootLeaderEffectiveAt ? rootLeaderEffectiveAt.slice(0, 10) : null;
   const parentByChild = new Map<string, string | null>(
     treeRows.map((r) => [r.id as string, (r.parent_id ?? null) as string | null]),
   );
@@ -295,18 +296,19 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
 
     // root가 리더인 경우: "리더가 된 이후" 계약만 포함
     let excludedByRootLeaderEffectiveAt = false;
-    if (rootLeaderEffectiveAt) {
-      const createdAt = (c.created_at as string | null | undefined) ?? null;
-      if (createdAt && createdAt < rootLeaderEffectiveAt) {
+    if (rootLeaderEffectiveAt && rootLeaderEffectiveYmd) {
+      // 요구: “리더가 되기 전의 산하 계약”은 제외 → 기본 기준은 join_date(업무 시점).
+      // (created_at은 적재/수정 시각일 수 있어 join_date보다 늦게 들어오면 오탐 가능)
+      const jd = String((c.join_date as string | null | undefined) ?? '').slice(0, 10);
+      if (jd && jd < rootLeaderEffectiveYmd) {
         excludedByRootLeaderEffectiveAt = true;
-      } else if (!createdAt) {
-        const jd = String((c.join_date as string | null | undefined) ?? '').slice(0, 10);
-        const effYmd = rootLeaderEffectiveAt.slice(0, 10);
-        if (jd && effYmd && jd < effYmd) excludedByRootLeaderEffectiveAt = true;
+      } else if (jd && jd === rootLeaderEffectiveYmd) {
+        // 같은 가입일이면 leader_rank_effective_at(시각) 이후만 포함
+        const createdAt = (c.created_at as string | null | undefined) ?? null;
+        if (createdAt && createdAt < rootLeaderEffectiveAt) excludedByRootLeaderEffectiveAt = true;
       }
       if (excludedByRootLeaderEffectiveAt) {
         if (opts?.debug) {
-          const jd = String((c.join_date as string | null | undefined) ?? '').slice(0, 10);
           debugRows.push({
             contract_id: String(c.id),
             contract_code: (c.contract_code as string | null | undefined) ?? null,
@@ -344,14 +346,14 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
         }
         const jd = String((c.join_date as string | null | undefined) ?? '').slice(0, 10);
         const createdAt = (c.created_at as string | null | undefined) ?? null;
-        const atOrAfter = isContractAtOrAfterPromotionThreshold(
+        const after = isContractStrictlyAfterPromotionThreshold(
           jd,
           String(c.id),
           th,
           createdAt,
         );
-        // 승격 계약(당일 포함)부터는 하위 리더 실적으로 귀속 → 상위 리더 산하에서 제외
-        if (atOrAfter) {
+        // 승격 계약 "이후"부터는 하위 리더 실적으로 귀속 → 상위 리더 산하에서 제외
+        if (after) {
           excludedByPromotionAfter = true;
           if (opts?.debug) {
             debugRows.push({
