@@ -2,7 +2,12 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createAdminSupabaseClient, createServerSupabaseClient } from '@/lib/supabase/server';
-import { getSettlementWindowForYearMonth, getSettlementWindowSeoul } from '@/lib/settlement/settlement-window';
+import {
+  coalesceYearMonthSearchParam,
+  getSettlementWindowForYearMonth,
+  getSettlementWindowSeoul,
+  normalizeYearMonthLabel,
+} from '@/lib/settlement/settlement-window';
 
 export const metadata: Metadata = { title: '지급 명세서' };
 export const dynamic = 'force-dynamic';
@@ -18,8 +23,9 @@ export default async function OrganizationStatementPage({
 }) {
   const sp = (await searchParams) ?? {};
   const defaultYearMonth = getSettlementWindowSeoul().label_year_month;
-  const requestedYearMonth = sp.year_month ?? defaultYearMonth;
-  const yearMonth = /^\d{4}-\d{2}$/.test(requestedYearMonth) ? requestedYearMonth : defaultYearMonth;
+  const requestedYearMonthRaw =
+    coalesceYearMonthSearchParam(sp.year_month as string | string[] | undefined) ?? defaultYearMonth;
+  const yearMonth = normalizeYearMonthLabel(requestedYearMonthRaw) ?? defaultYearMonth;
   const { start_date, end_date, label_year_month } = getSettlementWindowForYearMonth(yearMonth);
 
   const userDb = await createServerSupabaseClient();

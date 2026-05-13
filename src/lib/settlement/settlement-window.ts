@@ -91,6 +91,20 @@ export function coalesceYearMonthSearchParam(
   return undefined;
 }
 
+/**
+ * `year_month` 쿼리를 `YYYY-MM`으로 통일한다. (`2026-5` → `2026-05`)
+ * 유효하지 않으면 null.
+ */
+export function normalizeYearMonthLabel(raw: string): string | null {
+  const t = raw.trim();
+  const m = /^(\d{4})-(\d{1,2})$/.exec(t);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || mo < 1 || mo > 12) return null;
+  return `${String(y).padStart(4, '0')}-${String(mo).padStart(2, '0')}`;
+}
+
 const JOIN_YMD_PREFIX_RE = /^(\d{4}-\d{2}-\d{2})/;
 
 /**
@@ -99,6 +113,16 @@ const JOIN_YMD_PREFIX_RE = /^(\d{4}-\d{2}-\d{2})/;
  */
 export function contractJoinYmdForWindow(joinDate: unknown): string | null {
   if (joinDate == null) return null;
+  if (typeof joinDate === 'number' && Number.isFinite(joinDate)) {
+    const d = new Date(joinDate);
+    if (Number.isNaN(d.getTime())) return null;
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Seoul',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(d);
+  }
   if (typeof joinDate === 'string') {
     const t = joinDate.trim();
     if (!t) return null;
@@ -134,6 +158,7 @@ export function contractJoinYmdInInclusiveWindow(
   startYmd: string,
   endYmd: string,
 ): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startYmd) || !/^\d{4}-\d{2}-\d{2}$/.test(endYmd)) return false;
   const jd = contractJoinYmdForWindow(joinDate);
   if (!jd) return false;
   return jd >= startYmd && jd <= endYmd;

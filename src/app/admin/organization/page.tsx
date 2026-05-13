@@ -8,6 +8,7 @@ import {
   contractJoinYmdInInclusiveWindow,
   getSettlementWindowForYearMonth,
   getSettlementWindowSeoul,
+  normalizeYearMonthLabel,
 } from '@/lib/settlement/settlement-window';
 import { calculateOrgNodeMetrics } from '@/lib/settlement/org-node-metrics';
 import { isSettlementEligibleContract } from '@/lib/settlement/settlement-eligibility';
@@ -61,9 +62,9 @@ export default async function OrganizationPage({
   const db = createAdminSupabaseClient();
 
   const defaultYearMonth = getSettlementWindowSeoul().label_year_month;
-  const requestedYearMonth =
+  const requestedYearMonthRaw =
     coalesceYearMonthSearchParam(sp.year_month as string | string[] | undefined) ?? defaultYearMonth;
-  const yearMonth = /^\d{4}-\d{2}$/.test(requestedYearMonth) ? requestedYearMonth : defaultYearMonth;
+  const yearMonth = normalizeYearMonthLabel(requestedYearMonthRaw) ?? defaultYearMonth;
   const { start_date, end_date, label_year_month } = getSettlementWindowForYearMonth(yearMonth);
 
   const yearsForPicker = (() => {

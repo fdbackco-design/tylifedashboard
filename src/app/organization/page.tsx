@@ -12,6 +12,7 @@ import {
   contractJoinYmdInInclusiveWindow,
   getSettlementWindowForYearMonth,
   getSettlementWindowSeoul,
+  normalizeYearMonthLabel,
 } from '@/lib/settlement/settlement-window';
 import { calculateOrgNodeMetrics } from '@/lib/settlement/org-node-metrics';
 import { isSettlementEligibleContract } from '@/lib/settlement/settlement-eligibility';
@@ -71,9 +72,9 @@ export default async function OrganizationMyTreePage({
   const debugEnabled = sp.debug === '1';
 
   const defaultYearMonth = getSettlementWindowSeoul().label_year_month;
-  const requestedYearMonth =
+  const requestedYearMonthRaw =
     coalesceYearMonthSearchParam(sp.year_month as string | string[] | undefined) ?? defaultYearMonth;
-  const yearMonth = /^\d{4}-\d{2}$/.test(requestedYearMonth) ? requestedYearMonth : defaultYearMonth;
+  const yearMonth = normalizeYearMonthLabel(requestedYearMonthRaw) ?? defaultYearMonth;
   const { start_date, end_date, label_year_month } = getSettlementWindowForYearMonth(yearMonth);
 
   // user session은 anon+RLS 클라이언트로 읽어야 한다.
@@ -284,6 +285,11 @@ export default async function OrganizationMyTreePage({
     }
   }
 
+  // Supabase 필터 누락/비정상 응답이 있어도 카드·조직도 계약 목록은 정산 윈도우 밖을 제외
+  contractsRaw = contractsRaw.filter((c: any) =>
+    contractJoinYmdInInclusiveWindow(c.join_date, start_date, end_date),
+  );
+
   // subtree parent는 “parent가 subtree 밖이면 root 처리(=parent null)”
   const subtreeTreeRows: OrgTreeRow[] = treeRows
     .filter((r) => subtreeIdSet.has(r.id))
@@ -340,7 +346,6 @@ export default async function OrganizationMyTreePage({
   // - 이번달 준비 구좌: (정산 윈도우) + 준비/대기 + 해약 제외 + 취소 제외 + 렌탈 미충족 제외
   // - 이번달 가입 구좌: (정산 윈도우) + 가입 완료(표시 상태 기준) + 취소 제외
   const periodPendingUnits = contractsRaw
-    .filter((c: any) => contractJoinYmdInInclusiveWindow(c.join_date, start_date, end_date))
     .filter((c: any) => subtreeIdSet.has(resolveContractSalesMemberId(contractRemapInput(c))))
     .filter((c: any) => !c.is_cancelled)
     .filter((c: any) => String(c.status ?? '').trim() !== '해약')
@@ -358,7 +363,6 @@ export default async function OrganizationMyTreePage({
     .reduce((sum: number, c: any) => sum + (c.unit_count ?? 0), 0);
 
   const periodJoinUnits = contractsRaw
-    .filter((c: any) => contractJoinYmdInInclusiveWindow(c.join_date, start_date, end_date))
     .filter((c: any) => subtreeIdSet.has(resolveContractSalesMemberId(contractRemapInput(c))))
     .filter((c: any) => !c.is_cancelled)
     .filter((c: any) =>
