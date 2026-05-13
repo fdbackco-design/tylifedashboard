@@ -275,7 +275,7 @@ export default function AccountIssueClient() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="예: 김세영 / 010-1234-5678"
+              placeholder="예: 홍길동 / 010-1234-5678"
               onKeyDown={(e) => {
                 if (e.key !== 'Enter') return;
                 e.preventDefault();

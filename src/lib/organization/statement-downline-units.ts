@@ -7,6 +7,10 @@ import {
 import { contractJoinYmdInInclusiveWindow } from '@/lib/settlement/settlement-window';
 import type { OrgTreeRow } from '@/lib/types';
 import { buildOrgContractSalesRemap } from '@/lib/organization/org-contract-sales-remap';
+import {
+  isContractStrictlyAfterPromotionThreshold,
+  type SalesMemberPromotionThreshold,
+} from '@/lib/settlement/leader-promotion';
 
 type MemberRow = {
   id: string;
@@ -34,11 +38,14 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
   window: { start_date: string; end_date: string },
   directUnitCountFromSettlement: number,
 ): Promise<number> {
-  const [membersRes, edgesRes] = await Promise.all([
+  const [membersRes, edgesRes, promoRes] = await Promise.all([
     db
       .from('organization_members')
       .select('id,name,rank,phone,external_id,source_customer_id'),
     db.from('organization_edges').select('parent_id,child_id'),
+    db
+      .from('leader_promotion_events')
+      .select('member_id, threshold_contract_id, threshold_join_date'),
   ]);
 
   const membersRaw = ((membersRes.data ?? []) as MemberRow[]).map((m) =>
@@ -80,31 +87,56 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
   const subtreeIdSet = subtreeIds;
   const rankById = new Map(membersFiltered.map((m) => [m.id, m.rank] as const));
   const rootRank = rankById.get(rootMemberId) ?? null;
+  const parentByChild = new Map<string, string | null>(
+    treeRows.map((r) => [r.id as string, (r.parent_id ?? null) as string | null]),
+  );
+
+  const promotionThresholdByMemberId = new Map<string, SalesMemberPromotionThreshold>();
+  const thresholdContractIds: string[] = [];
+  for (const r of (promoRes.data ?? []) as Array<{
+    member_id: string;
+    threshold_contract_id: string | null;
+    threshold_join_date: string | null;
+  }>) {
+    const mid = String(r.member_id ?? '');
+    const cid = String(r.threshold_contract_id ?? '');
+    const jd = String(r.threshold_join_date ?? '').slice(0, 10);
+    if (!mid || !cid || !jd) continue;
+    promotionThresholdByMemberId.set(mid, { threshold_contract_id: cid, threshold_join_date: jd });
+    thresholdContractIds.push(cid);
+  }
+
+  // threshold_contract_id의 created_at이 필요 (동일 join_date에서 경계 처리)
+  const leaderPromotionThresholdContractCreatedAtById = new Map<string, string | null>();
+  const uniqThIds = [...new Set(thresholdContractIds)];
+  for (const thChunk of chunk(uniqThIds, 200)) {
+    if (thChunk.length === 0) continue;
+    const { data: thRows } = await db.from('contracts').select('id, created_at').in('id', thChunk);
+    for (const row of (thRows ?? []) as Array<{ id: string; created_at?: string | null }>) {
+      if (!row?.id) continue;
+      leaderPromotionThresholdContractCreatedAtById.set(String(row.id), (row.created_at ?? null) as string | null);
+    }
+  }
 
   // 요구: 명세서의 “산하 실적 구좌”는 오버라이드(롤업) 계산 기준과 동일하게,
   // 리더 산하에서 또 다른 리더가 있는 경우 그 하위 리더 subtree 실적은 상위 리더 산하에 포함하지 않는다.
-  // 따라서 root가 리더면: root 아래의 "다른 리더" 노드들은 해당 노드 및 subtree 전체를 산하 집계에서 제외한다.
-  const excludedSubtreeIds = new Set<string>();
-  if (rootRank === '리더') {
-    const stack = [...(childrenByParent.get(rootMemberId) ?? [])];
-    while (stack.length) {
-      const id = stack.pop()!;
-      if (excludedSubtreeIds.has(id)) continue;
-      const r = rankById.get(id) ?? null;
-      if (r === '리더') {
-        // 이 리더 노드 및 전체 subtree 제외
-        const leaderSubtree = collectSubtreeMemberIdsDownstream(id, childrenByParent);
-        for (const sid of leaderSubtree) excludedSubtreeIds.add(sid);
-        continue;
-      }
-      for (const ch of childrenByParent.get(id) ?? []) stack.push(ch);
+  // 단, “하위 리더가 발생하는 계약(승격 계약)까지”는 상위 리더 산하에 포함해야 한다.
+  // 따라서 root가 리더면: 계약 단위로, (origin의 가장 가까운 하위 리더)가 승격 계약 이후인지에 따라 포함/제외한다.
+  const nearestLeaderBelowRoot = (originMemberId: string): string | null => {
+    if (originMemberId === rootMemberId) return null;
+    let cur: string | null = originMemberId;
+    const visited = new Set<string>();
+    while (cur) {
+      if (visited.has(cur)) return null;
+      visited.add(cur);
+      const p: string | null = parentByChild.get(cur) ?? null;
+      if (!p) return null;
+      if (p === rootMemberId) return null;
+      if ((rankById.get(p) ?? null) === '리더') return p;
+      cur = p;
     }
-  }
-  const scopeIds = new Set<string>();
-  for (const id of subtreeIdSet) {
-    if (excludedSubtreeIds.has(id)) continue;
-    scopeIds.add(id);
-  }
+    return null;
+  };
   const subtreeMemberIds = [...subtreeIdSet];
   const subtreeMembers = membersFiltered.filter((m) => subtreeIdSet.has(m.id));
   const subtreeMemberOwnCustomerIds = [
@@ -117,7 +149,7 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
 
   const { start_date, end_date } = window;
   const contractSelect =
-    'id, contract_code, join_date, status, unit_count, sales_member_id, customer_id, is_cancelled, sales_link_status, rental_request_no, invoice_no, memo, customers(name, phone)';
+    'id, contract_code, join_date, status, unit_count, sales_member_id, customer_id, is_cancelled, sales_link_status, rental_request_no, invoice_no, memo, created_at, customers(name, phone)';
 
   const hqWindowRemapInput = (row: {
     sales_member_id?: string | null;
@@ -221,7 +253,39 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
   for (const c of contractsRaw) {
     if (!isSettlementEligibleContract(c as any)) continue;
     const origin = resolveContractOriginForSubtree(contractRemapInput(c), subtreeIdSet);
-    if (!scopeIds.has(origin)) continue;
+
+    // 기본: 내 서브트리 귀속만 집계
+    if (!subtreeIdSet.has(origin)) continue;
+
+    // 리더일 때만: "하위 리더 발생 시점(승격 계약)" 기준으로 계약 단위 포함/제외
+    if (rootRank === '리더') {
+      const leaderId = nearestLeaderBelowRoot(origin);
+      if (leaderId) {
+        const thBase = promotionThresholdByMemberId.get(leaderId) ?? null;
+        const th: SalesMemberPromotionThreshold | null = thBase
+          ? {
+              ...thBase,
+              threshold_created_at:
+                leaderPromotionThresholdContractCreatedAtById.get(thBase.threshold_contract_id) ?? null,
+            }
+          : null;
+        if (!th) {
+          // 이미 리더(승격 임계 정보 없음)면 상위 리더 산하에 포함하지 않는다.
+          continue;
+        }
+        const jd = String((c.join_date as string | null | undefined) ?? '').slice(0, 10);
+        const createdAt = (c.created_at as string | null | undefined) ?? null;
+        const after = isContractStrictlyAfterPromotionThreshold(
+          jd,
+          String(c.id),
+          th,
+          createdAt,
+        );
+        // 승격 계약 "이후"부터는 하위 리더 실적으로 귀속 → 상위 리더 산하에서 제외
+        if (after) continue;
+      }
+    }
+
     const u = Number((c.unit_count as number | null | undefined) ?? 0);
     if (Number.isFinite(u) && u > 0) scopeAttributedTotal += u;
   }
