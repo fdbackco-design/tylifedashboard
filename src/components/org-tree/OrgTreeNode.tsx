@@ -2,24 +2,13 @@
 
 import type { OrgTreeNode as OrgTreeNodeType } from '@/lib/types';
 import {
-  getContractDisplayStatus,
-  isContractJoinCompleted as isJoinCompleted,
-} from '@/lib/utils/contract-display-status';
+  type ContractItem,
+  collectSubtreeIds,
+  countByStatus,
+  sumJoinUnits,
+} from '@/lib/organization/org-tree-contract-counts';
 
-// ── 타입 ─────────────────────────────────────────────────
-export interface ContractItem {
-  id: string;
-  contract_code: string;
-  join_date: string | null;
-  product_type: string | null;
-  item_name?: string | null;
-  rental_request_no?: string | null;
-  invoice_no?: string | null;
-  memo?: string | null;
-  status: string;
-  unit_count: number | null;
-  customer_name: string;
-}
+export * from '@/lib/organization/org-tree-contract-counts';
 
 // ── 직급별 스타일 ─────────────────────────────────────────
 const RANK_STYLE: Record<string, { badge: string; border: string }> = {
@@ -29,63 +18,6 @@ const RANK_STYLE: Record<string, { badge: string; border: string }> = {
   리더:       { badge: 'bg-blue-500 text-white',   border: 'border-blue-400'   },
   영업사원:   { badge: 'bg-sky-200 text-sky-800',  border: 'border-sky-300'    },
 };
-
-// ── 서브트리 유틸 (exported — OrgTree에서도 사용) ─────────
-export function collectSubtreeIds(node: OrgTreeNodeType): string[] {
-  return [node.id, ...node.children.flatMap(collectSubtreeIds)];
-}
-
-const CARD_STATUSES = ['준비', '대기', '해약', '가입'] as const;
-type CardStatus = (typeof CARD_STATUSES)[number];
-
-export function countCompleted(ids: string[], map: Record<string, ContractItem[]>): number {
-  return ids.reduce(
-    (sum, id) => sum + (map[id] ?? []).filter(isJoinCompleted).length,
-    0,
-  );
-}
-
-export function sumJoinUnits(ids: string[], map: Record<string, ContractItem[]>): number {
-  let sum = 0;
-  for (const id of ids) {
-    for (const c of map[id] ?? []) {
-      if (!isJoinCompleted(c)) continue;
-      sum += Math.max(0, Number(c.unit_count ?? 0));
-    }
-  }
-  return sum;
-}
-
-export function countByStatus(
-  ids: string[],
-  map: Record<string, ContractItem[]>,
-): Record<CardStatus, number> {
-  const counts: Record<CardStatus, number> = { 준비: 0, 대기: 0, 해약: 0, 가입: 0 };
-  for (const id of ids) {
-    for (const c of map[id] ?? []) {
-      if (isJoinCompleted(c)) {
-        counts.가입 += 1;
-        continue;
-      }
-      // 조직도 계약 목록·헤더 KPI와 동일: 표시 상태 "렌탈 미충족"은 준비/대기 건수에 넣지 않음
-      if (
-        getContractDisplayStatus({
-          status: c.status,
-          rental_request_no: c.rental_request_no ?? null,
-          invoice_no: c.invoice_no ?? null,
-          memo: c.memo ?? null,
-        }) === '렌탈 미충족'
-      ) {
-        continue;
-      }
-      const st = String(c.status ?? '').trim();
-      const bucket: CardStatus =
-        st === '해약' ? '해약' : st === '대기' ? '대기' : st === '준비' ? '준비' : '준비';
-      counts[bucket] += 1;
-    }
-  }
-  return counts;
-}
 
 // ── 카드 컴포넌트 ─────────────────────────────────────────
 interface Props {

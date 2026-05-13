@@ -19,7 +19,11 @@ import { isSettlementEligibleContract } from '@/lib/settlement/settlement-eligib
 import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
 import type { OrgTreeRow } from '@/lib/types';
 import type { SettlementRule } from '@/lib/types/settlement';
-import type { ContractItem } from '@/components/org-tree/OrgTreeNode';
+import {
+  type ContractItem,
+  collectSubtreeIds,
+  countByStatus,
+} from '@/lib/organization/org-tree-contract-counts';
 import { buildChildrenByParentFromRows } from '@/lib/settlement/settlement-org-tree';
 import AccountActionsClient from './AccountActionsClient';
 import { stripOrgTreeNodesForDisplay } from '@/lib/organization/org-tree-display';
@@ -342,26 +346,8 @@ export default async function OrganizationMyTreePage({
   debugStats.eligible_contracts_for_metrics_count = eligibleContractsForMetrics.length;
 
   // ── 개인 대시 카드(서브트리 KPI) ─────────────────────────────
-  // 관리자 조직도(get_organization_kpis)와 동일한 기준으로 계산:
-  // - 이번달 준비 구좌: (정산 윈도우) + 준비/대기 + 해약 제외 + 취소 제외 + 렌탈 미충족 제외
-  // - 이번달 가입 구좌: (정산 윈도우) + 가입 완료(표시 상태 기준) + 취소 제외
-  const periodPendingUnits = contractsRaw
-    .filter((c: any) => subtreeIdSet.has(resolveContractSalesMemberId(contractRemapInput(c))))
-    .filter((c: any) => !c.is_cancelled)
-    .filter((c: any) => String(c.status ?? '').trim() !== '해약')
-    .filter((c: any) => {
-      const displayStatus = getContractDisplayStatus({
-        status: c.status,
-        rental_request_no: c.rental_request_no ?? null,
-        invoice_no: c.invoice_no ?? null,
-        memo: c.memo ?? null,
-      });
-      if (displayStatus === '렌탈 미충족') return false;
-      const st = String(c.status ?? '').trim();
-      return st === '준비' || st === '대기';
-    })
-    .reduce((sum: number, c: any) => sum + (c.unit_count ?? 0), 0);
-
+  // - 선택달 준비·대기: 표시 트리 루트별로 노드 카드와 동일한 countByStatus(준비+대기 건) 합산
+  // - 선택달 가입 구좌: (정산 윈도우) + 가입 완료(표시 상태 기준) + 취소 제외, unit_count 합
   const periodJoinUnits = contractsRaw
     .filter((c: any) => subtreeIdSet.has(resolveContractSalesMemberId(contractRemapInput(c))))
     .filter((c: any) => !c.is_cancelled)
@@ -486,6 +472,12 @@ export default async function OrganizationMyTreePage({
   debugStats.contracts_by_member_keys = Object.keys(contractsByMember).slice(0, 30);
   debugStats.contracts_by_member_total_rows = Object.values(contractsByMember).reduce((s, arr) => s + arr.length, 0);
 
+  const periodPendingTreeContractCount = (treeForDisplay as any[]).reduce((sum: number, root: any) => {
+    const ids = collectSubtreeIds(root);
+    const c = countByStatus(ids, contractsByMember);
+    return sum + c.준비 + c.대기;
+  }, 0);
+
   // edges/subtree는 calculateOrgNodeMetrics에 넣을 때도 서브트리만 유지
   const subtreeEdges = edgesRemapped.filter(
     (e) => e.child_id && subtreeIdSet.has(e.child_id) && e.parent_id && subtreeIdSet.has(e.parent_id),
@@ -531,10 +523,12 @@ export default async function OrganizationMyTreePage({
         <div className="flex flex-col gap-2 sm:items-end">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 w-full">
             <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
-              <span className="text-gray-500">선택달 준비 구좌 수</span>
-              <span className="ml-2 font-bold text-gray-800">{periodPendingUnits.toLocaleString('ko-KR')}구좌</span>
+              <span className="text-gray-500">선택달 준비·대기 건수</span>
+              <span className="ml-2 font-bold text-gray-800">
+                {periodPendingTreeContractCount.toLocaleString('ko-KR')}건
+              </span>
               <div className="text-[11px] text-gray-400 mt-0.5">
-                기준 {label_year_month} · {start_date}~{end_date}
+                노드 배지(준비+대기)와 동일 · 기준 {label_year_month} · {start_date}~{end_date}
               </div>
             </div>
             <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
