@@ -8,7 +8,6 @@ import { contractJoinYmdInInclusiveWindow } from '@/lib/settlement/settlement-wi
 import type { OrgTreeRow } from '@/lib/types';
 import { buildOrgContractSalesRemap } from '@/lib/organization/org-contract-sales-remap';
 import {
-  isContractAtOrAfterPromotionThreshold,
   isContractStrictlyAfterPromotionThreshold,
   type SalesMemberPromotionThreshold,
 } from '@/lib/settlement/leader-promotion';
@@ -321,13 +320,14 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
           if (createdAt && createdAt < rootLeaderEffectiveAt) excludedByRootLeaderEffectiveAt = true;
         }
       } else if (rootPromotionThreshold) {
-        const atOrAfter = isContractAtOrAfterPromotionThreshold(
+        // root 기준은 “리더가 된 이후”만 포함 → 승격 계약 자체는 리더 전으로 보고 제외(strictly after)
+        const after = isContractStrictlyAfterPromotionThreshold(
           jd,
           String(c.id),
           rootPromotionThreshold,
           createdAt,
         );
-        if (!atOrAfter) excludedByRootLeaderEffectiveAt = true;
+        if (!after) excludedByRootLeaderEffectiveAt = true;
       }
 
       if (excludedByRootLeaderEffectiveAt) {
