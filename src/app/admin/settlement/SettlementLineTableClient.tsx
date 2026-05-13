@@ -25,7 +25,6 @@ export default function SettlementLineTableClient(props: {
   todayYearMonth: string;
   startDate: string;
   endDate: string;
-  debugEnabled?: boolean;
   totalSales: number;
   periodSales: number;
   rankByMemberId: Record<string, string>;
@@ -218,34 +217,6 @@ export default function SettlementLineTableClient(props: {
       baseByRowIdx.set(rowIdx, (baseByRowIdx.get(rowIdx) ?? 0) + won);
     };
 
-    const debugRows: Array<{
-      contractId: string;
-      baseWon: number;
-      rawSalesMemberId: string | null;
-      rawSalesMemberRank: string | null;
-      isRawSalesMemberHeadOffice: boolean;
-      mappedMemberId: string | null;
-      isSelfCustomerContract: boolean;
-      resolvedTargetMemberId: string | null;
-      targetSource: string;
-      selectedRowTopLineId: string | null;
-      selectedRowName: string | null;
-      selectedRowDepth: number | null;
-      selectedRowMemberSetSize: number | null;
-      reason: string;
-    }> = [];
-    const unresolvedBaseItems: Array<{
-      contractId: string;
-      baseWon: number;
-      rawSalesMemberId: string | null;
-      rawSalesMemberRank: string | null;
-      isRawSalesMemberHeadOffice: boolean;
-      mappedMemberId: string | null;
-      resolvedTargetMemberId: string | null;
-      targetSource: string;
-      reason: string;
-      fallbackReason: string;
-    }> = [];
     const baseSummaryByRow = new Map<string, {
       selectedRowName: string;
       selectedRowTopLineId: string;
@@ -295,39 +266,6 @@ export default function SettlementLineTableClient(props: {
         reason = 'mapped_member';
       }
       if (!targetMemberId) {
-        const unresolvedReason = isRawSalesMemberHeadOffice
-          ? 'unresolved_head_office_mapped_not_in_tree'
-          : 'unresolved_no_assignable_row';
-        unresolvedBaseItems.push({
-          contractId: c.contractId,
-          baseWon,
-          rawSalesMemberId: c.rawSalesMemberId,
-          rawSalesMemberRank: rawRank,
-          isRawSalesMemberHeadOffice,
-          mappedMemberId: c.mappedMemberId,
-          resolvedTargetMemberId: null,
-          targetSource,
-          reason: unresolvedReason,
-          fallbackReason: 'target_member_missing',
-        });
-        if (props.debugEnabled) {
-          debugRows.push({
-            contractId: c.contractId,
-            baseWon,
-            rawSalesMemberId: c.rawSalesMemberId,
-            rawSalesMemberRank: rawRank,
-            isRawSalesMemberHeadOffice,
-            mappedMemberId: c.mappedMemberId,
-            isSelfCustomerContract: c.isSelfCustomerContract,
-            resolvedTargetMemberId: null,
-            targetSource,
-            selectedRowTopLineId: null,
-            selectedRowName: null,
-            selectedRowDepth: null,
-            selectedRowMemberSetSize: null,
-            reason: unresolvedReason,
-          });
-        }
         continue;
       }
 
@@ -383,43 +321,6 @@ export default function SettlementLineTableClient(props: {
       }
 
       if (!selected) {
-        const unresolvedReason = isRawSalesMemberHeadOffice
-          ? (
-              c.mappedMemberId && !rowByTopLineId.has(c.mappedMemberId) && !parentByChild.has(c.mappedMemberId)
-                ? 'unresolved_head_office_mapped_not_in_tree'
-                : 'unresolved_no_visible_ancestor'
-            )
-          : 'unresolved_no_assignable_row';
-        unresolvedBaseItems.push({
-          contractId: c.contractId,
-          baseWon,
-          rawSalesMemberId: c.rawSalesMemberId,
-          rawSalesMemberRank: rawRank,
-          isRawSalesMemberHeadOffice,
-          mappedMemberId: c.mappedMemberId,
-          resolvedTargetMemberId: targetMemberId,
-          targetSource,
-          reason: unresolvedReason,
-          fallbackReason: 'no_visible_row',
-        });
-        if (props.debugEnabled) {
-          debugRows.push({
-            contractId: c.contractId,
-            baseWon,
-            rawSalesMemberId: c.rawSalesMemberId,
-            rawSalesMemberRank: rawRank,
-            isRawSalesMemberHeadOffice,
-            mappedMemberId: c.mappedMemberId,
-            isSelfCustomerContract: c.isSelfCustomerContract,
-            resolvedTargetMemberId: targetMemberId,
-            targetSource,
-            selectedRowTopLineId: null,
-            selectedRowName: null,
-            selectedRowDepth: null,
-            selectedRowMemberSetSize: null,
-            reason: unresolvedReason,
-          });
-        }
         continue;
       }
 
@@ -441,44 +342,6 @@ export default function SettlementLineTableClient(props: {
           });
         }
       }
-
-      if (props.debugEnabled) {
-        debugRows.push({
-          contractId: c.contractId,
-          baseWon,
-          rawSalesMemberId: c.rawSalesMemberId,
-          rawSalesMemberRank: rawRank,
-          isRawSalesMemberHeadOffice,
-          mappedMemberId: c.mappedMemberId,
-          isSelfCustomerContract: c.isSelfCustomerContract,
-          resolvedTargetMemberId: targetMemberId,
-          targetSource,
-          selectedRowTopLineId: selected?.topLineId ?? null,
-          selectedRowName: selected?.topDisplayName ?? null,
-          selectedRowDepth: selected?.depth ?? null,
-          selectedRowMemberSetSize: selected?.memberSet.size ?? null,
-          reason,
-        });
-      }
-    }
-
-    if (props.debugEnabled && debugRows.length > 0) {
-      // eslint-disable-next-line no-console
-      console.log('[settlement split debug] contract base distribution');
-      // eslint-disable-next-line no-console
-      console.table(debugRows);
-    }
-    if (props.debugEnabled && unresolvedBaseItems.length > 0) {
-      // eslint-disable-next-line no-console
-      console.log('[settlement split debug] unresolved base items');
-      // eslint-disable-next-line no-console
-      console.table(unresolvedBaseItems);
-    }
-    if (props.debugEnabled && baseSummaryByRow.size > 0) {
-      // eslint-disable-next-line no-console
-      console.log('[settlement split debug] base summary by row');
-      // eslint-disable-next-line no-console
-      console.table(Array.from(baseSummaryByRow.values()));
     }
 
     let excludedUnits = 0;
@@ -510,7 +373,6 @@ export default function SettlementLineTableClient(props: {
     };
   }, [
     props.rows,
-    props.debugEnabled,
     props.periodSales,
     selfIncludedByTopId,
     splitOpenByTopId,

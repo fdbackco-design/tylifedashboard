@@ -26,7 +26,6 @@ interface PageProps {
     year_month?: string;
     rank?: string;
     member_id?: string;
-    debug?: string;
   }>;
 }
 
@@ -42,13 +41,11 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const todayYearMonth = getSettlementWindowSeoul().label_year_month;
   const yearMonth = params.year_month ?? todayYearMonth;
   const rankFilter = params.rank as RankType | undefined;
-  const debugEnabled = params.debug === '1';
 
   if (params.member_id) {
     const sp = new URLSearchParams();
     sp.set('year_month', yearMonth);
     sp.set('member_id', params.member_id);
-    if (debugEnabled) sp.set('debug', '1');
     redirect(`/admin/settlement/member?${sp.toString()}`);
   }
 
@@ -279,15 +276,6 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       cur.unitSum += unit;
     }
     directByMember.set(mid, cur);
-  }
-
-  if (debugEnabled) {
-    const sample = eligibleContracts
-      .filter((c) => c.sales_member_id && (membersRaw.find((m: any) => m.id === c.sales_member_id)?.name ?? '').includes('김세영'))
-      .slice(0, 3)
-      .map((c) => ({ contract_code: c.contract_code, sales_member_id: c.sales_member_id, customer_id: c.customer_id }));
-    // eslint-disable-next-line no-console
-    console.log('[settlement-debug] eligibleContracts', { yearMonth, total: eligibleContracts.length, sample });
   }
 
   let query = db
@@ -595,10 +583,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
           value={yearMonth}
           todayValue={todayYearMonth}
           years={yearsForPicker}
-          keepQuery={{
-            ...(rankFilter ? { rank: rankFilter } : {}),
-            ...(debugEnabled ? { debug: '1' } : {}),
-          }}
+          keepQuery={rankFilter ? { rank: rankFilter } : { rank: null }}
         />
 
         {/* 직급 필터 */}
@@ -630,7 +615,6 @@ export default async function SettlementPage({ searchParams }: PageProps) {
         todayYearMonth={todayYearMonth}
         startDate={start_date}
         endDate={end_date}
-        debugEnabled={debugEnabled}
         totalSales={totalSales}
         periodSales={periodSales}
         rankByMemberId={rankByMemberId}

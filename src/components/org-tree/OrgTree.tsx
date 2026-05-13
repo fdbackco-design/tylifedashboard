@@ -229,33 +229,6 @@ interface Props {
   showForecast?: boolean;
   /** /organization 전용: 최상단 가상 '본사(__hq_root__)' 카드를 숨김(레이아웃용 루트는 유지). 기본 false */
   hideHqRoot?: boolean;
-  debug?: {
-    enabled: boolean;
-    hqId: string | null;
-    hqEligibleTotal: number;
-    hqEligibleMappedToCustomerNode: number;
-    hqEligibleMissingCustomerNode: number;
-    customerNodesRaw?: number;
-    customerNodesAfterMerge?: number;
-    customerNodesChildOfHq?: number;
-    customerNodesInTree?: number;
-    sampleMissing?: Array<{ contract_code: string; customer_id: string; customer_name: string; customer_phone: string | null }>;
-    selfCustomerRecognized?: {
-      targets_total: number;
-      self_customer_contracts_in_window_total: number;
-      self_customer_units_in_window_total: number;
-      targets_sample: Array<{
-        id: string;
-        name: string;
-        rank: string;
-        parent_id: string | null;
-        parent_name: string;
-        parent_rank: string;
-        self_customer_contracts_in_window: number;
-        self_customer_units_in_window: number;
-      }>;
-    };
-  };
   metricsById?: Record<
     string,
     {
@@ -271,7 +244,6 @@ export default function OrgTree({
   roots,
   contractsByMember,
   metricsById,
-  debug,
   editable = true,
   showMetrics = true,
   showCommissionMetrics = true,
@@ -387,12 +359,6 @@ export default function OrgTree({
     }
   }, [editMode]);
 
-  useEffect(() => {
-    if (!debug?.enabled) return;
-    // eslint-disable-next-line no-console
-    console.log('[org-debug] summary', debug);
-  }, [debug]);
-
   const selectedNode = selectedId ? findNode(displayRoots, selectedId) : null;
   const selectedContracts = selectedNode
     ? collectSubtreeContracts(
@@ -401,42 +367,6 @@ export default function OrgTree({
         selectedNode.id === '__hq_root__' ? strippedNodeIds : undefined,
       )
     : [];
-
-  useEffect(() => {
-    if (!debug?.enabled) return;
-    if (!selectedId) return;
-    const list = contractsByMember[selectedId] ?? [];
-    // eslint-disable-next-line no-console
-    console.log('[org-debug] select', { selectedId, directContracts: list.length, sample: list.slice(0, 3) });
-
-    // 특정 고객(예: 최유주) 상태/필드 확인용
-    const norm = (v: string | null | undefined) => (v ?? '').replace(/\s+/g, '').trim();
-    const target = list.filter((c) => norm(c.customer_name).includes('최유주'));
-    if (target.length > 0) {
-      // eslint-disable-next-line no-console
-      console.log(
-        '[org-debug] target-customer',
-        target.slice(0, 5).map((c) => ({
-          contract_code: c.contract_code,
-          status: c.status,
-          rental_request_no: c.rental_request_no,
-          invoice_no: c.invoice_no,
-          memo: c.memo,
-          displayStatus: getDisplayStatus(c),
-        })),
-      );
-    }
-
-    if (target.length === 0) {
-      // eslint-disable-next-line no-console
-      console.log('[org-debug] target-customer', {
-        selectedId,
-        target: '최유주',
-        found: 0,
-        uniqueCustomers: Array.from(new Set(list.map((c) => (c.customer_name ?? '').trim()))).slice(0, 30),
-      });
-    }
-  }, [debug?.enabled, selectedId, contractsByMember]);
 
   function TreeSubtree({ node }: { node: OrgTreeNodeType }) {
     const children = node.children ?? [];
@@ -645,54 +575,6 @@ export default function OrgTree({
           ) : null}
         </div>
       </div>
-
-      {debug?.enabled && (
-        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
-          <div className="font-semibold mb-1">디버그</div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
-            <div>HQ eligible: {debug.hqEligibleTotal} / mapped {debug.hqEligibleMappedToCustomerNode} / missing {debug.hqEligibleMissingCustomerNode}</div>
-            <div>customer nodes: raw {debug.customerNodesRaw ?? '-'} → merged {debug.customerNodesAfterMerge ?? '-'} / childOfHQ {debug.customerNodesChildOfHq ?? '-'} / inTree {debug.customerNodesInTree ?? '-'}</div>
-            {debug.selfCustomerRecognized && (
-              <>
-                <div>
-                  self-customer targets: {debug.selfCustomerRecognized.targets_total}명
-                </div>
-                <div>
-                  self-customer(in window): {debug.selfCustomerRecognized.self_customer_contracts_in_window_total}건 · {debug.selfCustomerRecognized.self_customer_units_in_window_total}구좌
-                </div>
-              </>
-            )}
-          </div>
-
-          {debug.selfCustomerRecognized && debug.selfCustomerRecognized.targets_sample.length > 0 && (
-            <div className="mt-2 overflow-x-auto">
-              <table className="min-w-[720px] w-full text-[11px] border border-amber-200 rounded bg-white">
-                <thead className="bg-amber-100/60 border-b border-amber-200">
-                  <tr>
-                    {['대상', '직급', '부모', '부모직급', '본인고객(월) 건', '본인고객(월) 구좌'].map((h) => (
-                      <th key={h} className="px-2 py-1 text-left font-semibold text-amber-900 whitespace-nowrap">
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-amber-100">
-                  {debug.selfCustomerRecognized.targets_sample.map((r) => (
-                    <tr key={r.id}>
-                      <td className="px-2 py-1 whitespace-nowrap">{r.name || r.id}</td>
-                      <td className="px-2 py-1 whitespace-nowrap">{r.rank}</td>
-                      <td className="px-2 py-1 whitespace-nowrap">{r.parent_name || r.parent_id || '-'}</td>
-                      <td className="px-2 py-1 whitespace-nowrap">{r.parent_rank || '-'}</td>
-                      <td className="px-2 py-1 tabular-nums text-right">{r.self_customer_contracts_in_window}</td>
-                      <td className="px-2 py-1 tabular-nums text-right">{r.self_customer_units_in_window}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* 줌 가능한 뷰포트 */}
       <div

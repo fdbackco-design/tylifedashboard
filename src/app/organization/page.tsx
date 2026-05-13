@@ -70,12 +70,9 @@ const getCachedOrgSnapshot = unstable_cache(
 export default async function OrganizationMyTreePage({
   searchParams,
 }: {
-  searchParams?: Promise<{ year_month?: string; debug?: string; debug_customer?: string }>;
+  searchParams?: Promise<{ year_month?: string }>;
 }) {
   const sp = (await searchParams) ?? {};
-  const debugEnabled = sp.debug === '1';
-  const debugCustomerNeedle =
-    typeof sp.debug_customer === 'string' ? sp.debug_customer.trim() : '';
 
   const defaultYearMonth = getSettlementWindowSeoul().label_year_month;
   const requestedYearMonthRaw =
@@ -108,13 +105,6 @@ export default async function OrganizationMyTreePage({
   }
 
   const memberId = profile?.member_id as string | null;
-  const debugStats: Record<string, unknown> = {
-    debugEnabled,
-    user_id: user?.id ?? null,
-    profile_member_id: memberId,
-    yearMonth,
-    settlementWindow: { start_date, end_date, label_year_month },
-  };
 
   if (!memberId) {
     return (
@@ -156,7 +146,6 @@ export default async function OrganizationMyTreePage({
     remapMemberId,
     remapCustomerMemberId,
     resolveContractOriginForSubtree,
-    explainContractOriginForSubtree,
     hqIds: hqIdsForContracts,
     membersFiltered,
   } = buildOrgContractSalesRemap(membersRaw as any);
@@ -172,10 +161,6 @@ export default async function OrganizationMyTreePage({
     child_id: remapMemberId(e.child_id),
   }));
   const memberIdSetFiltered = new Set(membersFiltered.map((m) => m.id));
-
-  debugStats.members_raw_count = membersRaw.length;
-  debugStats.members_filtered_count = membersFiltered.length;
-  debugStats.edges_raw_count = edgesRaw.length;
 
   // treeRows 기준으로 서브트리 계산 (병합 반영 멤버만 사용)
   const treeRowsBase: OrgTreeRow[] = membersForTree.map((m) => ({
@@ -212,8 +197,6 @@ export default async function OrganizationMyTreePage({
         .filter((id): id is string => typeof id === 'string' && id.length > 0),
     ),
   ];
-  debugStats.subtree_ids_count = subtreeIds.size;
-  debugStats.subtree_members_count = subtreeMembers.length;
 
   // 계약은 subtree에 속한 sales_member_id만 조회(월 버튼 클릭 시 지연 감소)
   const subtreeMemberIds = [...subtreeIdSet.values()];
@@ -284,11 +267,6 @@ export default async function OrganizationMyTreePage({
       customer_name: row.customers?.name ?? null,
     }) as const;
 
-  let hqWindowFetched = 0;
-  let hqWindowIncluded = 0;
-  let hqWindowDroppedSubtree = 0;
-  const hqWindowDroppedSamples: Array<Record<string, unknown>> = [];
-
   if (hqSalesMemberIds.length > 0) {
     const { data: hqWindowRows } = await adminDb
       .from('contracts')
@@ -298,45 +276,17 @@ export default async function OrganizationMyTreePage({
       .lte('join_date', end_date)
       .order('join_date', { ascending: false })
       .limit(20000);
-    hqWindowFetched = (hqWindowRows ?? []).length;
     const seenWin = new Set(contractsRaw.map((c: any) => c.id as string));
     for (const row of (hqWindowRows ?? []) as any[]) {
       if (!row?.id || seenWin.has(row.id)) continue;
       const winInput = hqWindowRemapInput(row);
       const eff = resolveContractOriginForSubtree(winInput, subtreeIdSet);
-      if (!subtreeIdSet.has(eff)) {
-        hqWindowDroppedSubtree += 1;
-        const name = String(row?.customers?.name ?? '');
-        const matchNeedle =
-          !debugCustomerNeedle ||
-          name.includes(debugCustomerNeedle) ||
-          String(row.customer_id ?? '').includes(debugCustomerNeedle);
-        if (debugEnabled && matchNeedle && hqWindowDroppedSamples.length < 40) {
-          hqWindowDroppedSamples.push({
-            contract_id: row.id,
-            join_date: row.join_date,
-            customer_name: row.customers?.name ?? null,
-            customer_id: row.customer_id,
-            sales_member_id: row.sales_member_id,
-            display_status: getContractDisplayStatus({
-              status: row.status,
-              rental_request_no: row.rental_request_no ?? null,
-              invoice_no: row.invoice_no ?? null,
-              memo: row.memo ?? null,
-            }),
-            explain: explainContractOriginForSubtree(winInput, subtreeIdSet),
-          });
-        }
-        continue;
-      }
-      hqWindowIncluded += 1;
+      if (!subtreeIdSet.has(eff)) continue;
       seenWin.add(row.id);
       contractsRaw.push(row);
     }
   }
 
-  let ownCustomerWindowFetched = 0;
-  let ownCustomerWindowMerged = 0;
   if (subtreeMemberOwnCustomerIds.length > 0) {
     const seenOwn = new Set(contractsRaw.map((c: any) => c.id as string));
     for (const custChunk of chunk(subtreeMemberOwnCustomerIds, 120)) {
@@ -348,28 +298,15 @@ export default async function OrganizationMyTreePage({
         .lte('join_date', end_date)
         .order('join_date', { ascending: false })
         .limit(20000);
-      ownCustomerWindowFetched += (ownWinRows ?? []).length;
       for (const row of (ownWinRows ?? []) as any[]) {
         if (!row?.id || seenOwn.has(row.id)) continue;
         const winInput = hqWindowRemapInput(row);
         const eff = resolveContractOriginForSubtree(winInput, subtreeIdSet);
         if (!subtreeIdSet.has(eff)) continue;
         seenOwn.add(row.id);
-        ownCustomerWindowMerged += 1;
         contractsRaw.push(row);
       }
     }
-  }
-
-  if (debugEnabled) {
-    debugStats.hq_sales_member_ids = hqSalesMemberIds;
-    debugStats.hq_window_contracts = {
-      fetched_row_count: hqWindowFetched,
-      merged_into_subtree_count: hqWindowIncluded,
-      dropped_subtree_filter_count: hqWindowDroppedSubtree,
-      dropped_samples_needle: debugCustomerNeedle || null,
-      dropped_samples: hqWindowDroppedSamples,
-    };
   }
 
   // Supabase 필터 누락/비정상 응답이 있어도 카드·조직도 계약 목록은 정산 윈도우 밖을 제외
@@ -384,13 +321,10 @@ export default async function OrganizationMyTreePage({
       const pid = r.parent_id ?? null;
       return { ...r, parent_id: pid && subtreeIdSet.has(pid) ? pid : null };
     });
-  debugStats.subtree_tree_rows_count = subtreeTreeRows.length;
 
   const tree = buildOrgTree(subtreeTreeRows);
   // /organization에서는 최상단 본사(person) 노드는 숨기고, 자식들을 루트로 승격해서 보여준다.
   const treeForDisplay = stripOrgTreeNodesForDisplay(tree as any);
-  debugStats.tree_roots_count = tree.length;
-  debugStats.tree_root_ids = tree.map((r: any) => r.id);
 
   const contractRemapInput = (c: any) => ({
     sales_member_id: String(c.sales_member_id ?? ''),
@@ -428,7 +362,6 @@ export default async function OrganizationMyTreePage({
       };
     })
     .filter((x): x is NonNullable<typeof x> => x != null);
-  debugStats.eligible_contracts_for_metrics_count = eligibleContractsForMetrics.length;
 
   // ── 개인 대시 카드(서브트리 KPI) ─────────────────────────────
   // - 선택달 준비·대기: 표시 트리 루트별로 노드 카드와 동일한 countByStatus(준비+대기 건) 합산
@@ -493,8 +426,6 @@ export default async function OrganizationMyTreePage({
     }
   }
 
-  let ownCustomerCumulativeFetched = 0;
-  let ownCustomerCumulativeMerged = 0;
   if (subtreeMemberOwnCustomerIds.length > 0) {
     const seenOwnC = new Set(cumulativeContractsRaw.map((c: any) => c.id as string));
     for (const custChunk of chunk(subtreeMemberOwnCustomerIds, 120)) {
@@ -504,7 +435,6 @@ export default async function OrganizationMyTreePage({
         .in('customer_id', custChunk)
         .not('sales_member_id', 'is', null)
         .limit(50000);
-      ownCustomerCumulativeFetched += (ownCumRows ?? []).length;
       for (const row of (ownCumRows ?? []) as any[]) {
         if (!row?.id || seenOwnC.has(row.id)) continue;
         const eff = resolveContractOriginForSubtree(
@@ -523,7 +453,6 @@ export default async function OrganizationMyTreePage({
         );
         if (!subtreeIdSet.has(eff)) continue;
         seenOwnC.add(row.id);
-        ownCustomerCumulativeMerged += 1;
         cumulativeContractsRaw.push(row);
       }
     }
@@ -593,88 +522,6 @@ export default async function OrganizationMyTreePage({
       contractsByMember[customerKey].push(item);
     }
   }
-  debugStats.contracts_by_member_keys = Object.keys(contractsByMember).slice(0, 30);
-  debugStats.contracts_by_member_total_rows = Object.values(contractsByMember).reduce((s, arr) => s + arr.length, 0);
-
-  if (debugEnabled) {
-    debugStats.debug_customer_param = debugCustomerNeedle || null;
-    debugStats.contracts_raw_in_window_count = contractsRaw.length;
-    debugStats.subtree_own_customer_contracts = {
-      own_customer_id_count: subtreeMemberOwnCustomerIds.length,
-      window: {
-        fetched_row_count_sum: ownCustomerWindowFetched,
-        merged_into_subtree_count: ownCustomerWindowMerged,
-      },
-      cumulative: {
-        fetched_row_count_sum: ownCustomerCumulativeFetched,
-        merged_into_subtree_count: ownCustomerCumulativeMerged,
-      },
-    };
-    debugStats.subtree_member_sample = subtreeMembers.slice(0, 20).map((m) => ({
-      id: m.id,
-      name: m.name,
-      rank: m.rank,
-      external_id: m.external_id,
-      source_customer_id: m.source_customer_id,
-    }));
-    if (debugCustomerNeedle) {
-      debugStats.subtree_members_name_match = subtreeMembers
-        .filter((m) => (m.name ?? '').includes(debugCustomerNeedle))
-        .map((m) => ({ id: m.id, name: m.name, rank: m.rank, external_id: m.external_id }));
-    }
-    const explainSamples: Array<Record<string, unknown>> = [];
-    for (const c of contractsRaw) {
-      if (explainSamples.length >= 35) break;
-      const custName = String((c as any).customers?.name ?? '');
-      const match =
-        !debugCustomerNeedle ||
-        custName.includes(debugCustomerNeedle) ||
-        String((c as any).customer_id ?? '').includes(debugCustomerNeedle);
-      if (!match) continue;
-      const ri = contractRemapInput(c);
-      const o = originInSubtree(c);
-      explainSamples.push({
-        contract_id: (c as any).id,
-        join_date: (c as any).join_date,
-        customer_name: custName || null,
-        customer_id: (c as any).customer_id,
-        sales_member_id: (c as any).sales_member_id,
-        origin_key: o,
-        in_subtree_bucket: subtreeIdSet.has(o),
-        explain: explainContractOriginForSubtree(ri, subtreeIdSet),
-      });
-    }
-    debugStats.window_contract_explain_samples = explainSamples;
-    if (debugCustomerNeedle && explainSamples.length === 0) {
-      debugStats.window_contract_explain_note =
-        '이 달 contracts_raw(서브트리+HQ병합 후, 날짜창 필터 적용)에서 debug_customer 문자열과 일치하는 고객/ID가 없습니다. HQ에서 걸러진 경우 hq_window_contracts.dropped_samples를 보세요.';
-    }
-
-    const hqSalesSet = new Set(hqSalesMemberIds);
-    const hqInWindowSamples: Array<Record<string, unknown>> = [];
-    for (const c of contractsRaw) {
-      if (hqInWindowSamples.length >= 20) break;
-      if (!hqSalesSet.has(String((c as any).sales_member_id ?? ''))) continue;
-      const ri = contractRemapInput(c);
-      hqInWindowSamples.push({
-        contract_id: (c as any).id,
-        customer_name: (c as any).customers?.name ?? null,
-        origin_key: originInSubtree(c),
-        explain: explainContractOriginForSubtree(ri, subtreeIdSet),
-      });
-    }
-    debugStats.window_hq_attributed_contract_samples = hqInWindowSamples;
-
-    console.log('[organization:debug]', {
-      memberId,
-      yearMonth,
-      debug_customer: debugCustomerNeedle || null,
-      contracts_raw_in_window: contractsRaw.length,
-      hq_window: debugStats.hq_window_contracts,
-      first_drop_reason: (hqWindowDroppedSamples[0] as { explain?: { reason?: string } } | undefined)?.explain
-        ?.reason,
-    });
-  }
 
   const periodPendingTreeContractCount = (treeForDisplay as any[]).reduce((sum: number, root: any) => {
     const ids = collectSubtreeIds(root);
@@ -708,21 +555,6 @@ export default async function OrganizationMyTreePage({
 
   return (
     <div className="p-3 sm:p-6">
-      {debugEnabled ? (
-        <div className="mb-4 bg-slate-50 border border-slate-200 rounded-lg p-4">
-          <div className="text-sm font-semibold text-slate-800 mb-2">[organization debug] stats</div>
-          <p className="text-[11px] text-slate-600 mb-2">
-            URL 예: <code className="bg-slate-200 px-1 rounded">?debug=1</code> · 특정 고객만 샘플링:{' '}
-            <code className="bg-slate-200 px-1 rounded">?debug=1&amp;debug_customer=신희석</code> · 터미널(
-            <code className="bg-slate-200 px-1 rounded">npm run dev</code>)에는{' '}
-            <code className="bg-slate-200 px-1 rounded">[organization:debug]</code> 로그가 출력됩니다.
-          </p>
-          <pre className="text-[11px] leading-4 text-slate-700 whitespace-pre-wrap">
-            {JSON.stringify(debugStats, null, 2)}
-          </pre>
-        </div>
-      ) : null}
-
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4 sm:mb-6">
         <div>
           <h2 className="text-xl sm:text-2xl font-bold text-gray-800">내 조직도</h2>
@@ -760,19 +592,7 @@ export default async function OrganizationMyTreePage({
         </div>
       </div>
 
-      <YearMonthSelector
-        value={yearMonth}
-        todayValue={defaultYearMonth}
-        years={yearsForPicker}
-        keepQuery={
-          debugEnabled
-            ? {
-                debug: '1',
-                ...(debugCustomerNeedle ? { debug_customer: debugCustomerNeedle } : {}),
-              }
-            : { debug: null, debug_customer: null }
-        }
-      />
+      <YearMonthSelector value={yearMonth} todayValue={defaultYearMonth} years={yearsForPicker} />
 
       <div className="mb-4 flex justify-end">
         <Link
@@ -792,11 +612,6 @@ export default async function OrganizationMyTreePage({
           showMetrics={false}
           showForecast={true}
           hideHqRoot={true}
-          debug={
-            debugEnabled
-              ? ({ enabled: true } as any)
-              : ({ enabled: false, hqId: null, hqEligibleTotal: 0, hqEligibleMappedToCustomerNode: 0, hqEligibleMissingCustomerNode: 0 } as any)
-          }
         />
       </div>
     </div>

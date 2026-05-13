@@ -55,10 +55,9 @@ function formatWon(value: number): string {
 export default async function OrganizationPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ debug?: string; year_month?: string }>;
+  searchParams?: Promise<{ year_month?: string }>;
 }) {
   const sp = (await searchParams) ?? {};
-  const debugEnabled = sp.debug === '1';
   const db = createAdminSupabaseClient();
 
   const defaultYearMonth = getSettlementWindowSeoul().label_year_month;
@@ -141,15 +140,8 @@ export default async function OrganizationPage({
   const hqIdForTree =
     membersRaw.find((m: any) => m.name === '안성준')?.id ?? (hqIdsRaw.values().next().value ?? null);
 
-  // debug(서버): 병합/트리 단계별 카운트
-  let dbg_customerNodes_raw = 0;
-  let dbg_customerNodes_afterMerge = 0;
-  let dbg_customerNodes_childOfHq = 0;
-  let dbg_customerNodes_inTree = 0;
-
   for (const m of membersRaw as any[]) {
     const ext = (m as { external_id?: string | null }).external_id ?? null;
-    if (ext?.startsWith('customer:')) dbg_customerNodes_raw += 1;
     const nName = normName((m as any).name);
     const digits = toPhoneDigits((m as any).phone);
     const key = `${nName}|${digits}`;
@@ -194,7 +186,6 @@ export default async function OrganizationPage({
   }
 
   const members = membersRaw.filter((m: any) => !customerMergeTo.has((m as { id: string }).id));
-  dbg_customerNodes_afterMerge = (members as any[]).filter((m) => ((m as any).external_id ?? '').startsWith('customer:')).length;
   const memberIdSet = new Set((members as any[]).map((m) => (m as { id: string }).id));
   const edges = (edgesRaw as any[]).map((e) => ({
     parent_id: (e as any).parent_id ? remapMemberId((e as any).parent_id) : null,
@@ -228,14 +219,6 @@ export default async function OrganizationPage({
   }
 
   const dedupedEdges = [...bestByChild.values()];
-
-  // 본사(hq) 직속 customer 노드 수(트리 구성 전)
-  dbg_customerNodes_childOfHq = dedupedEdges.filter(
-    (e) =>
-      e.parent_id != null &&
-      hqIdsRaw.has(e.parent_id) &&
-      ((membersRaw.find((m: any) => (m as any).id === e.child_id)?.external_id ?? '') as string).startsWith('customer:'),
-  ).length;
 
   const edgeMap = new Map<string, string | null>();
   for (const e of dedupedEdges) {
@@ -290,11 +273,6 @@ export default async function OrganizationPage({
       .filter((m) => m.name === '안성준' || m.rank === '본사')
       .map((m) => m.id),
   );
-  const hqId = members.find((m) => m.name === '안성준')?.id ?? (hqIds.values().next().value ?? null);
-  let dbg_hqEligibleTotal = 0;
-  let dbg_hqEligibleMapped = 0;
-  let dbg_hqEligibleMissing = 0;
-  const dbg_sampleMissing: Array<{ contract_code: string; customer_id: string; customer_name: string; customer_phone: string | null }> = [];
   const customerNodeByCustomerId = new Map<string, string>(); // external_id = customer:{customer_id}
   const customerMemberIdByCustomerId = new Map<string, string>(); // (customer node) customer_id -> member id (source_customer_id 우선)
   const nodeIdByPhoneDigits = new Map<string, string>(); // phone digits -> member id
@@ -358,20 +336,9 @@ export default async function OrganizationPage({
     });
 
     if (hqIds.size > 0 && hqIds.has(c.sales_member_id) && joinEligible) {
-      dbg_hqEligibleTotal += 1;
       const customerNodeId = findCustomerNodeId({ customer_id: c.customer_id, customer_phone: c.customer_phone });
       if (customerNodeId) {
-        dbg_hqEligibleMapped += 1;
         return customerNodeId;
-      }
-      dbg_hqEligibleMissing += 1;
-      if (dbg_sampleMissing.length < 5) {
-        dbg_sampleMissing.push({
-          contract_code: c.contract_code ?? '(unknown)',
-          customer_id: c.customer_id,
-          customer_name: c.customer_name ?? '',
-          customer_phone: c.customer_phone,
-        });
       }
     }
     return c.sales_member_id;
@@ -578,9 +545,6 @@ export default async function OrganizationPage({
   // 조직도(OrgTree)와 동일한 숨김·승격 후 평탄 노드 — 직급 배지·헤더 인원수 집계에 사용
   const orgTreeVisibleNodes = flattenOrgTreeNodes(stripOrgTreeNodesForDisplay(tree));
   const orgTreeVisibleCountExcludingHqRank = orgTreeVisibleNodes.filter((n) => n.rank !== '본사').length;
-  // buildOrgTree 결과에 customer 노드가 실제로 남아있는지
-  const flatten = (nodes: any[]): any[] => nodes.flatMap((n) => [n, ...(n.children ? flatten(n.children) : [])]);
-  dbg_customerNodes_inTree = flatten(tree).filter((n) => ((membersRaw.find((m: any) => (m as any).id === n.id)?.external_id ?? '') as string).startsWith('customer:')).length;
 
   /** 조직 노드 구좌·수당: get_organization_kpis 와 동일한 가입 인정 기준 */
   const kpiEligibleForMetrics = rawContractRows
@@ -606,77 +570,6 @@ export default async function OrganizationPage({
       })),
       created_at: (c as { created_at?: string | null }).created_at ?? null,
     }));
-
-  // 조직도 페이지 전용 예외 대상(안성준 직속 1단계 영업사원/리더) 계산 + 디버그용 요약
-  const selfCustomerRecognizedTargetIds = (() => {
-    const byId = new Map<string, { name: string; rank: string }>();
-    for (const m of members as any[]) byId.set(m.id as string, { name: String(m.name ?? ''), rank: String(m.rank ?? '') });
-
-    const set = new Set<string>();
-    for (const e of dedupedEdges as any[]) {
-      const parentId = (e.parent_id ?? null) as string | null;
-      const childId = (e.child_id ?? null) as string | null;
-      if (!parentId || !childId) continue;
-
-      const p = byId.get(parentId);
-      const ch = byId.get(childId);
-      if (!p || !ch) continue;
-
-      const parentIsAhn = p.name === '안성준' && (p.rank === '영업사원' || p.rank === '본사');
-      const childIsTargetRank = ch.rank === '영업사원' || ch.rank === '리더';
-      if (parentIsAhn && childIsTargetRank) set.add(childId);
-    }
-    return set;
-  })();
-
-  const selfCustomerDebug = (() => {
-    const byId = new Map<string, { name: string; rank: string }>();
-    for (const m of members as any[]) byId.set(m.id as string, { name: String(m.name ?? ''), rank: String(m.rank ?? '') });
-    const parentByChild = new Map<string, string | null>();
-    for (const e of dedupedEdges as any[]) parentByChild.set(String(e.child_id), (e.parent_id ?? null) as string | null);
-
-    const targets = [...selfCustomerRecognizedTargetIds].map((id) => {
-      const self = byId.get(id) ?? { name: '', rank: '' };
-      const pid = parentByChild.get(id) ?? null;
-      const p = pid ? (byId.get(pid) ?? { name: '', rank: '' }) : { name: '', rank: '' };
-      return { id, name: self.name, rank: self.rank, parent_id: pid, parent_name: p.name, parent_rank: p.rank };
-    });
-
-    const inWindow = (joinDate: string): boolean => joinDate >= start_date && joinDate <= end_date;
-    const countsById = new Map<string, { contractCount: number; unitCount: number }>();
-    let totalContracts = 0;
-    let totalUnits = 0;
-
-    for (const c of kpiEligibleForMetrics as any[]) {
-      if (!c.is_self_customer_contract) continue;
-      const originId = (c.sales_member_id ?? null) as string | null;
-      if (!originId) continue;
-      if (!selfCustomerRecognizedTargetIds.has(originId)) continue;
-      const jd = String(c.join_date ?? '').slice(0, 10);
-      if (!jd || !inWindow(jd)) continue;
-      const unit = Number(c.unit_count ?? 0);
-      if (unit <= 0) continue;
-      totalContracts += 1;
-      totalUnits += unit;
-      const prev = countsById.get(originId) ?? { contractCount: 0, unitCount: 0 };
-      countsById.set(originId, { contractCount: prev.contractCount + 1, unitCount: prev.unitCount + unit });
-    }
-
-    const byTarget = targets
-      .map((t) => ({
-        ...t,
-        self_customer_contracts_in_window: countsById.get(t.id)?.contractCount ?? 0,
-        self_customer_units_in_window: countsById.get(t.id)?.unitCount ?? 0,
-      }))
-      .sort((a, b) => b.self_customer_units_in_window - a.self_customer_units_in_window);
-
-    return {
-      targets_total: targets.length,
-      targets_sample: byTarget.slice(0, 30),
-      self_customer_contracts_in_window_total: totalContracts,
-      self_customer_units_in_window_total: totalUnits,
-    };
-  })();
 
   // 수당(인정/실지급) parent 체인은 트리와 동일한 단일 parent(child_id UNIQUE)를 써야 한다.
   // 원본 edges 배열을 그대로 쓰면 동일 child에 대한 중복 행 때문에 마지막 행만 남아
@@ -812,12 +705,7 @@ export default async function OrganizationPage({
         </div>
       </div>
 
-      <YearMonthSelector
-        value={label_year_month}
-        todayValue={defaultYearMonth}
-        years={yearsForPicker}
-        keepQuery={debugEnabled ? { debug: '1' } : { debug: null }}
-      />
+      <YearMonthSelector value={label_year_month} todayValue={defaultYearMonth} years={yearsForPicker} />
 
       {/* 마지막 동기화 상태 */}
       {lastSync ? (
@@ -914,23 +802,6 @@ export default async function OrganizationPage({
           contractsByMember={contractsByMember}
           metricsById={orgMetricsById}
           showCommissionMetrics={false}
-          debug={
-            debugEnabled
-              ? {
-                  enabled: true,
-                  hqId,
-                  hqEligibleTotal: dbg_hqEligibleTotal,
-                  hqEligibleMappedToCustomerNode: dbg_hqEligibleMapped,
-                  hqEligibleMissingCustomerNode: dbg_hqEligibleMissing,
-                  sampleMissing: dbg_sampleMissing,
-                  customerNodesRaw: dbg_customerNodes_raw,
-                  customerNodesAfterMerge: dbg_customerNodes_afterMerge,
-                  customerNodesChildOfHq: dbg_customerNodes_childOfHq,
-                  customerNodesInTree: dbg_customerNodes_inTree,
-                  selfCustomerRecognized: selfCustomerDebug,
-                }
-              : { enabled: false, hqId, hqEligibleTotal: 0, hqEligibleMappedToCustomerNode: 0, hqEligibleMissingCustomerNode: 0 }
-          }
         />
       </div>
     </div>
