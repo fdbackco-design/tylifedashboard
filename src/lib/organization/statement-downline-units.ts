@@ -24,13 +24,15 @@ function chunk<T>(arr: T[], size: number): T[][] {
 }
 
 /**
- * 지급 명세서용: 정산 윈도우 안에서, 귀속 담당자가 `rootMemberId`의 직접 산하(본인 제외)에 속한 계약 구좌 합계.
+ * 지급 명세서용: 정산 윈도우 안에서 귀속 담당자가 `rootMemberId` 서브트리에 속한 계약 구좌 합(본인 포함)에서,
+ * 명세서 개인 실적(`directUnitCountFromSettlement`)을 뺀 값을 산하 실적으로 반환한다.
  * /organization 과 동일한 `resolveContractOriginForSubtree`·정산 대상 필터를 사용한다.
  */
 export async function sumDownlineAttributedUnitsInSettlementWindow(
   db: SupabaseClient,
   rootMemberId: string,
   window: { start_date: string; end_date: string },
+  directUnitCountFromSettlement: number,
 ): Promise<number> {
   const [membersRes, edgesRes] = await Promise.all([
     db
@@ -75,10 +77,6 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
 
   const childrenByParent = buildChildrenByParentFromRows(treeRows);
   const subtreeIds = collectSubtreeMemberIdsDownstream(rootMemberId, childrenByParent);
-  const descendantIds = new Set(subtreeIds);
-  descendantIds.delete(rootMemberId);
-  if (descendantIds.size === 0) return 0;
-
   const subtreeIdSet = subtreeIds;
   const subtreeMemberIds = [...subtreeIdSet];
   const subtreeMembers = membersFiltered.filter((m) => subtreeIdSet.has(m.id));
@@ -192,14 +190,15 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
     customer_name: ((c.customers as { name?: string | null } | null)?.name ?? null) as string | null,
   });
 
-  let sum = 0;
+  let subtreeAttributedTotal = 0;
   for (const c of contractsRaw) {
     if (!isSettlementEligibleContract(c as any)) continue;
     const origin = resolveContractOriginForSubtree(contractRemapInput(c), subtreeIdSet);
-    if (!descendantIds.has(origin)) continue;
+    if (!subtreeIdSet.has(origin)) continue;
     const u = Number((c.unit_count as number | null | undefined) ?? 0);
-    if (Number.isFinite(u) && u > 0) sum += u;
+    if (Number.isFinite(u) && u > 0) subtreeAttributedTotal += u;
   }
 
-  return sum;
+  const personal = Math.max(0, Math.floor(Number(directUnitCountFromSettlement) || 0));
+  return Math.max(0, subtreeAttributedTotal - personal);
 }

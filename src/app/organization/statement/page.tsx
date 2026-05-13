@@ -121,10 +121,12 @@ export default async function OrganizationStatementPage({
     );
   }
 
-  const downlineAttributedUnits = await sumDownlineAttributedUnitsInSettlementWindow(db, memberId, {
-    start_date,
-    end_date,
-  });
+  const downlineAttributedUnits = await sumDownlineAttributedUnitsInSettlementWindow(
+    db,
+    memberId,
+    { start_date, end_date },
+    s.direct_unit_count ?? 0,
+  );
 
   const no = `${label_year_month}-${String(memberId).slice(0, 4)}`;
   const statementTotalUnits = (s.direct_unit_count ?? 0) + downlineAttributedUnits;
@@ -179,8 +181,8 @@ export default async function OrganizationStatementPage({
               </div>
             </div>
             <div className="px-4 py-2 text-[11px] text-gray-500 leading-relaxed">
-              본인을 제외한 산하 조직원(및 고객 노드)이 담당으로 귀속된 계약 구좌입니다. 본사 담당 등은 내
-              산하 고객으로 귀속된 경우만 포함합니다.
+              내 서브트리에 귀속된 계약 구좌 합에서, 위 개인 실적 구좌(정산 기준)를 뺀 값입니다. 본사 담당 등은
+              내 산하 고객으로 귀속된 경우만 서브트리 합에 포함됩니다.
             </div>
           </div>
 
