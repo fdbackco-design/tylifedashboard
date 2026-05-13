@@ -43,6 +43,8 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
   | number
   | {
       downline_units: number;
+      included_units_before_personal: number;
+      personal_units_from_settlement: number;
       debug_rows: Array<{
         contract_id: string;
         contract_code: string | null;
@@ -307,10 +309,13 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
     // root가 리더인 경우: "리더가 된 이후" 계약만 포함
     let excludedByRootLeaderEffectiveAt = false;
     if (rootRank === '리더') {
+      // 요구: “본인이 직접 담당한 계약”은 리더 전이라도 산하 집계(개인 차감 전 목록)에는 포함되어야 한다.
+      // (최종 산하 구좌에서는 personal_units_from_settlement을 빼므로 값에는 영향이 없고, 디버그/검증 목적)
+      const jd = String((c.join_date as string | null | undefined) ?? '').slice(0, 10);
+      if (origin !== rootMemberId) {
       // 요구: “리더가 되기 전의 산하 계약”은 제외.
       // 1) leader_rank_effective_at이 있으면 join_date 우선으로 필터하고, 같은 날만 created_at으로 경계 처리
       // 2) leader_rank_effective_at이 없으면 leader_promotion_events(threshold) 기준으로 "승격 계약부터" 포함
-      const jd = String((c.join_date as string | null | undefined) ?? '').slice(0, 10);
       const createdAt = (c.created_at as string | null | undefined) ?? null;
 
       if (rootLeaderEffectiveAt && rootLeaderEffectiveYmd) {
@@ -328,6 +333,7 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
           createdAt,
         );
         if (!after) excludedByRootLeaderEffectiveAt = true;
+      }
       }
 
       if (excludedByRootLeaderEffectiveAt) {
@@ -420,7 +426,12 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
   const personal = Math.max(0, Math.floor(Number(directUnitCountFromSettlement) || 0));
   const downline = Math.max(0, scopeAttributedTotal - personal);
   if (opts?.debug) {
-    return { downline_units: downline, debug_rows: debugRows };
+    return {
+      downline_units: downline,
+      included_units_before_personal: scopeAttributedTotal,
+      personal_units_from_settlement: personal,
+      debug_rows: debugRows,
+    };
   }
   return downline;
 }

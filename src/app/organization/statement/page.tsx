@@ -203,6 +203,21 @@ export default async function OrganizationStatementPage({
                 <div className="text-xs text-gray-500 mt-0.5">
                   포함된 계약(및 제외된 계약 일부)을 확인합니다.
                 </div>
+                <div className="text-xs text-gray-600 mt-2">
+                  포함 합계(개인 차감 전){' '}
+                  <span className="font-semibold tabular-nums">
+                    {downlineRes.included_units_before_personal.toLocaleString('ko-KR')}
+                  </span>
+                  구좌 · 개인(정산){' '}
+                  <span className="font-semibold tabular-nums">
+                    {downlineRes.personal_units_from_settlement.toLocaleString('ko-KR')}
+                  </span>
+                  구좌 · 최종 산하{' '}
+                  <span className="font-semibold tabular-nums">
+                    {downlineRes.downline_units.toLocaleString('ko-KR')}
+                  </span>
+                  구좌
+                </div>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
