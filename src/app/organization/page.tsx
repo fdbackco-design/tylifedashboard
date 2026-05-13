@@ -140,17 +140,31 @@ export default async function OrganizationMyTreePage({
   const rules = (snapshot.rules ?? []) as SettlementRule[];
 
   const {
+    remapMemberId,
     remapCustomerMemberId,
     resolveContractSalesMemberId,
     hqIds: hqIdsForContracts,
+    membersFiltered,
   } = buildOrgContractSalesRemap(membersRaw as any);
   const hqSalesMemberIds = [...hqIdsForContracts];
 
+  /** 병합 필터 후에도 스냅샷 행과 동일 객체(leader_rank_effective_at 등 유지) */
+  type MemberRow = (typeof membersRaw)[number];
+  const membersForTree = membersFiltered as MemberRow[];
+
+  // /admin/organization 과 동일: 병합된 customer 노드 id를 edge에서 직원 id로 치환
+  const edgesRemapped = edgesRaw.map((e) => ({
+    parent_id: e.parent_id ? remapMemberId(e.parent_id) : null,
+    child_id: remapMemberId(e.child_id),
+  }));
+  const memberIdSetFiltered = new Set(membersFiltered.map((m) => m.id));
+
   debugStats.members_raw_count = membersRaw.length;
+  debugStats.members_filtered_count = membersFiltered.length;
   debugStats.edges_raw_count = edgesRaw.length;
 
-  // treeRows 기준으로 서브트리 계산
-  const treeRowsBase: OrgTreeRow[] = membersRaw.map((m) => ({
+  // treeRows 기준으로 서브트리 계산 (병합 반영 멤버만 사용)
+  const treeRowsBase: OrgTreeRow[] = membersForTree.map((m) => ({
     id: m.id,
     name: m.name,
     rank: m.rank,
@@ -158,7 +172,13 @@ export default async function OrganizationMyTreePage({
     depth: 0,
   }));
   const edgeByChild = new Map<string, string | null>();
-  for (const e of edgesRaw) edgeByChild.set(e.child_id, e.parent_id);
+  for (const e of edgesRemapped) {
+    const child_id = e.child_id;
+    if (!memberIdSetFiltered.has(child_id)) continue;
+    const parent_id =
+      e.parent_id && memberIdSetFiltered.has(e.parent_id) ? e.parent_id : null;
+    edgeByChild.set(child_id, parent_id);
+  }
 
   const treeRows = treeRowsBase.map((r) => ({
     ...r,
@@ -168,7 +188,7 @@ export default async function OrganizationMyTreePage({
   const childrenByParent = buildChildrenByParentFromRows(treeRows);
   const subtreeIds = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
 
-  const subtreeMembers = membersRaw.filter((m) => subtreeIds.has(m.id));
+  const subtreeMembers = membersForTree.filter((m) => subtreeIds.has(m.id));
   const subtreeIdSet = new Set(subtreeMembers.map((m) => m.id));
   debugStats.subtree_ids_count = subtreeIds.size;
   debugStats.subtree_members_count = subtreeMembers.length;
@@ -209,7 +229,7 @@ export default async function OrganizationMyTreePage({
   }
 
   const contractSelect =
-    'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, customer_id, is_cancelled, customers(name, phone), created_at';
+    'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, customer_id, is_cancelled, sales_link_status, customers(name, phone), created_at';
 
   const contractChunks = chunk(subtreeMemberIds, 500);
   const contractResList = await Promise.all(
@@ -344,7 +364,7 @@ export default async function OrganizationMyTreePage({
 
   // 누적 가입 구좌: 월 제한 없이(서브트리 전체) 가입 완료(표시 상태) 합산
   const cumulativeContractsSelect =
-    'id, join_date, unit_count, status, rental_request_no, invoice_no, memo, is_cancelled, sales_member_id, customer_id, item_name, created_at, customers(phone)';
+    'id, join_date, unit_count, status, rental_request_no, invoice_no, memo, is_cancelled, sales_member_id, customer_id, item_name, created_at, sales_link_status, customers(name, phone)';
   const cumulativeResList = await Promise.all(
     contractChunks.map((ids) =>
       ids.length === 0
@@ -454,7 +474,9 @@ export default async function OrganizationMyTreePage({
   debugStats.contracts_by_member_total_rows = Object.values(contractsByMember).reduce((s, arr) => s + arr.length, 0);
 
   // edges/subtree는 calculateOrgNodeMetrics에 넣을 때도 서브트리만 유지
-  const subtreeEdges = edgesRaw.filter((e) => e.child_id && subtreeIdSet.has(e.child_id) && e.parent_id && subtreeIdSet.has(e.parent_id));
+  const subtreeEdges = edgesRemapped.filter(
+    (e) => e.child_id && subtreeIdSet.has(e.child_id) && e.parent_id && subtreeIdSet.has(e.parent_id),
+  );
   const orgMetricsById = calculateOrgNodeMetrics({
     roots: treeForDisplay as any[],
     members: subtreeMembers.map((m) => ({
