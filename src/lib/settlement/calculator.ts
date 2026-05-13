@@ -577,7 +577,11 @@ export function calculateMemberSettlement(
     const ruLeader = getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
     let label = `${member.rank} 기준`;
     let applied: number | null = getActiveRuleOrFallback(rules, member.rank, refDate).commission_per_unit;
-    if (member.rank === '영업사원' || member.rank === '리더') {
+    if (member.rank === '리더') {
+      // DB 리더: 직접 기본수당은 항상 리더 단가(40만/구좌). 승격 threshold 유무와 무관하게 메타도 동일하게 둔다.
+      label = `${(ruLeader / 10_000).toFixed(0)}만원/구좌(리더)`;
+      applied = ruLeader;
+    } else if (member.rank === '영업사원') {
       if (!th) {
         label = `${(ruSales / 10_000).toFixed(0)}만원/구좌(영업사원)`;
         applied = ruSales;
