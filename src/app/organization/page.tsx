@@ -528,7 +528,7 @@ export default async function OrganizationMyTreePage({
                 {periodPendingTreeContractCount.toLocaleString('ko-KR')}건
               </span>
               <div className="text-[11px] text-gray-400 mt-0.5">
-                노드 배지(준비+대기)와 동일 · 기준 {label_year_month} · {start_date}~{end_date}
+                기준 {label_year_month} · {start_date}~{end_date}
               </div>
             </div>
             <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
