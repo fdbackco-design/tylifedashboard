@@ -71,7 +71,7 @@ export default async function OrganizationPage({
     await Promise.all([
     db
       .from('organization_members')
-      .select('id, name, rank, external_id, phone, source_customer_id')
+      .select('id, name, rank, external_id, phone, source_customer_id, leader_rank_effective_at')
       .eq('is_active', true)
       .order('name'),
     db.from('organization_edges').select('parent_id, child_id'),
@@ -642,6 +642,7 @@ export default async function OrganizationPage({
       return (members as any[]).map((m) => ({
         id: (m as any).id,
         rank: (effectiveRankById.get((m as any).id) ?? (m as any).rank) as any,
+        leader_rank_effective_at: (m as any).leader_rank_effective_at ?? undefined,
       }));
     })(),
     edges: dedupedEdges as { parent_id: string | null; child_id: string }[],

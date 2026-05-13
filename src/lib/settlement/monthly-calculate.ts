@@ -73,7 +73,7 @@ export async function calculateMonthlySettlement(params: {
   const [membersRes, edgesRes, joinContractsRes] = await Promise.all([
     db
       .from('organization_members')
-      .select('id, name, rank, external_id, phone, source_customer_id')
+      .select('id, name, rank, external_id, phone, source_customer_id, leader_rank_effective_at')
       .eq('is_active', true),
     db.from('organization_edges').select('parent_id, child_id'),
     db
@@ -156,6 +156,14 @@ export async function calculateMonthlySettlement(params: {
 
   const promotionThresholdByMemberId = computeSalesMemberPromotionThreshold(treeRows, joinAttributed, rankById);
 
+  const leaderRankEffectiveAtByMemberId = new Map<string, string | null>();
+  for (const m of membersRaw as OrganizationMember[]) {
+    const at = m.leader_rank_effective_at;
+    if (at != null && String(at).trim() !== '') {
+      leaderRankEffectiveAtByMemberId.set(m.id, String(at).trim());
+    }
+  }
+
   const leaderOpts: LeaderSettlementOpts = {
     treeRows,
     promotionThresholdByMemberId,
@@ -163,6 +171,7 @@ export async function calculateMonthlySettlement(params: {
     settlementEndDate: end_date,
     leaderMaintenanceBonusAlreadyPaidByMemberId: leaderMaintBlockByMemberId,
     previousLeaderByPromotedMemberId: prevLeaderByPromotedMemberId,
+    leaderRankEffectiveAtByMemberId,
   };
 
   const contractsByMember = new Map<string, Contract[]>();

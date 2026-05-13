@@ -25,6 +25,11 @@ export interface OrganizationMember {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  /**
+   * DB 직급이 리더인 경우, 리더 단가를 적용할 기준 시각(서버/DB UTC).
+   * NULL이면 `leader_promotion` threshold·계약 created_at 보정만 사용한다.
+   */
+  leader_rank_effective_at?: string | null;
 }
 
 export interface OrganizationMemberInsert {

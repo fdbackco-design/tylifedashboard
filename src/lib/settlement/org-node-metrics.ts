@@ -85,9 +85,16 @@ function effectiveRankForContract(params: {
   dbRank: RankType;
   contract: { id: string; join_date: string; created_at?: string | null };
   promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>;
+  leaderRankEffectiveAtByMemberId?: Map<string, string | null>;
 }): RankType {
   // 본사는 수당 대상이 아님(상위 로직에서 0 처리)
   if (params.dbRank === '본사') return '본사';
+
+  const effectiveAt = (params.leaderRankEffectiveAtByMemberId?.get(params.memberId) ?? '').trim();
+  if (params.dbRank === '리더' && effectiveAt) {
+    const cAt = (params.contract.created_at ?? '').trim();
+    if (cAt && cAt >= effectiveAt) return '리더';
+  }
 
   // 정책 승격/유지 로직은 영업사원 ↔ 리더 범위에서만 의미가 있다.
   if (params.dbRank !== '영업사원' && params.dbRank !== '리더') return params.dbRank;
@@ -109,6 +116,11 @@ function effectiveRankForContract(params: {
   if (params.dbRank === '리더') {
     const jd = params.contract.join_date.slice(0, 10);
     if (jd > th.threshold_join_date) return '리더';
+    if (jd === th.threshold_join_date) {
+      const cAt = (params.contract.created_at ?? '').trim();
+      const tAt = (th.threshold_created_at ?? '').trim();
+      if (cAt && tAt && cAt > tAt) return '리더';
+    }
   }
   return '영업사원';
 }
@@ -213,7 +225,7 @@ function buildParentMapFromTreeRows(rows: OrgTreeRow[]): Map<string, string | nu
 
 export function calculateOrgNodeMetrics(params: {
   roots: any[]; // OrgTreeNode[]
-  members: Pick<OrganizationMember, 'id' | 'rank'>[];
+  members: Pick<OrganizationMember, 'id' | 'rank' | 'leader_rank_effective_at'>[];
   edges: Pick<OrganizationEdge, 'parent_id' | 'child_id'>[];
   /**
    * 조직도와 동일한 parent(예: source_customer_id 본사 직속 등). edges만 쓰면
@@ -288,6 +300,14 @@ export function calculateOrgNodeMetrics(params: {
     rankByIdForThreshold,
   );
 
+  const leaderRankEffectiveAtByMemberId = new Map<string, string | null>();
+  for (const m of members) {
+    const at = m.leader_rank_effective_at;
+    if (at != null && String(at).trim() !== '') {
+      leaderRankEffectiveAtByMemberId.set(m.id, String(at).trim());
+    }
+  }
+
   return calculateOrgNodeMetricsAlignedToSettlement({
     roots,
     members,
@@ -303,6 +323,7 @@ export function calculateOrgNodeMetrics(params: {
     hqId,
     leaderMaintenanceBonusBlockedByMemberId,
     attributeCommissionToTopLineUnderHq,
+    leaderRankEffectiveAtByMemberId,
   });
 }
 
@@ -321,6 +342,7 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
   hqId?: string | null;
   leaderMaintenanceBonusBlockedByMemberId?: Map<string, boolean>;
   attributeCommissionToTopLineUnderHq?: boolean;
+  leaderRankEffectiveAtByMemberId?: Map<string, string | null>;
 }): Record<string, OrgNodeMetrics> {
   const {
     roots,
@@ -337,6 +359,7 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
     hqId,
     leaderMaintenanceBonusBlockedByMemberId,
     attributeCommissionToTopLineUnderHq = false,
+    leaderRankEffectiveAtByMemberId,
   } = params;
 
   const refDate = `${settlementWindow.label_year_month}-01`;
@@ -353,7 +376,13 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
   const getRate = (memberId: string, contract: { id: string; join_date: string; created_at?: string | null }): number => {
     const dbRank = rankById.get(memberId);
     if (!dbRank) return 0;
-    const eff = effectiveRankForContract({ memberId, dbRank, contract, promotionThresholdByMemberId });
+    const eff = effectiveRankForContract({
+      memberId,
+      dbRank,
+      contract,
+      promotionThresholdByMemberId,
+      leaderRankEffectiveAtByMemberId,
+    });
     return getCommissionPerUnit(rules, eff, refDate);
   };
 

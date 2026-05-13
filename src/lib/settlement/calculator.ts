@@ -247,6 +247,11 @@ export interface LeaderSettlementOpts {
   leaderMaintenanceBonusAlreadyPaidByMemberId?: Map<string, boolean>;
   /** 정책 승격자의 '승격 전 상위 리더' (재계산 안정화용) */
   previousLeaderByPromotedMemberId?: Map<string, string | null>;
+  /**
+   * 멤버 id → 리더 단가 적용 기준 시각(ISO). organization_members.leader_rank_effective_at에서 채운다.
+   * 해당 시각 이후(≥) 생성된 계약은 threshold와 무관하게 리더 단가 후보가 된다.
+   */
+  leaderRankEffectiveAtByMemberId?: Map<string, string | null>;
 }
 
 const LEADER_MAINTENANCE_BONUS_WON = 1_000_000;
@@ -258,8 +263,19 @@ function commissionPerUnitForDirectContract(
   rules: SettlementRule[],
   refDate: string,
   promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>,
+  leaderRankEffectiveAtByMemberId?: Map<string, string | null>,
 ): number {
   if (dbRank === '본사') return 0;
+
+  const effectiveAtRaw = leaderRankEffectiveAtByMemberId?.get(memberId) ?? null;
+  const effectiveAt = (effectiveAtRaw ?? '').trim();
+  if (dbRank === '리더' && effectiveAt) {
+    const cAt = (contract.created_at ?? '').trim();
+    if (cAt && cAt >= effectiveAt) {
+      return getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
+    }
+  }
+
   const th = promotionThresholdByMemberId.get(memberId) ?? null;
 
   // 산하 가입 20구좌 기준 승격 계약(threshold)이 있으면, DB가 리더여도
@@ -269,12 +285,19 @@ function commissionPerUnitForDirectContract(
     if (isContractStrictlyAfterPromotionThreshold(contract.join_date, contract.id, th, contract.created_at)) {
       return getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
     }
-    // DB 직급이 이미 리더인 경우: 직급 전환 후에 맺은 계약이 '20구좌 승격 계약'보다 달력상 뒤인데,
-    // 같은 날·id 정렬만으로는 strictly-after가 false가 되는 경우가 있어 가입일 기준으로 보정한다.
+    // DB 직급이 이미 리더: 가입일이 승격 계약일보다 뒤면 리더 단가.
+    // 같은 가입일이면 contracts.created_at vs 승격 계약의 created_at(산하 20구좌 시점)으로 순서 보정.
     if (dbRank === '리더') {
       const jd = contract.join_date.slice(0, 10);
       if (jd > th.threshold_join_date) {
         return getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
+      }
+      if (jd === th.threshold_join_date) {
+        const cAt = (contract.created_at ?? '').trim();
+        const tAt = (th.threshold_created_at ?? '').trim();
+        if (cAt && tAt && cAt > tAt) {
+          return getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
+        }
       }
     }
     return getActiveRuleOrFallback(rules, '영업사원', refDate).commission_per_unit;
@@ -289,17 +312,20 @@ function calcDirectContractsWithLeaderPromotion(
   rules: SettlementRule[],
   refDate: string,
   promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>,
+  leaderRankEffectiveAtByMemberId?: Map<string, string | null>,
 ): { items: ContractSettlementItem[]; total: number } {
   const items: ContractSettlementItem[] = eligible.map((c) => {
     const originMemberId = (c as any).__attributed_origin_member_id as string | undefined;
     const originRank = (c as any).__attributed_origin_rank as RankType | undefined;
+    const rateMemberId = originMemberId ?? member.id;
     const rate = commissionPerUnitForDirectContract(
-      originMemberId ?? member.id,
+      rateMemberId,
       originRank ?? member.rank,
       { id: c.id, join_date: c.join_date, created_at: (c as { created_at?: string | null }).created_at },
       rules,
       refDate,
       promotionThresholdByMemberId,
+      leaderRankEffectiveAtByMemberId,
     );
     const base = c.unit_count * rate;
     const penalty = commissionPenaltyWonForItemName((c as { item_name?: string }).item_name, c.unit_count);
@@ -322,6 +348,7 @@ function calcRollupItemsWithLeaderPromotion(
   yearMonth: string,
   promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>,
   previousLeaderByPromotedMemberId?: Map<string, string | null>,
+  leaderRankEffectiveAtByMemberId?: Map<string, string | null>,
 ): { items: RollupItem[]; total: number } {
   const refDate = monthEndDate(yearMonth);
   const items: RollupItem[] = [];
@@ -371,6 +398,7 @@ function calcRollupItemsWithLeaderPromotion(
         rules,
         refDate,
         promotionThresholdByMemberId,
+        leaderRankEffectiveAtByMemberId,
       );
       const lower = commissionPerUnitForDirectContract(
         child.id,
@@ -379,6 +407,7 @@ function calcRollupItemsWithLeaderPromotion(
         rules,
         refDate,
         promotionThresholdByMemberId,
+        leaderRankEffectiveAtByMemberId,
       );
       subtotal += Math.max(0, upper - lower) * c.unit_count;
     }
@@ -430,6 +459,7 @@ function calcRollupItemsWithLeaderPromotion(
           rules,
           refDate,
           promotionThresholdByMemberId,
+          leaderRankEffectiveAtByMemberId,
         );
         const lower = commissionPerUnitForDirectContract(
           promotedId,
@@ -439,6 +469,7 @@ function calcRollupItemsWithLeaderPromotion(
           rules,
           refDate,
           promotionThresholdByMemberId,
+          leaderRankEffectiveAtByMemberId,
         );
         subtotal += Math.max(0, upper - lower) * c.unit_count;
       }
@@ -499,6 +530,7 @@ export function calculateMemberSettlement(
 
   const thresholdMap =
     leaderOpts?.promotionThresholdByMemberId ?? new Map<string, SalesMemberPromotionThreshold | null>();
+  const leaderEffectiveMap = leaderOpts?.leaderRankEffectiveAtByMemberId;
   const thForMember = thresholdMap.get(member.id) ?? null;
   const hasAttributedOrigin = eligible.some((c) => (c as any).__attributed_origin_member_id != null);
   const useLeaderRates =
@@ -515,6 +547,7 @@ export function calculateMemberSettlement(
       rules,
       refDate,
       thresholdMap,
+      leaderEffectiveMap,
     ));
     ({ items: rollupItems, total: rollupCommission } = calcRollupItemsWithLeaderPromotion(
       orgNode,
@@ -523,6 +556,7 @@ export function calculateMemberSettlement(
       yearMonth,
       thresholdMap,
       leaderOpts?.previousLeaderByPromotedMemberId,
+      leaderEffectiveMap,
     ));
   } else {
     ({ items: directItems, total: baseCommission } = calcDirectContracts(eligible, rule));

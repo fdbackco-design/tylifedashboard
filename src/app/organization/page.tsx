@@ -28,6 +28,7 @@ type OrgMemberRow = {
   phone: string | null;
   external_id: string | null;
   source_customer_id: string | null;
+  leader_rank_effective_at?: string | null;
 };
 
 const getCachedOrgSnapshot = unstable_cache(
@@ -38,7 +39,9 @@ const getCachedOrgSnapshot = unstable_cache(
   }> => {
     const db = createAdminSupabaseClient();
     const [membersRes, edgesRes, rulesRes] = await Promise.all([
-      db.from('organization_members').select('id,name,rank,phone,external_id,source_customer_id'),
+      db
+        .from('organization_members')
+        .select('id,name,rank,phone,external_id,source_customer_id,leader_rank_effective_at'),
       db.from('organization_edges').select('parent_id,child_id'),
       db.from('settlement_rules').select('*'),
     ]);
@@ -130,6 +133,7 @@ export default async function OrganizationMyTreePage({
     phone: string | null;
     external_id: string | null;
     source_customer_id: string | null;
+    leader_rank_effective_at?: string | null;
   }>;
   const edgesRaw = (snapshot.edges ?? []) as Array<{ parent_id: string | null; child_id: string }>;
   const rules = (snapshot.rules ?? []) as SettlementRule[];
@@ -334,7 +338,11 @@ export default async function OrganizationMyTreePage({
   const subtreeEdges = edgesRaw.filter((e) => e.child_id && subtreeIdSet.has(e.child_id) && e.parent_id && subtreeIdSet.has(e.parent_id));
   const orgMetricsById = calculateOrgNodeMetrics({
     roots: treeForDisplay as any[],
-    members: subtreeMembers.map((m) => ({ id: m.id, rank: m.rank })),
+    members: subtreeMembers.map((m) => ({
+      id: m.id,
+      rank: m.rank,
+      leader_rank_effective_at: m.leader_rank_effective_at ?? undefined,
+    })),
     edges: subtreeEdges.map((e) => ({ parent_id: e.parent_id, child_id: e.child_id })),
     treeRows: subtreeTreeRows,
     attributeCommissionToTopLineUnderHq: false,
