@@ -50,6 +50,8 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
         contract_code: string | null;
         join_date: string;
         unit_count: number;
+        raw_sales_member_id: string;
+        raw_sales_member_name: string | null;
         origin_member_id: string;
         origin_member_name: string | null;
         nearest_leader_id: string | null;
@@ -292,6 +294,8 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
     contract_code: string | null;
     join_date: string;
     unit_count: number;
+    raw_sales_member_id: string;
+    raw_sales_member_name: string | null;
     origin_member_id: string;
     origin_member_name: string | null;
     nearest_leader_id: string | null;
@@ -301,6 +305,8 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
   }> = [];
   for (const c of contractsRaw) {
     if (!isSettlementEligibleContract(c as any)) continue;
+    const rawSalesMemberId = String((c.sales_member_id as string | null | undefined) ?? '');
+    const rawSalesMemberIdRemapped = remapMemberId(rawSalesMemberId);
     const origin = resolveContractOriginForSubtree(contractRemapInput(c), subtreeIdSet);
 
     // 기본: 내 서브트리 귀속만 집계
@@ -309,10 +315,12 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
     // root가 리더인 경우: "리더가 된 이후" 계약만 포함
     let excludedByRootLeaderEffectiveAt = false;
     if (rootRank === '리더') {
-      // 요구: “본인이 직접 담당한 계약”은 리더 전이라도 산하 집계(개인 차감 전 목록)에는 포함되어야 한다.
-      // (최종 산하 구좌에서는 personal_units_from_settlement을 빼므로 값에는 영향이 없고, 디버그/검증 목적)
+      // 요구: “그 사람이 직접 담당자로 계약한 계약”은 리더 전이라도 제외하면 안 된다.
+      // 주의: origin(귀속 담당자)은 HQ→고객 귀속 등으로 고객 노드가 될 수 있으므로,
+      // 직접 담당 판정은 contracts.sales_member_id(고객 merge만 반영) 기준으로 한다.
       const jd = String((c.join_date as string | null | undefined) ?? '').slice(0, 10);
-      if (origin !== rootMemberId) {
+      const isDirectByRawSales = rawSalesMemberIdRemapped === rootMemberId;
+      if (!isDirectByRawSales) {
       // 요구: “리더가 되기 전의 산하 계약”은 제외.
       // 1) leader_rank_effective_at이 있으면 join_date 우선으로 필터하고, 같은 날만 created_at으로 경계 처리
       // 2) leader_rank_effective_at이 없으면 leader_promotion_events(threshold) 기준으로 "승격 계약부터" 포함
@@ -343,6 +351,8 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
             contract_code: (c.contract_code as string | null | undefined) ?? null,
             join_date: jd,
             unit_count: Number((c.unit_count as number | null | undefined) ?? 0),
+            raw_sales_member_id: rawSalesMemberIdRemapped,
+            raw_sales_member_name: nameById.get(rawSalesMemberIdRemapped) ?? null,
             origin_member_id: origin,
             origin_member_name: nameById.get(origin) ?? null,
             nearest_leader_id: null,
@@ -390,6 +400,8 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
               contract_code: (c.contract_code as string | null | undefined) ?? null,
               join_date: jd,
               unit_count: Number((c.unit_count as number | null | undefined) ?? 0),
+              raw_sales_member_id: rawSalesMemberIdRemapped,
+              raw_sales_member_name: nameById.get(rawSalesMemberIdRemapped) ?? null,
               origin_member_id: origin,
               origin_member_name: nameById.get(origin) ?? null,
               nearest_leader_id: nearestLeaderId,
@@ -412,6 +424,8 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
           contract_code: (c.contract_code as string | null | undefined) ?? null,
           join_date: String((c.join_date as string | null | undefined) ?? '').slice(0, 10),
           unit_count: u,
+          raw_sales_member_id: rawSalesMemberIdRemapped,
+          raw_sales_member_name: nameById.get(rawSalesMemberIdRemapped) ?? null,
           origin_member_id: origin,
           origin_member_name: nameById.get(origin) ?? null,
           nearest_leader_id: nearestLeaderId,

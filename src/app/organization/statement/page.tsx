@@ -223,7 +223,7 @@ export default async function OrganizationStatementPage({
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr className="text-left text-xs text-gray-600">
-                      {['가입일', '계약', '구좌', '귀속 담당자', '가까운 하위 리더', '비고'].map((h) => (
+                      {['가입일', '계약', '구좌', '원본 담당자', '귀속 담당자', '가까운 하위 리더', '비고'].map((h) => (
                         <th key={h} className="px-3 py-2 font-semibold whitespace-nowrap">
                           {h}
                         </th>
@@ -243,6 +243,9 @@ export default async function OrganizationStatementPage({
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap tabular-nums text-right">
                           {Number(r.unit_count ?? 0).toLocaleString('ko-KR')}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-700">
+                          {(r.raw_sales_member_name ?? r.raw_sales_member_id).replace(/^\[고객\]\s*/, '')}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-700">
                           {(r.origin_member_name ?? r.origin_member_id).replace(/^\[고객\]\s*/, '')}
