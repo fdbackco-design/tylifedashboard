@@ -25,6 +25,7 @@ import {
   countByStatus,
 } from '@/lib/organization/org-tree-contract-counts';
 import { buildChildrenByParentFromRows } from '@/lib/settlement/settlement-org-tree';
+import TyLifePartnersLogo from '@/components/TyLifePartnersLogo';
 import AccountActionsClient from './AccountActionsClient';
 import { stripOrgTreeNodesForDisplay } from '@/lib/organization/org-tree-display';
 import { buildOrgContractSalesRemap } from '@/lib/organization/org-contract-sales-remap';
@@ -108,7 +109,8 @@ export default async function OrganizationMyTreePage({
 
   if (!memberId) {
     return (
-      <div className="p-6">
+      <div className="p-6 max-w-lg">
+        <TyLifePartnersLogo className="mb-5" />
         <p className="text-sm text-red-600">이 계정은 조직도에 연결된 권한(member_id)이 없습니다.</p>
         <Link className="text-sm text-blue-600 underline mt-2 inline-block" href="/login">
           로그인으로 돌아가기
@@ -556,11 +558,14 @@ export default async function OrganizationMyTreePage({
   return (
     <div className="p-3 sm:p-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4 sm:mb-6">
-        <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-gray-800">내 조직도</h2>
-          <p className="text-sm text-gray-500 mt-0.5">
-            기준 {label_year_month} · {start_date}~{end_date}
-          </p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4 min-w-0">
+          <TyLifePartnersLogo className="sm:pt-0.5" />
+          <div className="min-w-0">
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-800">내 조직도</h2>
+            <p className="text-sm text-gray-500 mt-0.5">
+              기준 {label_year_month} · {start_date}~{end_date}
+            </p>
+          </div>
         </div>
         <div className="flex flex-col gap-2 sm:items-end">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 w-full">

@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import TyLifePartnersLogo from '@/components/TyLifePartnersLogo';
 import { createClient } from '@/lib/supabase/client';
 
 export default function LoginClient(props: { redirect: string }) {
@@ -44,7 +45,8 @@ export default function LoginClient(props: { redirect: string }) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50">
+    <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50 gap-8">
+      <TyLifePartnersLogo variant="hero" className="mx-auto" priority />
       <div className="w-full max-w-md bg-white border border-gray-200 rounded-xl shadow-sm p-6">
         <h1 className="text-xl font-bold text-gray-900 mb-1">로그인</h1>
         <p className="text-sm text-gray-600 mb-4">발급된 계정으로 로그인해주세요.</p>
