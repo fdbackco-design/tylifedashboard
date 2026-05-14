@@ -270,25 +270,27 @@ export default async function ContractsPage({ searchParams }: PageProps) {
       </div>
 
       {/* 검색 */}
-      <form className="mb-4 flex gap-2 flex-wrap" action="/admin/contracts" method="GET">
+      <form className="mb-4 space-y-2" action="/admin/contracts" method="GET">
         {statusFilter && <input type="hidden" name="status" value={statusFilter} />}
         {yearMonth && <input type="hidden" name="year_month" value={yearMonth} />}
-        <input
-          name="q"
-          defaultValue={q}
-          placeholder="고객명 또는 담당사원 검색"
-          className="w-full sm:w-96 px-3 py-2 text-sm border border-gray-300 rounded-md bg-white"
-        />
-        <button
-          type="submit"
-          className="px-3 py-2 text-sm rounded-md border border-slate-800 bg-slate-800 text-white hover:bg-slate-700"
-        >
-          검색
-        </button>
+        <div className="flex items-center gap-2">
+          <input
+            name="q"
+            defaultValue={q}
+            placeholder="고객명 또는 담당사원 검색"
+            className="w-0 min-w-[9rem] flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md bg-white sm:w-96 sm:min-w-0 sm:flex-none sm:max-w-md"
+          />
+          <button
+            type="submit"
+            className="shrink-0 whitespace-nowrap px-3 py-2 text-sm rounded-md border border-slate-800 bg-slate-800 text-white hover:bg-slate-700"
+          >
+            검색
+          </button>
+        </div>
         {q && (
           <Link
             href={`/admin/contracts${querySuffix({ q: undefined, page: '1' })}`}
-            className="px-3 py-2 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+            className="inline-flex shrink-0 whitespace-nowrap px-3 py-2 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
           >
             초기화
           </Link>
