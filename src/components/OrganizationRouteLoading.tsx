@@ -18,7 +18,7 @@ export default function OrganizationRouteLoading() {
         className="h-24 w-auto max-w-[min(100%,220px)] object-contain drop-shadow-md sm:h-28"
       />
       <p className="text-center text-base font-semibold tracking-tight text-[#5a5656] sm:text-lg">
-        잠시만 기다려주세요.
+        잠시만 기다려주세요...
       </p>
     </div>
   );
