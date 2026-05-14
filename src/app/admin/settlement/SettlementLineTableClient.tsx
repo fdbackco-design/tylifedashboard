@@ -405,59 +405,291 @@ export default function SettlementLineTableClient(props: {
     [adjustedRows, props.statementDownlineUnitsByMemberId],
   );
 
+  const handleSplitToggle = (topId: string, nextVal: boolean) => {
+    if (splitSaveInFlightRef.current.has(topId)) return;
+    splitSaveInFlightRef.current.add(topId);
+    setSplitSavePendingByTopId((prev) => ({ ...prev, [topId]: true }));
+    setSplitSaveError(null);
+    setSplitOpenByTopId((prev) => ({ ...prev, [topId]: nextVal }));
+
+    void fetch('/api/settlement/line-split-preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        year_month: props.yearMonth,
+        top_line_id: topId,
+        is_split: nextVal,
+      }),
+    })
+      .then(async (res) => {
+        const json = (await res.json()) as { success?: boolean; error?: string };
+        if (!res.ok || !json?.success) {
+          throw new Error(json?.error ?? `HTTP ${res.status}`);
+        }
+      })
+      .catch((err) => {
+        setSplitOpenByTopId((prev) => ({ ...prev, [topId]: !nextVal }));
+        setSplitSaveError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        splitSaveInFlightRef.current.delete(topId);
+        setSplitSavePendingByTopId((prev) => {
+          const next = { ...prev };
+          delete next[topId];
+          return next;
+        });
+      });
+  };
+
+  const renderSplitButton = (topId: string, className: string) => {
+    const hasChildren = (props.childrenByParent[topId] ?? []).length > 0;
+    const hasMeta = !!props.memberAggById[topId];
+    if (!hasMeta) return null;
+    const splitSaving = Boolean(splitSavePendingByTopId[topId]);
+    return (
+      <LoadingButton
+        type="button"
+        disabled={!hasChildren}
+        isLoading={splitSaving}
+        loadingText="저장 중…"
+        onClick={() => {
+          if (!hasChildren) return;
+          const nextVal = !((splitOpenByTopId[topId] ?? false) as boolean);
+          handleSplitToggle(topId, nextVal);
+        }}
+        className={className}
+      >
+        {(splitOpenByTopId[topId] ?? false) ? '산하 합치기' : '산하 분리'}
+      </LoadingButton>
+    );
+  };
+
+  const kpiCellClass = 'min-w-0 flex-1 px-2 py-2.5 text-center';
+
   return (
     <>
-      <div className="text-xs sm:text-sm text-gray-500 mt-0.5 break-keep">
-        <span className="whitespace-nowrap">{props.yearMonth}</span> ·{' '}
-        <span className="whitespace-nowrap">합계 {formatKRW(adjustedTotalAmount)}</span>
+      {/* 총매출 / 이번달 매출 / 수익 — 모바일 한 줄, 데스크톱 3카드 */}
+      <div className="mb-3 overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.035]">
+        <div className="flex divide-x divide-slate-100 md:hidden">
+          <div className={kpiCellClass}>
+            <div className="text-[10px] font-medium text-slate-500">총 매출</div>
+            <div className="mt-0.5 truncate text-sm font-bold tabular-nums text-slate-900">{formatKRW(props.totalSales)}</div>
+          </div>
+          <div className={kpiCellClass}>
+            <div className="text-[10px] font-medium text-slate-500">이번달 매출</div>
+            <div className="mt-0.5 truncate text-sm font-bold tabular-nums text-orange-800">{formatKRW(props.periodSales)}</div>
+          </div>
+          <div className={kpiCellClass}>
+            <div className="text-[10px] font-medium text-slate-500">수익</div>
+            <div
+              className={`mt-0.5 truncate text-sm font-bold tabular-nums ${adjustedProfit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}
+            >
+              {formatKRW(adjustedProfit)}
+            </div>
+          </div>
+        </div>
+        <div className="hidden gap-2 p-2 md:grid md:grid-cols-3">
+          <div className="rounded-xl border border-slate-200/90 bg-gradient-to-b from-white to-slate-50/80 px-3 py-2 shadow-sm ring-1 ring-slate-900/[0.035]">
+            <div className="text-[11px] font-medium text-slate-500">총 매출</div>
+            <div className="font-bold tabular-nums text-slate-900">{formatKRW(props.totalSales)}</div>
+          </div>
+          <div className="rounded-xl border border-orange-100/90 bg-gradient-to-b from-white to-orange-50/40 px-3 py-2 shadow-sm ring-1 ring-orange-100/60">
+            <div className="text-[11px] font-medium text-orange-900/80">이번달 매출</div>
+            <div className="font-bold tabular-nums text-orange-950">{formatKRW(props.periodSales)}</div>
+            <div className="mt-0.5 text-[10px] text-slate-500">
+              기준 {props.startDate}~{props.endDate}
+            </div>
+          </div>
+          <div className="rounded-xl border border-slate-200/90 bg-gradient-to-b from-white to-slate-50/80 px-3 py-2 shadow-sm ring-1 ring-slate-900/[0.035]">
+            <div className="text-[11px] font-medium text-slate-500">수익</div>
+            <div className={`font-bold tabular-nums ${adjustedProfit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+              {formatKRW(adjustedProfit)}
+            </div>
+            <div className="mt-0.5 text-[10px] text-slate-500">이번달 매출 − 정산금 합계</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="text-xs sm:text-sm text-slate-600 mt-0.5 break-keep">
+        <span className="whitespace-nowrap font-medium text-slate-800">{props.yearMonth}</span>
+        <span className="text-slate-400"> · </span>
+        <span className="whitespace-nowrap">
+          합계 <span className="font-semibold text-orange-900/90">{formatKRW(adjustedTotalAmount)}</span>
+        </span>
         {excludedUnitsTotal > 0 && (
-          <span className="ml-2 text-[11px] sm:text-xs text-amber-700">
+          <span className="ml-2 text-[11px] sm:text-xs text-amber-800">
             (본인계약 미인정{' '}
-            <span className="whitespace-nowrap">{excludedUnitsTotal.toLocaleString('ko-KR')}구좌</span> ·{' '}
-            <span className="whitespace-nowrap">-(구좌당 차감 단가는 행별 직급 기준)</span>)
+            <span className="whitespace-nowrap tabular-nums">{excludedUnitsTotal.toLocaleString('ko-KR')}구좌</span>
+            <span className="whitespace-nowrap"> · 구좌당 차감은 행별 직급 기준)</span>
           </span>
         )}
-        {saveError && (
-          <span className="ml-2 text-xs text-red-600">
-            (저장 실패: {saveError})
-          </span>
-        )}
-        {splitSaveError && (
-          <span className="ml-2 text-xs text-red-600">
-            (산하 분리 저장 실패: {splitSaveError})
-          </span>
-        )}
+        {saveError && <span className="ml-2 text-xs text-red-600">(저장 실패: {saveError})</span>}
+        {splitSaveError && <span className="ml-2 text-xs text-red-600">(산하 분리 저장 실패: {splitSaveError})</span>}
       </div>
 
-      {/* KPI (오른쪽) */}
-      <div className="hidden md:grid grid-cols-3 gap-2">
-        <div className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm shadow-sm">
-          <div className="text-[11px] text-gray-500">총 매출</div>
-          <div className="font-bold text-gray-800 tabular-nums">{formatKRW(props.totalSales)}</div>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm shadow-sm">
-          <div className="text-[11px] text-gray-500">이번달 매출</div>
-          <div className="font-bold text-gray-800 tabular-nums">{formatKRW(props.periodSales)}</div>
-          <div className="text-[10px] text-gray-400 mt-0.5">
-            기준 {props.startDate}~{props.endDate}
+      {/* 모바일: 카드 리스트 */}
+      <div className="mt-3 space-y-2 md:hidden">
+        {adjustedRows.map((r, rowIdx) => (
+          <div
+            key={`${r.topLineId}-${rowIdx}`}
+            className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-3 shadow-sm ring-1 ring-slate-900/[0.035]"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <Link
+                  href={`/admin/settlement/member?year_month=${props.yearMonth}&member_id=${r.topLineId}`}
+                  className="text-sm font-semibold text-orange-800 hover:underline"
+                >
+                  <span
+                    className="inline-flex items-center"
+                    style={{ paddingLeft: `${Math.min(5, (r.__depth ?? 0) as number) * 10}px` }}
+                  >
+                    {(r.__depth ?? 0) > 0 && (
+                      <span className="mr-0.5 text-slate-400" aria-hidden="true">
+                        ↳
+                      </span>
+                    )}
+                    <span className="truncate">{r.topDisplayName || '-'}</span>
+                  </span>
+                </Link>
+                <p className="mt-0.5 text-xs text-slate-500">{r.topRank}</p>
+              </div>
+              {renderSplitButton(
+                r.topLineId,
+                `shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-semibold transition ${
+                  (props.childrenByParent[r.topLineId] ?? []).length === 0 || splitSavePendingByTopId[r.topLineId]
+                    ? 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-300'
+                    : (splitOpenByTopId[r.topLineId] ?? false)
+                      ? 'border-orange-300 bg-orange-600 text-white shadow-sm'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-orange-200 hover:bg-orange-50/80'
+                }`,
+              )}
+            </div>
+            <div className="mt-3 flex items-end justify-between gap-2 border-t border-slate-100 pt-2">
+              <div>
+                <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">총 지급액</p>
+                <p className="text-lg font-bold tabular-nums text-slate-900">{formatKRW(r.adjustedTotal)}</p>
+              </div>
+              <div className="text-right text-xs tabular-nums text-slate-700">
+                <div>
+                  직접{' '}
+                  <span className="font-semibold text-slate-900">
+                    {(props.statementDirectUnitsByMemberId[r.topLineId] ?? 0).toLocaleString('ko-KR')}
+                  </span>
+                </div>
+                <div className="mt-0.5">
+                  산하{' '}
+                  <span className="font-semibold text-slate-900">
+                    {(props.statementDownlineUnitsByMemberId[r.topLineId] ?? 0).toLocaleString('ko-KR')}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-2 rounded-lg bg-slate-50/90 px-2 py-1.5 text-[11px] leading-relaxed text-slate-600">
+              <span className="text-slate-500">개인수당</span>{' '}
+              <span className="font-medium tabular-nums text-slate-800">{formatKRW(r.base)}</span>
+              <span className="mx-1 text-slate-300">·</span>
+              <span className="text-slate-500">오버라이드</span>{' '}
+              <span className="font-medium tabular-nums text-slate-800">{formatKRW(r.rollup)}</span>
+              <span className="mx-1 text-slate-300">·</span>
+              <span className="text-slate-500">유지장려</span>{' '}
+              <span className="font-medium tabular-nums text-violet-800">{formatKRW(r.leaderMaint)}</span>
+            </div>
+            <div className="mt-2 border-t border-slate-100 pt-2">
+              <label
+                className={`flex flex-wrap items-center gap-2 text-xs select-none ${
+                  r.ownDirectUnitSum > 0 && !selfPrefSavePendingByTopId[r.topLineId]
+                    ? 'cursor-pointer'
+                    : 'cursor-not-allowed opacity-60'
+                }`}
+              >
+                <span className="font-medium text-slate-600">본인계약</span>
+                <input
+                  type="checkbox"
+                  checked={r.selfContractIncluded}
+                  disabled={r.ownDirectUnitSum <= 0 || Boolean(selfPrefSavePendingByTopId[r.topLineId])}
+                  aria-busy={selfPrefSavePendingByTopId[r.topLineId] ? true : undefined}
+                  onChange={(e) => {
+                    if (r.ownDirectUnitSum <= 0) return;
+                    const topId = r.topLineId;
+                    if (selfPrefSaveInFlightRef.current.has(topId)) return;
+                    selfPrefSaveInFlightRef.current.add(topId);
+                    setSelfPrefSavePendingByTopId((prev) => ({ ...prev, [topId]: true }));
+                    const nextVal = e.target.checked;
+                    setSaveError(null);
+                    setSelfIncludedByTopId((prev) => {
+                      const next = { ...prev, [topId]: nextVal };
+                      return next;
+                    });
+
+                    void fetch('/api/settlement/self-contract-preferences', {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        year_month: props.yearMonth,
+                        top_line_id: topId,
+                        included: nextVal,
+                      }),
+                    })
+                      .then(async (res) => {
+                        const json = (await res.json()) as { success?: boolean; error?: string };
+                        if (!res.ok || !json?.success) {
+                          throw new Error(json?.error ?? `HTTP ${res.status}`);
+                        }
+                      })
+                      .catch((err) => {
+                        setSelfIncludedByTopId((prev) => ({ ...prev, [topId]: !nextVal }));
+                        setSaveError(err instanceof Error ? err.message : String(err));
+                      })
+                      .finally(() => {
+                        selfPrefSaveInFlightRef.current.delete(topId);
+                        setSelfPrefSavePendingByTopId((prev) => {
+                          const next = { ...prev };
+                          delete next[topId];
+                          return next;
+                        });
+                      });
+                  }}
+                />
+                <span className={r.selfContractIncluded ? 'font-semibold text-emerald-700' : 'font-semibold text-amber-800'}>
+                  {r.selfContractIncluded ? '인정' : '미인정'}
+                  {selfPrefSavePendingByTopId[r.topLineId] ? (
+                    <span className="ml-1 font-normal text-slate-500">저장 중…</span>
+                  ) : null}
+                </span>
+                {!r.selfContractIncluded && r.ownDirectUnitSum > 0 && (
+                  <span className="text-[11px] text-amber-800">(-{formatKRW(r.selfContractAdjustWon)})</span>
+                )}
+              </label>
+            </div>
           </div>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm shadow-sm">
-          <div className="text-[11px] text-gray-500">수익</div>
-          <div className={`font-bold tabular-nums ${adjustedProfit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
-            {formatKRW(adjustedProfit)}
-          </div>
-          <div className="text-[10px] text-gray-400 mt-0.5">
-            이번달 매출 - 정산금 합계
+        ))}
+
+        <div className="overflow-hidden rounded-2xl border border-orange-100/90 bg-orange-50/50 px-3 py-2.5 text-xs ring-1 ring-orange-100/60">
+          <div className="font-semibold text-orange-950">합계</div>
+          <div className="mt-1 grid grid-cols-2 gap-x-2 gap-y-1 tabular-nums text-slate-800">
+            <span className="text-slate-600">직접구좌</span>
+            <span className="text-right font-medium">{statementDirectColSum.toLocaleString('ko-KR')}</span>
+            <span className="text-slate-600">산하구좌</span>
+            <span className="text-right font-medium">{statementDownlineColSum.toLocaleString('ko-KR')}</span>
+            <span className="text-slate-600">기본수당</span>
+            <span className="text-right font-medium">{formatKRW(baseSum)}</span>
+            <span className="text-slate-600">롤업</span>
+            <span className="text-right font-medium">{formatKRW(rollupSum)}</span>
+            <span className="text-slate-600">유지장려</span>
+            <span className="text-right font-medium text-violet-800">{formatKRW(leaderMaintSum)}</span>
+            <span className="col-span-2 mt-1 border-t border-orange-200/60 pt-1 font-bold text-orange-950">
+              총 지급 {formatKRW(adjustedTotalAmount)}
+            </span>
           </div>
         </div>
       </div>
 
-      {/* 정산 테이블 */}
-      <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden mt-1">
+      {/* 데스크톱: 테이블 */}
+      <div className="mt-1 hidden overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.035] md:block">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="border-b border-slate-200 bg-slate-50/90">
               <tr>
                 {[
                   '담당자',
@@ -472,21 +704,21 @@ export default function SettlementLineTableClient(props: {
                 ].map((h) => (
                   <th
                     key={h}
-                    className="px-4 py-3 text-left text-xs font-semibold text-gray-600 whitespace-nowrap"
+                    className="px-4 py-3 text-left text-xs font-semibold text-slate-600 whitespace-nowrap"
                   >
                     {h}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
-              {adjustedRows.map((r) => (
-                <tr key={r.topLineId} className="hover:bg-gray-50">
+            <tbody className="divide-y divide-slate-100">
+              {adjustedRows.map((r, rowIdx) => (
+                <tr key={`${r.topLineId}-${rowIdx}`} className="hover:bg-orange-50/30">
                   <td className="px-4 py-3 font-medium whitespace-nowrap">
                     <div className="flex items-center gap-2">
                       <Link
                         href={`/admin/settlement/member?year_month=${props.yearMonth}&member_id=${r.topLineId}`}
-                        className="text-blue-600 hover:underline whitespace-nowrap"
+                        className="text-orange-800 hover:underline whitespace-nowrap"
                       >
                         <span
                           className="inline-flex items-center"
@@ -495,78 +727,23 @@ export default function SettlementLineTableClient(props: {
                           }}
                         >
                           {(r.__depth ?? 0) > 0 && (
-                            <span className="mr-1 text-gray-400" aria-hidden="true">
+                            <span className="mr-1 text-slate-400" aria-hidden="true">
                               ↳
                             </span>
                           )}
                           {r.topDisplayName || '-'}
                         </span>
                       </Link>
-                      {/* 산하 분리(Preview): 현재 행(노드)이 직계 자식이 있으면 언제든 분리 가능(재귀) */}
-                      {(() => {
-                        const hasChildren = (props.childrenByParent[r.topLineId] ?? []).length > 0;
-                        // 월정산 결과에 존재하는 노드만(표시 가능한 노드만) 버튼 노출
-                        const hasMeta = !!props.memberAggById[r.topLineId];
-                        if (!hasMeta) return null;
-                        const topId = r.topLineId;
-                        const splitSaving = Boolean(splitSavePendingByTopId[topId]);
-                        return (
-                          <LoadingButton
-                            type="button"
-                            disabled={!hasChildren}
-                            isLoading={splitSaving}
-                            loadingText="저장 중…"
-                            onClick={() => {
-                              if (!hasChildren) return;
-                              if (splitSaveInFlightRef.current.has(topId)) return;
-                              splitSaveInFlightRef.current.add(topId);
-                              setSplitSavePendingByTopId((prev) => ({ ...prev, [topId]: true }));
-                              const nextVal = !((splitOpenByTopId[topId] ?? false) as boolean);
-                              setSplitSaveError(null);
-                              setSplitOpenByTopId((prev) => ({ ...prev, [topId]: nextVal }));
-
-                              // DB 저장 (월/라인 단위)
-                              void fetch('/api/settlement/line-split-preferences', {
-                                method: 'PUT',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                  year_month: props.yearMonth,
-                                  top_line_id: topId,
-                                  is_split: nextVal,
-                                }),
-                              })
-                                .then(async (res) => {
-                                  const json = (await res.json()) as { success?: boolean; error?: string };
-                                  if (!res.ok || !json?.success) {
-                                    throw new Error(json?.error ?? `HTTP ${res.status}`);
-                                  }
-                                })
-                                .catch((err) => {
-                                  // 실패 시 롤백
-                                  setSplitOpenByTopId((prev) => ({ ...prev, [topId]: !nextVal }));
-                                  setSplitSaveError(err instanceof Error ? err.message : String(err));
-                                })
-                                .finally(() => {
-                                  splitSaveInFlightRef.current.delete(topId);
-                                  setSplitSavePendingByTopId((prev) => {
-                                    const next = { ...prev };
-                                    delete next[topId];
-                                    return next;
-                                  });
-                                });
-                            }}
-                            className={`px-2 py-0.5 rounded text-[11px] border ${
-                              !hasChildren || splitSaving
-                                ? 'bg-gray-50 text-gray-300 border-gray-200 cursor-not-allowed'
-                                : (splitOpenByTopId[topId] ?? false)
-                                  ? 'bg-slate-800 text-white border-slate-800'
-                                  : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
-                            }`}
-                          >
-                            {(splitOpenByTopId[topId] ?? false) ? '산하 합치기' : '산하 분리'}
-                          </LoadingButton>
-                        );
-                      })()}
+                      {renderSplitButton(
+                        r.topLineId,
+                        `px-2 py-0.5 rounded-full text-[11px] font-semibold border transition ${
+                          (props.childrenByParent[r.topLineId] ?? []).length === 0 || splitSavePendingByTopId[r.topLineId]
+                            ? 'bg-slate-50 text-slate-300 border-slate-200 cursor-not-allowed'
+                            : (splitOpenByTopId[r.topLineId] ?? false)
+                              ? 'bg-orange-600 text-white border-orange-600 shadow-sm'
+                              : 'bg-white text-slate-700 border-slate-200 hover:border-orange-200 hover:bg-orange-50/80'
+                        }`,
+                      )}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{r.topRank}</td>
@@ -656,28 +833,28 @@ export default function SettlementLineTableClient(props: {
               ))}
             </tbody>
 
-            <tfoot className="border-t-2 border-gray-200 bg-gray-50">
+            <tfoot className="border-t-2 border-slate-200 bg-orange-50/40">
               <tr>
-                <td colSpan={2} className="px-4 py-3 font-semibold text-gray-700">
+                <td colSpan={2} className="px-4 py-3 font-semibold text-slate-800">
                   합계
                 </td>
-                <td className="px-4 py-3 tabular-nums text-right font-semibold text-gray-700">
+                <td className="px-4 py-3 tabular-nums text-right font-semibold text-slate-800">
                   {statementDirectColSum.toLocaleString('ko-KR')}
                 </td>
-                <td className="px-4 py-3 tabular-nums text-right font-semibold text-gray-700">
+                <td className="px-4 py-3 tabular-nums text-right font-semibold text-slate-800">
                   {statementDownlineColSum.toLocaleString('ko-KR')}
                 </td>
-                <td className="px-4 py-3 tabular-nums text-right font-semibold">
+                <td className="px-4 py-3 tabular-nums text-right font-semibold text-slate-800">
                   {formatKRW(baseSum)}
                 </td>
-                <td className="px-4 py-3 tabular-nums text-right font-semibold">
+                <td className="px-4 py-3 tabular-nums text-right font-semibold text-slate-800">
                   {formatKRW(rollupSum)}
                 </td>
                 <td className="px-4 py-3 tabular-nums text-right font-semibold text-violet-700">
                   {formatKRW(leaderMaintSum)}
                 </td>
                 <td />
-                <td className="px-4 py-3 tabular-nums text-right font-bold text-gray-900">
+                <td className="px-4 py-3 tabular-nums text-right font-bold text-orange-950">
                   {formatKRW(adjustedTotalAmount)}
                 </td>
               </tr>

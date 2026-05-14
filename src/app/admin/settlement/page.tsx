@@ -606,51 +606,70 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     return out;
   })();
 
-  return (
-    <div className="p-4 sm:p-6">
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-6">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-800">정산 현황</h2>
-          {allContractsCount > 0 && (
-            <p className="text-xs text-gray-400 mt-0.5">
-              {yearMonth} 계약 {allContractsCount}건 중{' '}
-              <span
-                className={
-                  eligibleContractsCount > 0
-                    ? 'text-green-600 font-medium'
-                    : 'text-amber-600 font-medium'
-                }
-              >
-                정산 대상 {eligibleContractsCount}건
-              </span>
-              {eligibleContractsCount === 0 && (
-                <> (가입 상태 기준)</>
-              )}
-            </p>
-          )}
-        </div>
+  const [basisYear, basisMonth] = yearMonth.split('-');
 
-        <div className="flex items-start gap-3 sm:shrink-0">
+  return (
+    <div className="p-3 sm:p-6">
+      {/* 상단: 제목 + 부가지표 + 재계산 */}
+      <section className="mb-3 overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.035] sm:mb-4">
+        <div className="flex flex-col gap-2 border-b border-orange-100/80 bg-gradient-to-r from-orange-50/90 via-white to-slate-50/90 px-3 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3 sm:px-4 sm:py-3.5">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-orange-800/80">관리자</p>
+            <h1 className="text-lg font-bold tracking-tight text-slate-900 sm:text-2xl">정산 현황</h1>
+            {allContractsCount > 0 && (
+              <p className="mt-1 text-[11px] leading-snug text-slate-600 sm:text-xs">
+                <span className="tabular-nums text-slate-800">{yearMonth}</span> 계약{' '}
+                <span className="font-medium tabular-nums text-slate-800">
+                  {allContractsCount.toLocaleString('ko-KR')}
+                </span>
+                건 중{' '}
+                <span
+                  className={
+                    eligibleContractsCount > 0 ? 'font-semibold text-emerald-700' : 'font-semibold text-amber-700'
+                  }
+                >
+                  정산 대상 {eligibleContractsCount.toLocaleString('ko-KR')}건
+                </span>
+                {eligibleContractsCount === 0 && <span className="text-slate-500"> (가입 상태 기준)</span>}
+              </p>
+            )}
+          </div>
           <RecalcButton yearMonth={yearMonth} />
         </div>
-      </div>
+      </section>
 
-      {/* 필터 */}
-      <div className="flex flex-col gap-3 mb-5">
+      {/* 기준월 필터 카드 */}
+      <section className="mb-3 overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-3 shadow-sm ring-1 ring-slate-900/[0.035] sm:mb-4 sm:p-4">
+        <div className="mb-2 flex flex-col gap-0.5 border-b border-slate-100 pb-2 sm:flex-row sm:items-baseline sm:justify-between">
+          <p className="text-[13px] font-semibold tabular-nums text-slate-800 sm:text-sm">
+            <span className="text-orange-800">{basisYear}년</span>{' '}
+            <span className="text-orange-800">{basisMonth}월</span> 기준
+          </p>
+          <p className="text-[10px] text-slate-500 sm:text-xs">정산 구간 {start_date} ~ {end_date}</p>
+        </div>
         <YearMonthSelector
+          layout="compact-toolbar"
+          className="min-w-0"
           value={yearMonth}
           todayValue={todayYearMonth}
           years={yearsForPicker}
           keepQuery={rankFilter ? { rank: rankFilter } : { rank: null }}
+          todayLabel="오늘 기준월"
         />
+      </section>
 
-        {/* 직급 필터 */}
-        <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
-          <div className="flex gap-2 whitespace-nowrap w-max items-center">
-            <span className="text-gray-300">|</span>
+      {/* 직급 pill 탭 */}
+      <div className="mb-3 sm:mb-4">
+        <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">직급 필터</p>
+        <div className="-mx-1 overflow-x-auto overscroll-x-contain px-1 pb-1">
+          <div className="flex w-max gap-1.5 sm:flex-wrap sm:gap-2">
             <Link
               href={`/admin/settlement?year_month=${yearMonth}`}
-              className={`px-3 py-1 rounded text-xs border ${!rankFilter ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-300'}`}
+              className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                !rankFilter
+                  ? 'bg-orange-600 text-white shadow-sm ring-1 ring-orange-500/30'
+                  : 'bg-slate-50 text-slate-600 ring-1 ring-slate-200/90 hover:bg-slate-100'
+              }`}
             >
               전체
             </Link>
@@ -658,7 +677,11 @@ export default async function SettlementPage({ searchParams }: PageProps) {
               <Link
                 key={r}
                 href={`/admin/settlement?year_month=${yearMonth}&rank=${r}`}
-                className={`px-3 py-1 rounded text-xs border ${rankFilter === r ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-300'}`}
+                className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                  rankFilter === r
+                    ? 'bg-orange-600 text-white shadow-sm ring-1 ring-orange-500/30'
+                    : 'bg-slate-50 text-slate-600 ring-1 ring-slate-200/90 hover:bg-slate-100'
+                }`}
               >
                 {r}
               </Link>
