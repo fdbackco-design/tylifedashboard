@@ -440,11 +440,6 @@ export default function SettlementLineTableClient(props: {
       </div>
 
       {/* 정산 테이블 */}
-      <p className="text-[11px] text-gray-500 mt-4 mb-2 break-keep leading-relaxed">
-        기본수당 열은 본사 직속 라인에 속한 멤버들의 기본수당을 합산한 값입니다. 산하 영업사원의 직접 계약(구좌당
-        30만원)이 포함되면, 최상위 직급이 리더여도 합계를 구좌로 나눈 값이 30만원에 가깝게 보일 수 있습니다. 리더
-        본인 직접 계약만의 단가는 멤버별 월정산·계약 상세에서 확인하세요.
-      </p>
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden mt-1">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
