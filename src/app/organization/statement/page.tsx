@@ -149,6 +149,7 @@ export default async function OrganizationStatementPage({
 
   const no = `${label_year_month}-${String(memberId).slice(0, 4)}`;
   const statementTotalUnits = (s.direct_unit_count ?? 0) + downlineAttributedUnits;
+  const [basisYear, basisMonth] = label_year_month.split('-');
 
   return (
     <div className="p-4 sm:p-6">
@@ -163,29 +164,26 @@ export default async function OrganizationStatementPage({
         </div>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
-        <div className="border-t-4 border-orange-400 p-5 sm:p-7">
+      <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.035]">
+        <div className="border-t-4 border-orange-400 p-4 sm:p-6">
           <div className="flex items-baseline justify-between gap-3 pb-3 border-b border-gray-200 mb-5">
             <h3 className="m-0 text-base font-semibold text-orange-950">지급 명세서</h3>
             <span className="text-xs text-gray-400">No. {no}</span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
-            <div className="bg-orange-50 rounded-lg p-3.5 border border-orange-100">
-              <div className="text-xs text-orange-800 mb-1">이름</div>
-              <div className="text-sm font-semibold text-orange-950">{displayName}</div>
+          <div className="mb-4 rounded-2xl border border-slate-200/90 bg-gradient-to-b from-white to-slate-50/70 p-3 shadow-[0_1px_2px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.035] sm:mb-5 sm:p-3.5">
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span className="text-lg font-bold tracking-tight text-slate-900 sm:text-xl">{displayName}</span>
+              <span className="inline-flex max-w-full items-center rounded-full border border-orange-200/90 bg-orange-50 px-2.5 py-0.5 text-[11px] font-semibold leading-tight text-orange-900 sm:text-xs">
+                {rank}
+              </span>
             </div>
-            <div className="bg-orange-50 rounded-lg p-3.5 border border-orange-100">
-              <div className="text-xs text-orange-800 mb-1">직급</div>
-              <div className="text-sm font-semibold text-orange-950">{rank}</div>
-            </div>
-            <div className="bg-orange-50 rounded-lg p-3.5 border border-orange-100">
-              <div className="text-xs text-orange-800 mb-1">기간</div>
-              <div className="text-sm font-semibold text-orange-950">{label_year_month}</div>
-              <div className="text-[11px] text-orange-900/60 mt-0.5">
-                {start_date}~{end_date}
-              </div>
-            </div>
+            <p className="mt-2 text-xs font-medium tabular-nums tracking-tight text-slate-500 sm:text-[13px]">
+              {basisYear}년 {basisMonth}월
+            </p>
+            <p className="mt-0.5 text-[11px] tabular-nums text-slate-400 sm:text-xs">
+              {start_date} ~ {end_date}
+            </p>
           </div>
 
           <div className="text-sm font-semibold text-orange-800 mb-2">기간 내 실적</div>
