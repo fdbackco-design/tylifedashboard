@@ -31,25 +31,34 @@ import SyncButton from './SyncButton';
 export const metadata: Metadata = { title: '조직도' };
 export const dynamic = 'force-dynamic';
 
-function formatDuration(startedAt: string, finishedAt: string | null): string {
-  if (!finishedAt) return '진행 중';
-  const ms = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
-  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}초` : `${ms}ms`;
+function formatWon(value: number): string {
+  return `${Math.round(value).toLocaleString('ko-KR')}원`;
 }
 
-function formatDateTime(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleString('ko-KR', {
+/** 모바일 등에서 금액을 짧게 표시 (원 단위는 title 등으로 병기) */
+function formatWonShort(value: number): string {
+  const v = Math.round(Number(value) || 0);
+  if (!Number.isFinite(v) || v === 0) return '0원';
+  const eok = Math.floor(v / 100_000_000);
+  const man = Math.round((v % 100_000_000) / 10_000);
+  if (eok > 0 && man > 0) return `${eok.toLocaleString('ko-KR')}억 ${man.toLocaleString('ko-KR')}만원`;
+  if (eok > 0) return `${eok.toLocaleString('ko-KR')}억원`;
+  if (man >= 1) return `${man.toLocaleString('ko-KR')}만원`;
+  return `${v.toLocaleString('ko-KR')}원`;
+}
+
+function formatSyncBarTime(iso: string): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Seoul',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-  });
-}
-
-function formatWon(value: number): string {
-  return `${Math.round(value).toLocaleString('ko-KR')}원`;
+    hour12: false,
+  }).formatToParts(new Date(iso));
+  const pick = (t: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === t)?.value?.padStart(2, '0') ?? '';
+  return `${pick('month')}.${pick('day')} ${pick('hour')}:${pick('minute')}`;
 }
 
 export default async function OrganizationPage({
@@ -675,123 +684,188 @@ export default async function OrganizationPage({
   if ((rankCounts['본사'] ?? 0) > 0) rankCounts['본사'] = 1;
   else if (tree.length > 0) rankCounts['본사'] = 1;
 
-  const statusColor: Record<string, string> = {
-    completed: 'text-green-600',
-    failed: 'text-red-500',
-    running: 'text-yellow-600',
-  };
-
   const statusLabel: Record<string, string> = {
     completed: '완료',
     failed: '실패',
     running: '진행 중',
   };
 
+  const [basisYear, basisMonth] = label_year_month.split('-');
+  const rankDisplayOrder = ['본사', '사업본부장', '센터장', '리더', '영업사원'];
+  const rankSummaryParts = [...rankDisplayOrder, ...Object.keys(rankCounts).filter((r) => !rankDisplayOrder.includes(r))]
+    .filter((r) => (rankCounts[r] ?? 0) > 0)
+    .map((r) => `${r} ${rankCounts[r]}`);
+
   return (
-    <div className="p-6">
-      {/* 헤더 + 동기화 버튼 */}
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-6">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-800">조직도</h2>
-          <p className="text-sm text-gray-500 mt-0.5">
-            총 {orgTreeVisibleCountExcludingHqRank}명 · 계약 {contractCount.toLocaleString()}건 저장됨
-          </p>
-          <p className="text-xs text-gray-400 mt-0.5">
-            기준 {label_year_month} · {start_date}~{end_date}
-          </p>
+    <div className="p-3 sm:p-6">
+      {/* Hero: 제목·기준 기간·핵심 수치 */}
+      <section className="mb-3 overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.035] sm:mb-4">
+        <div className="border-b border-orange-100/80 bg-gradient-to-r from-orange-50/90 via-white to-slate-50/90 px-3 py-3 sm:px-4 sm:py-3.5">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-orange-700/85">관리자</p>
+              <h1 className="text-lg font-bold tracking-tight text-slate-900 sm:text-xl">조직도</h1>
+              <p className="mt-1 text-[11px] leading-snug text-slate-600 sm:text-xs">
+                <span className="font-medium text-orange-900/90">{basisYear}년</span>{' '}
+                <span className="font-medium text-orange-900/90">{basisMonth}월</span>
+                <span className="text-slate-400"> · </span>
+                <span className="tabular-nums text-slate-500">
+                  {start_date} ~ {end_date}
+                </span>
+              </p>
+            </div>
+            <div className="flex shrink-0 gap-4 sm:gap-6">
+              <div className="text-right">
+                <p className="text-2xl font-bold tabular-nums leading-none text-slate-900 sm:text-3xl">
+                  {orgTreeVisibleCountExcludingHqRank.toLocaleString('ko-KR')}
+                </p>
+                <p className="mt-0.5 text-[10px] font-medium text-slate-500 sm:text-[11px]">전체 인원</p>
+              </div>
+              <div className="text-right">
+                <p className="text-2xl font-bold tabular-nums leading-none text-orange-600 sm:text-3xl">
+                  {contractCount.toLocaleString('ko-KR')}
+                </p>
+                <p className="mt-0.5 text-[10px] font-medium text-slate-500 sm:text-[11px]">계약 수</p>
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="sm:shrink-0">
+
+        {/* 동기화: 보조 버튼 + 한 줄 상태 */}
+        <div className="flex flex-col gap-2 border-b border-slate-100/90 bg-slate-50/50 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4">
           <SyncButton />
-        </div>
-      </div>
-
-      <YearMonthSelector value={label_year_month} todayValue={defaultYearMonth} years={yearsForPicker} />
-
-      {/* 마지막 동기화 상태 */}
-      {lastSync ? (
-        <div className="mb-5 flex items-center gap-3 text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5">
-          <span className="font-medium text-gray-700">마지막 동기화</span>
-          <span>{formatDateTime(lastSync.started_at)}</span>
-          <span
-            className={`font-semibold ${statusColor[lastSync.status] ?? 'text-gray-600'}`}
-          >
-            {statusLabel[lastSync.status] ?? lastSync.status}
-          </span>
-          {lastSync.finished_at && (
-            <span>{formatDuration(lastSync.started_at, lastSync.finished_at)}</span>
-          )}
-          {lastSync.total_fetched != null && (
-            <span>
-              조회 {lastSync.total_fetched}건 · 신규 {lastSync.total_created ?? 0} · 갱신{' '}
-              {lastSync.total_updated ?? 0}
-              {(lastSync.total_errors ?? 0) > 0 && (
-                <span className="text-red-500"> · 오류 {lastSync.total_errors}</span>
+          {lastSync ? (
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-600 sm:justify-end">
+              <span className="truncate text-slate-700">
+                최근 동기화
+                <span className="text-slate-400"> · </span>
+                {formatSyncBarTime(lastSync.finished_at ?? lastSync.started_at)}
+                {lastSync.status !== 'completed' && (
+                  <>
+                    <span className="text-slate-400"> · </span>
+                    <span className="font-medium text-amber-800">
+                      {statusLabel[lastSync.status] ?? lastSync.status}
+                    </span>
+                  </>
+                )}
+                {lastSync.total_updated != null && (
+                  <>
+                    <span className="text-slate-400"> · </span>
+                    <span className="tabular-nums">{lastSync.total_updated.toLocaleString('ko-KR')}건 갱신</span>
+                  </>
+                )}
+                {lastSync.total_fetched != null && (
+                  <>
+                    <span className="text-slate-400"> · </span>
+                    <span className="tabular-nums">조회 {lastSync.total_fetched.toLocaleString('ko-KR')}</span>
+                  </>
+                )}
+                {(lastSync.total_errors ?? 0) > 0 && (
+                  <>
+                    <span className="text-slate-400"> · </span>
+                    <span className="font-medium text-red-600">오류 {lastSync.total_errors}</span>
+                  </>
+                )}
+              </span>
+              {lastSync.status === 'completed' && (
+                <span className="inline-flex shrink-0 items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800 ring-1 ring-emerald-200/80">
+                  완료
+                </span>
               )}
-            </span>
+            </div>
+          ) : (
+            <p className="text-[11px] text-amber-800 sm:text-right">동기화 기록이 없습니다. TY Life 동기화를 실행해 주세요.</p>
           )}
         </div>
-      ) : (
-        <div className="mb-5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5">
-          동기화 기록이 없습니다. 오른쪽 상단 버튼으로 TY Life 데이터를 가져오세요.
-        </div>
-      )}
+      </section>
 
-      {/* 직급별 현황 */}
-      <div className="mb-6 flex flex-col lg:flex-row lg:items-stretch gap-3">
-        <div className="flex gap-3 flex-wrap">
-          {Object.entries(rankCounts).map(([rank, count]) => (
-            <div
-              key={rank}
-              className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm"
-            >
-              <span className="text-gray-500">{rank}</span>
-              <span className="ml-2 font-bold text-gray-800">{count}명</span>
-            </div>
-          ))}
+      {/* 기준월 선택: /organization 과 유사한 카드 + 컴팩트 툴바 */}
+      <section className="mb-3 overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-3 shadow-sm ring-1 ring-slate-900/[0.035] sm:mb-4 sm:p-4">
+        <div className="mb-2.5 flex flex-col gap-0.5 border-b border-slate-100 pb-2.5 sm:flex-row sm:items-baseline sm:justify-between">
+          <p className="text-[13px] font-semibold tabular-nums text-slate-800 sm:text-sm">
+            <span className="text-orange-800">{basisYear}년</span> <span className="text-orange-800">{basisMonth}월</span>{' '}
+            기준
+          </p>
+          <p className="text-[10px] text-slate-500 sm:text-xs">월별 정산 구간에 맞춰 지표를 불러옵니다.</p>
+        </div>
+        <YearMonthSelector
+          layout="compact-toolbar"
+          className="min-w-0"
+          value={label_year_month}
+          todayValue={defaultYearMonth}
+          years={yearsForPicker}
+          todayLabel="오늘 기준월"
+        />
+      </section>
+
+      {/* 직급 구성 + 실적: 한 카드 안에서 모바일 압축 */}
+      <section className="mb-3 overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-3 shadow-sm ring-1 ring-slate-900/[0.035] sm:mb-4 sm:p-4">
+        <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-orange-100/90 bg-orange-50/40 px-2.5 py-2 text-[11px] text-slate-800 sm:text-xs">
+          <span className="font-semibold text-orange-900/90">구성</span>
+          <span className="text-slate-400">|</span>
+          <span className="tabular-nums text-slate-700">
+            {rankSummaryParts.length > 0 ? rankSummaryParts.join(' · ') : '—'}
+          </span>
         </div>
 
-        {/* KPI (오른쪽) */}
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 w-full lg:w-auto lg:ml-auto">
-          <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
-            <span className="text-gray-500">이번달 준비 구좌 수</span>
-            <span className="ml-2 font-bold text-gray-800">
-              {periodPendingUnits.toLocaleString('ko-KR')}구좌
-            </span>
-            <div className="text-[11px] text-gray-400 mt-0.5">
-              기준 {label_year_month} · {start_date}~{end_date}
-            </div>
+        <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-orange-800/90">실적</p>
+        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 sm:gap-2">
+          <div
+            className="flex min-h-0 flex-col rounded-xl border border-slate-200/85 bg-gradient-to-b from-white to-slate-50/80 px-2 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)] sm:px-2.5 sm:py-2.5"
+            title={`기준 ${label_year_month} (${start_date}~${end_date})`}
+          >
+            <p className="text-[10px] font-medium leading-tight text-slate-500 sm:text-[11px]">이번달 준비</p>
+            <p className="mt-1 text-lg font-semibold tabular-nums tracking-tight text-slate-900 sm:text-xl">
+              {periodPendingUnits.toLocaleString('ko-KR')}
+              <span className="ml-0.5 text-[11px] font-semibold text-slate-500 sm:text-xs">구좌</span>
+            </p>
           </div>
-          <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
-            <span className="text-gray-500">누적 가입 구좌 수</span>
-            <span className="ml-2 font-bold text-gray-800">
-              {totalJoinUnits.toLocaleString('ko-KR')}구좌
-            </span>
+          <div
+            className="flex min-h-0 flex-col rounded-xl border border-slate-200/85 bg-gradient-to-b from-white to-slate-50/80 px-2 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)] sm:px-2.5 sm:py-2.5"
+            title={`기준 ${label_year_month} (${start_date}~${end_date})`}
+          >
+            <p className="text-[10px] font-medium leading-tight text-slate-500 sm:text-[11px]">이번달 가입</p>
+            <p className="mt-1 text-lg font-semibold tabular-nums tracking-tight text-slate-900 sm:text-xl">
+              {periodJoinUnits.toLocaleString('ko-KR')}
+              <span className="ml-0.5 text-[11px] font-semibold text-slate-500 sm:text-xs">구좌</span>
+            </p>
           </div>
-          <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
-            <span className="text-gray-500">총 매출</span>
-            <span className="ml-2 font-bold text-gray-800">{formatWon(totalSales)}</span>
+          <div className="flex min-h-0 flex-col rounded-xl border border-slate-200/85 bg-gradient-to-b from-white to-slate-50/80 px-2 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)] sm:px-2.5 sm:py-2.5">
+            <p className="text-[10px] font-medium leading-tight text-slate-500 sm:text-[11px]">누적 가입</p>
+            <p className="mt-1 text-lg font-semibold tabular-nums tracking-tight text-slate-900 sm:text-xl">
+              {totalJoinUnits.toLocaleString('ko-KR')}
+              <span className="ml-0.5 text-[11px] font-semibold text-slate-500 sm:text-xs">구좌</span>
+            </p>
           </div>
-          <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
-            <span className="text-gray-500">이번달 가입 구좌 수</span>
-            <span className="ml-2 font-bold text-gray-800">
-              {periodJoinUnits.toLocaleString('ko-KR')}구좌
-            </span>
-            <div className="text-[11px] text-gray-400 mt-0.5">
-              기준 {label_year_month} · {start_date}~{end_date}
-            </div>
+          <div
+            className="flex min-h-0 flex-col rounded-xl border border-slate-200/85 bg-gradient-to-b from-white to-orange-50/30 px-2 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)] ring-1 ring-orange-100/60 sm:px-2.5 sm:py-2.5"
+            title={formatWon(totalSales)}
+          >
+            <p className="text-[10px] font-medium leading-tight text-orange-900/80 sm:text-[11px]">총 매출</p>
+            <p className="mt-1 text-lg font-semibold tabular-nums tracking-tight text-orange-950 sm:hidden">
+              {formatWonShort(totalSales)}
+            </p>
+            <p className="mt-1 hidden text-lg font-semibold tabular-nums tracking-tight text-orange-950 sm:block sm:text-xl">
+              {formatWon(totalSales)}
+            </p>
           </div>
-          <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
-            <span className="text-gray-500">이번달 매출</span>
-            <span className="ml-2 font-bold text-gray-800">{formatWon(periodSales)}</span>
-            <div className="text-[11px] text-gray-400 mt-0.5">
-              기준 {label_year_month}
-            </div>
+          <div
+            className="col-span-2 flex min-h-0 flex-col rounded-xl border border-slate-200/85 bg-gradient-to-b from-white to-orange-50/25 px-2 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)] ring-1 ring-orange-100/50 sm:col-span-1 sm:px-2.5 sm:py-2.5"
+            title={`${formatWon(periodSales)} · ${label_year_month}`}
+          >
+            <p className="text-[10px] font-medium leading-tight text-orange-900/80 sm:text-[11px]">이번달 매출</p>
+            <p className="mt-1 text-lg font-semibold tabular-nums tracking-tight text-orange-950 sm:hidden">
+              {formatWonShort(periodSales)}
+            </p>
+            <p className="mt-1 hidden text-lg font-semibold tabular-nums tracking-tight text-orange-950 sm:block sm:text-xl">
+              {formatWon(periodSales)}
+            </p>
           </div>
         </div>
-      </div>
+      </section>
 
       {/* 조직 트리 */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+      <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-3 shadow-sm ring-1 ring-slate-900/[0.035] sm:p-4">
         {members.length > 0 && tree.length === 0 && (
           <p className="text-xs text-amber-600 mb-4 text-center">
             {members.length}명이 있지만 조직 계층 연결(edges)이 없습니다. 상하위 관계를 등록하면 트리로 표시됩니다.
