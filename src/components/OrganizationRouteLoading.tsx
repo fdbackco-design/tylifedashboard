@@ -17,7 +17,7 @@ export default function OrganizationRouteLoading() {
         priority
         className="h-24 w-auto max-w-[min(100%,220px)] object-contain drop-shadow-md sm:h-28"
       />
-      <p className="text-center text-base font-semibold tracking-tight text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.28)] sm:text-lg">
+      <p className="text-center text-base font-semibold tracking-tight text-[#5a5656] sm:text-lg">
         잠시만 기다려주세요.
       </p>
     </div>
