@@ -15,6 +15,10 @@ import {
   computeSalesMemberPromotionThreshold,
   type AttributedJoinContractRow,
 } from '@/lib/settlement/leader-promotion';
+import {
+  loadStatementDownlineSharedData,
+  computeStatementDownlineUnitsWithSharedContext,
+} from '@/lib/organization/statement-downline-units';
 
 export const metadata: Metadata = { title: '정산 현황' };
 export const dynamic = 'force-dynamic';
@@ -497,6 +501,60 @@ export default async function SettlementPage({ searchParams }: PageProps) {
 
   const totalAmount = displayLineRows.reduce((sum, r) => sum + (r.total ?? 0), 0);
 
+  // /organization/statement 와 동일: 개인 실적 = 월정산 direct_unit_count, 산하 = 공통 스냅샷 기준 산하 집계
+  const settlementMemberIds = [
+    ...new Set(
+      ((settlements ?? []) as Array<{ member_id?: string | null }>)
+        .map((r) => String(r.member_id ?? '').trim())
+        .filter(Boolean),
+    ),
+  ];
+  const statementDirectUnitsByMemberId: Record<string, number> = {};
+  const leaderRankEffectiveAtByMemberId: Record<string, string | null> = {};
+  for (const r of (settlements ?? []) as Array<{
+    member_id?: string | null;
+    direct_unit_count?: number | null;
+  }>) {
+    const mid = String(r.member_id ?? '').trim();
+    if (!mid) continue;
+    statementDirectUnitsByMemberId[mid] = Math.max(0, Math.floor(Number(r.direct_unit_count ?? 0) || 0));
+  }
+  if (settlementMemberIds.length > 0) {
+    const { data: leaderRows } = await db
+      .from('organization_members')
+      .select('id, leader_rank_effective_at')
+      .in('id', settlementMemberIds);
+    for (const row of (leaderRows ?? []) as Array<{ id: string; leader_rank_effective_at?: string | null }>) {
+      if (!row?.id) continue;
+      leaderRankEffectiveAtByMemberId[row.id] = (row.leader_rank_effective_at ?? null) as string | null;
+    }
+  }
+  const statementDownlineUnitsByMemberId: Record<string, number> = {};
+  if (settlementMemberIds.length > 0) {
+    const sharedDownline = await loadStatementDownlineSharedData(db);
+    const window = { start_date, end_date };
+    const PAR = 12;
+    for (let i = 0; i < settlementMemberIds.length; i += PAR) {
+      const slice = settlementMemberIds.slice(i, i + PAR);
+      const results = await Promise.all(
+        slice.map((mid) =>
+          computeStatementDownlineUnitsWithSharedContext(
+            db,
+            sharedDownline,
+            mid,
+            window,
+            statementDirectUnitsByMemberId[mid] ?? 0,
+            leaderRankEffectiveAtByMemberId[mid] ?? null,
+          ),
+        ),
+      );
+      slice.forEach((mid, j) => {
+        const res = results[j];
+        statementDownlineUnitsByMemberId[mid] = typeof res === 'number' ? res : res.downline_units;
+      });
+    }
+  }
+
   // DB 저장된 "본인 계약 수당 인정" 설정 로드 (월/라인 단위)
   // - 새 테이블/마이그레이션이 아직 적용되지 않은 환경에서도 페이지 렌더가 깨지지 않게 방어한다.
   const selfIncludedInitialByTopId: Record<string, boolean> = {};
@@ -618,6 +676,8 @@ export default async function SettlementPage({ searchParams }: PageProps) {
         totalSales={totalSales}
         periodSales={periodSales}
         rankByMemberId={rankByMemberId}
+        statementDirectUnitsByMemberId={statementDirectUnitsByMemberId}
+        statementDownlineUnitsByMemberId={statementDownlineUnitsByMemberId}
         selfIncludedInitialByTopId={selfIncludedInitialByTopId}
         splitOpenInitialByTopId={splitOpenInitialByTopId}
         childrenByParent={childrenByParent}

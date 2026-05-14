@@ -27,40 +27,21 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
-/**
- * 지급 명세서용: 정산 윈도우 안에서 귀속 담당자가 `rootMemberId` 서브트리에 속한 계약 구좌 합(본인 포함)에서,
- * 명세서 개인 실적(`directUnitCountFromSettlement`)을 뺀 값을 산하 실적으로 반환한다.
- * /organization 과 동일한 `resolveContractOriginForSubtree`·정산 대상 필터를 사용한다.
- */
-export async function sumDownlineAttributedUnitsInSettlementWindow(
-  db: SupabaseClient,
-  rootMemberId: string,
-  window: { start_date: string; end_date: string },
-  directUnitCountFromSettlement: number,
-  rootLeaderRankEffectiveAt: string | null,
-  opts?: { debug?: boolean },
-): Promise<
-  | number
-  | {
-      downline_units: number;
-      included_units_before_personal: number;
-      personal_units_from_settlement: number;
-      debug_rows: Array<{
-        contract_id: string;
-        contract_code: string | null;
-        join_date: string;
-        unit_count: number;
-        raw_sales_member_id: string;
-        raw_sales_member_name: string | null;
-        origin_member_id: string;
-        origin_member_name: string | null;
-        nearest_leader_id: string | null;
-        nearest_leader_name: string | null;
-        excluded_by_leader_after_promotion: boolean;
-        excluded_by_root_leader_effective_at: boolean;
-      }>;
-    }
-> {
+/** `sumDownlineAttributedUnitsInSettlementWindow`에서 조직 스냅샷을 한 번만 로드할 때 사용 */
+export type StatementDownlineSharedData = {
+  remapMemberId: (id: string) => string;
+  resolveContractOriginForSubtree: (input: any, subtreeIdSet: Set<string>) => string;
+  hqSalesMemberIds: string[];
+  membersFiltered: MemberRow[];
+  treeRows: OrgTreeRow[];
+  childrenByParent: ReturnType<typeof buildChildrenByParentFromRows>;
+  rankById: Map<string, string>;
+  nameById: Map<string, string>;
+  promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold>;
+  leaderPromotionThresholdContractCreatedAtById: Map<string, string | null>;
+};
+
+export async function loadStatementDownlineSharedData(db: SupabaseClient): Promise<StatementDownlineSharedData> {
   const [membersRes, edgesRes, promoRes] = await Promise.all([
     db
       .from('organization_members')
@@ -72,7 +53,7 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
   ]);
 
   const membersRaw = ((membersRes.data ?? []) as MemberRow[]).map((m) =>
-    m.name === '안성준' ? { ...m, rank: '본사' } : m,
+    m.name === '안성준' ? { ...m, rank: '본사' as const } : m,
   );
   const edgesRaw = (edgesRes.data ?? []) as Array<{ parent_id: string | null; child_id: string }>;
 
@@ -106,19 +87,8 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
   }));
 
   const childrenByParent = buildChildrenByParentFromRows(treeRows);
-  const subtreeIds = collectSubtreeMemberIdsDownstream(rootMemberId, childrenByParent);
-  const subtreeIdSet = subtreeIds;
   const rankById = new Map(membersFiltered.map((m) => [m.id, m.rank] as const));
   const nameById = new Map(membersFiltered.map((m) => [m.id, m.name] as const));
-  const rootRank = rankById.get(rootMemberId) ?? null;
-  const rootLeaderEffectiveAt =
-    rootRank === '리더' && rootLeaderRankEffectiveAt && String(rootLeaderRankEffectiveAt).trim() !== ''
-      ? String(rootLeaderRankEffectiveAt).trim()
-      : null;
-  const rootLeaderEffectiveYmd = rootLeaderEffectiveAt ? rootLeaderEffectiveAt.slice(0, 10) : null;
-  const parentByChild = new Map<string, string | null>(
-    treeRows.map((r) => [r.id as string, (r.parent_id ?? null) as string | null]),
-  );
 
   const promotionThresholdByMemberId = new Map<string, SalesMemberPromotionThreshold>();
   const thresholdContractIds: string[] = [];
@@ -135,7 +105,6 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
     thresholdContractIds.push(cid);
   }
 
-  // threshold_contract_id의 created_at이 필요 (동일 join_date에서 경계 처리)
   const leaderPromotionThresholdContractCreatedAtById = new Map<string, string | null>();
   const uniqThIds = [...new Set(thresholdContractIds)];
   for (const thChunk of chunk(uniqThIds, 200)) {
@@ -147,7 +116,75 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
     }
   }
 
-  // leader_rank_effective_at이 없으면, 승격 이벤트(threshold)로 “리더 시작 시점”을 추론한다.
+  return {
+    remapMemberId,
+    resolveContractOriginForSubtree,
+    hqSalesMemberIds,
+    membersFiltered,
+    treeRows,
+    childrenByParent,
+    rankById,
+    nameById,
+    promotionThresholdByMemberId,
+    leaderPromotionThresholdContractCreatedAtById,
+  };
+}
+
+export async function computeStatementDownlineUnitsWithSharedContext(
+  db: SupabaseClient,
+  shared: StatementDownlineSharedData,
+  rootMemberId: string,
+  window: { start_date: string; end_date: string },
+  directUnitCountFromSettlement: number,
+  rootLeaderRankEffectiveAt: string | null,
+  opts?: { debug?: boolean },
+): Promise<
+  | number
+  | {
+      downline_units: number;
+      included_units_before_personal: number;
+      personal_units_from_settlement: number;
+      debug_rows: Array<{
+        contract_id: string;
+        contract_code: string | null;
+        join_date: string;
+        unit_count: number;
+        raw_sales_member_id: string;
+        raw_sales_member_name: string | null;
+        origin_member_id: string;
+        origin_member_name: string | null;
+        nearest_leader_id: string | null;
+        nearest_leader_name: string | null;
+        excluded_by_leader_after_promotion: boolean;
+        excluded_by_root_leader_effective_at: boolean;
+      }>;
+    }
+> {
+  const {
+    remapMemberId,
+    resolveContractOriginForSubtree,
+    hqSalesMemberIds,
+    membersFiltered,
+    treeRows,
+    childrenByParent,
+    rankById,
+    nameById,
+    promotionThresholdByMemberId,
+    leaderPromotionThresholdContractCreatedAtById,
+  } = shared;
+
+  const subtreeIds = collectSubtreeMemberIdsDownstream(rootMemberId, childrenByParent);
+  const subtreeIdSet = subtreeIds;
+  const rootRank = rankById.get(rootMemberId) ?? null;
+  const rootLeaderEffectiveAt =
+    rootRank === '리더' && rootLeaderRankEffectiveAt && String(rootLeaderRankEffectiveAt).trim() !== ''
+      ? String(rootLeaderRankEffectiveAt).trim()
+      : null;
+  const rootLeaderEffectiveYmd = rootLeaderEffectiveAt ? rootLeaderEffectiveAt.slice(0, 10) : null;
+  const parentByChild = new Map<string, string | null>(
+    treeRows.map((r) => [r.id as string, (r.parent_id ?? null) as string | null]),
+  );
+
   const rootPromotionThresholdBase = promotionThresholdByMemberId.get(rootMemberId) ?? null;
   const rootPromotionThreshold: SalesMemberPromotionThreshold | null = rootPromotionThresholdBase
     ? {
@@ -157,10 +194,6 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
       }
     : null;
 
-  // 요구: 명세서의 “산하 실적 구좌”는 오버라이드(롤업) 계산 기준과 동일하게,
-  // 리더 산하에서 또 다른 리더가 있는 경우 그 하위 리더 subtree 실적은 상위 리더 산하에 포함하지 않는다.
-  // 단, “하위 리더가 발생하는 계약(승격 계약)까지”는 상위 리더 산하에 포함해야 한다.
-  // 따라서 root가 리더면: 계약 단위로, (origin의 가장 가까운 하위 리더)가 승격 계약 이후인지에 따라 포함/제외한다.
   const nearestLeaderBelowRoot = (originMemberId: string): string | null => {
     if (originMemberId === rootMemberId) return null;
     let cur: string | null = originMemberId;
@@ -309,39 +342,30 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
     const rawSalesMemberIdRemapped = remapMemberId(rawSalesMemberId);
     const origin = resolveContractOriginForSubtree(contractRemapInput(c), subtreeIdSet);
 
-    // 기본: 내 서브트리 귀속만 집계
     if (!subtreeIdSet.has(origin)) continue;
 
-    // root가 리더인 경우: "리더가 된 이후" 계약만 포함
     let excludedByRootLeaderEffectiveAt = false;
     if (rootRank === '리더') {
-      // 요구: “그 사람이 직접 담당자로 계약한 계약”은 리더 전이라도 제외하면 안 된다.
-      // 주의: origin(귀속 담당자)은 HQ→고객 귀속 등으로 고객 노드가 될 수 있으므로,
-      // 직접 담당 판정은 contracts.sales_member_id(고객 merge만 반영) 기준으로 한다.
       const jd = String((c.join_date as string | null | undefined) ?? '').slice(0, 10);
       const isDirectByRawSales = rawSalesMemberIdRemapped === rootMemberId;
       if (!isDirectByRawSales) {
-      // 요구: “리더가 되기 전의 산하 계약”은 제외.
-      // 1) leader_rank_effective_at이 있으면 join_date 우선으로 필터하고, 같은 날만 created_at으로 경계 처리
-      // 2) leader_rank_effective_at이 없으면 leader_promotion_events(threshold) 기준으로 "승격 계약부터" 포함
-      const createdAt = (c.created_at as string | null | undefined) ?? null;
+        const createdAt = (c.created_at as string | null | undefined) ?? null;
 
-      if (rootLeaderEffectiveAt && rootLeaderEffectiveYmd) {
-        if (jd && jd < rootLeaderEffectiveYmd) {
-          excludedByRootLeaderEffectiveAt = true;
-        } else if (jd && jd === rootLeaderEffectiveYmd) {
-          if (createdAt && createdAt < rootLeaderEffectiveAt) excludedByRootLeaderEffectiveAt = true;
+        if (rootLeaderEffectiveAt && rootLeaderEffectiveYmd) {
+          if (jd && jd < rootLeaderEffectiveYmd) {
+            excludedByRootLeaderEffectiveAt = true;
+          } else if (jd && jd === rootLeaderEffectiveYmd) {
+            if (createdAt && createdAt < rootLeaderEffectiveAt) excludedByRootLeaderEffectiveAt = true;
+          }
+        } else if (rootPromotionThreshold) {
+          const after = isContractStrictlyAfterPromotionThreshold(
+            jd,
+            String(c.id),
+            rootPromotionThreshold,
+            createdAt,
+          );
+          if (!after) excludedByRootLeaderEffectiveAt = true;
         }
-      } else if (rootPromotionThreshold) {
-        // root 기준은 “리더가 된 이후”만 포함 → 승격 계약 자체는 리더 전으로 보고 제외(strictly after)
-        const after = isContractStrictlyAfterPromotionThreshold(
-          jd,
-          String(c.id),
-          rootPromotionThreshold,
-          createdAt,
-        );
-        if (!after) excludedByRootLeaderEffectiveAt = true;
-      }
       }
 
       if (excludedByRootLeaderEffectiveAt) {
@@ -365,7 +389,6 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
       }
     }
 
-    // 리더일 때만: "하위 리더 발생 시점(승격 계약)" 기준으로 계약 단위 포함/제외
     let excludedByPromotionAfter = false;
     let nearestLeaderId: string | null = null;
     if (rootRank === '리더') {
@@ -380,18 +403,11 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
             }
           : null;
         if (!th) {
-          // 이미 리더(승격 임계 정보 없음)면 상위 리더 산하에 포함하지 않는다.
           continue;
         }
         const jd = String((c.join_date as string | null | undefined) ?? '').slice(0, 10);
         const createdAt = (c.created_at as string | null | undefined) ?? null;
-        const after = isContractStrictlyAfterPromotionThreshold(
-          jd,
-          String(c.id),
-          th,
-          createdAt,
-        );
-        // 승격 계약 "이후"부터는 하위 리더 실적으로 귀속 → 상위 리더 산하에서 제외
+        const after = isContractStrictlyAfterPromotionThreshold(jd, String(c.id), th, createdAt);
         if (after) {
           excludedByPromotionAfter = true;
           if (opts?.debug) {
@@ -448,4 +464,50 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
     };
   }
   return downline;
+}
+
+/**
+ * 지급 명세서용: 정산 윈도우 안에서 귀속 담당자가 `rootMemberId` 서브트리에 속한 계약 구좌 합(본인 포함)에서,
+ * 명세서 개인 실적(`directUnitCountFromSettlement`)을 뺀 값을 산하 실적으로 반환한다.
+ * /organization 과 동일한 `resolveContractOriginForSubtree`·정산 대상 필터를 사용한다.
+ */
+export async function sumDownlineAttributedUnitsInSettlementWindow(
+  db: SupabaseClient,
+  rootMemberId: string,
+  window: { start_date: string; end_date: string },
+  directUnitCountFromSettlement: number,
+  rootLeaderRankEffectiveAt: string | null,
+  opts?: { debug?: boolean },
+): Promise<
+  | number
+  | {
+      downline_units: number;
+      included_units_before_personal: number;
+      personal_units_from_settlement: number;
+      debug_rows: Array<{
+        contract_id: string;
+        contract_code: string | null;
+        join_date: string;
+        unit_count: number;
+        raw_sales_member_id: string;
+        raw_sales_member_name: string | null;
+        origin_member_id: string;
+        origin_member_name: string | null;
+        nearest_leader_id: string | null;
+        nearest_leader_name: string | null;
+        excluded_by_leader_after_promotion: boolean;
+        excluded_by_root_leader_effective_at: boolean;
+      }>;
+    }
+> {
+  const shared = await loadStatementDownlineSharedData(db);
+  return computeStatementDownlineUnitsWithSharedContext(
+    db,
+    shared,
+    rootMemberId,
+    window,
+    directUnitCountFromSettlement,
+    rootLeaderRankEffectiveAt,
+    opts,
+  );
 }

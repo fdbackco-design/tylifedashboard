@@ -29,6 +29,10 @@ export default function SettlementLineTableClient(props: {
   totalSales: number;
   periodSales: number;
   rankByMemberId: Record<string, string>;
+  /** /organization/statement 의 개인 실적 구좌와 동일: monthly_settlements.direct_unit_count */
+  statementDirectUnitsByMemberId: Record<string, number>;
+  /** /organization/statement 의 산하 실적 구좌와 동일 */
+  statementDownlineUnitsByMemberId: Record<string, number>;
   selfIncludedInitialByTopId: Record<string, boolean>;
   splitOpenInitialByTopId: Record<string, boolean>;
   rows: SettlementLineRow[];
@@ -390,6 +394,16 @@ export default function SettlementLineTableClient(props: {
   const baseSum = useMemo(() => adjustedRows.reduce((s, r) => s + (r.base ?? 0), 0), [adjustedRows]);
   const rollupSum = useMemo(() => adjustedRows.reduce((s, r) => s + (r.rollup ?? 0), 0), [adjustedRows]);
   const leaderMaintSum = useMemo(() => adjustedRows.reduce((s, r) => s + (r.leaderMaint ?? 0), 0), [adjustedRows]);
+  const statementDirectColSum = useMemo(
+    () =>
+      adjustedRows.reduce((s, r) => s + (props.statementDirectUnitsByMemberId[r.topLineId] ?? 0), 0),
+    [adjustedRows, props.statementDirectUnitsByMemberId],
+  );
+  const statementDownlineColSum = useMemo(
+    () =>
+      adjustedRows.reduce((s, r) => s + (props.statementDownlineUnitsByMemberId[r.topLineId] ?? 0), 0),
+    [adjustedRows, props.statementDownlineUnitsByMemberId],
+  );
 
   return (
     <>
@@ -556,8 +570,12 @@ export default function SettlementLineTableClient(props: {
                     </div>
                   </td>
                   <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{r.topRank}</td>
-                  <td className="px-4 py-3 tabular-nums text-right">{r.directUnitSum.toLocaleString()}</td>
-                  <td className="px-4 py-3 tabular-nums text-right">-</td>
+                  <td className="px-4 py-3 tabular-nums text-right">
+                    {(props.statementDirectUnitsByMemberId[r.topLineId] ?? 0).toLocaleString('ko-KR')}
+                  </td>
+                  <td className="px-4 py-3 tabular-nums text-right">
+                    {(props.statementDownlineUnitsByMemberId[r.topLineId] ?? 0).toLocaleString('ko-KR')}
+                  </td>
                   <td className="px-4 py-3 tabular-nums text-right text-gray-700">{formatKRW(r.base)}</td>
                   <td className="px-4 py-3 tabular-nums text-right text-gray-700">{formatKRW(r.rollup)}</td>
                   <td className="px-4 py-3 tabular-nums text-right text-violet-700">{formatKRW(r.leaderMaint)}</td>
@@ -640,8 +658,14 @@ export default function SettlementLineTableClient(props: {
 
             <tfoot className="border-t-2 border-gray-200 bg-gray-50">
               <tr>
-                <td colSpan={4} className="px-4 py-3 font-semibold text-gray-700">
+                <td colSpan={2} className="px-4 py-3 font-semibold text-gray-700">
                   합계
+                </td>
+                <td className="px-4 py-3 tabular-nums text-right font-semibold text-gray-700">
+                  {statementDirectColSum.toLocaleString('ko-KR')}
+                </td>
+                <td className="px-4 py-3 tabular-nums text-right font-semibold text-gray-700">
+                  {statementDownlineColSum.toLocaleString('ko-KR')}
                 </td>
                 <td className="px-4 py-3 tabular-nums text-right font-semibold">
                   {formatKRW(baseSum)}
