@@ -608,12 +608,20 @@ export default async function OrganizationMyTreePage({
           </div>
         </div>
 
-        <div className="flex justify-end border-t border-slate-100 bg-slate-50/40 px-2 py-2 sm:px-3 sm:py-2">
-          <AccountActionsClient
-            showChangePassword={false}
-            showPrivacyPolicy={false}
-            redirectAfterLogout={`/login?redirect=${encodeURIComponent(`/organization?year_month=${yearMonth}`)}`}
-          />
+        <div className="flex items-center gap-2 border-t border-slate-100 bg-slate-50/40 px-2 py-2 sm:gap-3 sm:px-3 sm:py-2">
+          <Link
+            href={`/organization/statement?year_month=${encodeURIComponent(yearMonth)}`}
+            className="flex min-h-9 min-w-0 flex-1 items-center justify-center rounded-lg bg-gradient-to-b from-orange-500 to-orange-600 px-3 text-xs font-semibold text-white shadow-sm shadow-orange-900/15 ring-1 ring-orange-400/25 transition hover:from-orange-600 hover:to-orange-700 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 sm:min-h-10 sm:text-sm"
+          >
+            명세서 보기
+          </Link>
+          <div className="shrink-0">
+            <AccountActionsClient
+              showChangePassword={false}
+              showPrivacyPolicy={false}
+              redirectAfterLogout={`/login?redirect=${encodeURIComponent(`/organization?year_month=${yearMonth}`)}`}
+            />
+          </div>
         </div>
       </header>
 
@@ -633,7 +641,7 @@ export default async function OrganizationMyTreePage({
             월별 정산 구간에 맞춰 조직도를 불러옵니다.
           </p>
         </div>
-        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-3">
           <YearMonthSelector
             layout="compact-toolbar"
             className="min-w-0 flex-1 sm:min-w-[min(100%,22rem)]"
@@ -642,12 +650,6 @@ export default async function OrganizationMyTreePage({
             years={yearsForPicker}
             todayLabel="오늘 기준월"
           />
-          <Link
-            href={`/organization/statement?year_month=${encodeURIComponent(yearMonth)}`}
-            className="inline-flex h-11 w-full shrink-0 items-center justify-center rounded-xl bg-gradient-to-b from-orange-500 to-orange-600 px-4 text-sm font-semibold text-white shadow-md shadow-orange-900/20 ring-1 ring-orange-400/30 transition hover:from-orange-600 hover:to-orange-700 hover:shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 sm:h-10 sm:w-auto sm:min-w-[8.5rem]"
-          >
-            명세서 보기
-          </Link>
         </div>
       </section>
 
