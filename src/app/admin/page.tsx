@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
-import Link from 'next/link';
+import AdminDashboardMonthNav from './AdminDashboardMonthNav';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { buildDashboardAggregations } from '@/lib/dashboard/aggregations';
 import { getSettlementWindowSeoul } from '@/lib/settlement/settlement-window';
@@ -11,14 +11,14 @@ export const dynamic = 'force-dynamic';
 
 function SectionCard(props: { title: string; subtitle?: string; children: ReactNode }) {
   return (
-    <section className="bg-white rounded-xl border border-gray-200 shadow-sm">
-      <div className="px-6 py-4 border-b border-gray-100">
-        <div className="flex items-baseline justify-between gap-4">
-          <h3 className="text-sm font-semibold text-gray-800">{props.title}</h3>
-          {props.subtitle ? <p className="text-xs text-gray-500">{props.subtitle}</p> : null}
+    <section className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.035]">
+      <div className="border-b border-orange-100/90 bg-gradient-to-r from-orange-50/50 to-white px-4 py-3 sm:px-6 sm:py-4">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+          <h3 className="text-sm font-semibold text-orange-950">{props.title}</h3>
+          {props.subtitle ? <p className="text-xs text-slate-500">{props.subtitle}</p> : null}
         </div>
       </div>
-      <div className="p-6">{props.children}</div>
+      <div className="p-4 sm:p-6">{props.children}</div>
     </section>
   );
 }
@@ -33,10 +33,10 @@ function DataTable(props: { rows: Array<{ parent_name: string; member_name: stri
   };
 
   return (
-    <div className="overflow-auto rounded-lg border border-gray-200 max-h-[420px] lg:max-h-[520px]">
+    <div className="overflow-auto rounded-lg border border-slate-200/90 max-h-[420px] lg:max-h-[520px]">
       <table className="min-w-full text-sm">
-        <thead className="bg-gray-50 sticky top-0 z-10">
-          <tr className="text-xs text-gray-500 uppercase tracking-wide">
+        <thead className="sticky top-0 z-10 bg-orange-50/80">
+          <tr className="text-xs uppercase tracking-wide text-slate-500">
             <th className="text-left font-medium px-4 py-2 whitespace-nowrap">상위 조직</th>
             <th className="text-left font-medium px-4 py-2 whitespace-nowrap">담당자</th>
             <th className="text-right font-medium px-4 py-2 whitespace-nowrap">구좌 수</th>
@@ -67,7 +67,7 @@ function DataTable(props: { rows: Array<{ parent_name: string; member_name: stri
                     <div className="w-28">
                       <div className="h-2 rounded-full bg-gray-100">
                         <div
-                          className="h-2 rounded-full bg-blue-600"
+                          className="h-2 rounded-full bg-orange-500"
                           style={{
                             width: `${maxUnits > 0 ? Math.round((r.unit_sum / maxUnits) * 100) : 0}%`,
                           }}
@@ -93,15 +93,17 @@ function DataTable(props: { rows: Array<{ parent_name: string; member_name: stri
 
 function SummaryCard(props: { label: string; value: string; hint?: string }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-6 shadow-sm">
-      <p className="text-xs text-gray-500 leading-snug break-keep">
+    <div className="flex min-h-0 flex-col rounded-xl border border-slate-200/85 bg-gradient-to-b from-white to-slate-50/80 p-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.02] sm:p-4">
+      <p className="break-keep text-[10px] font-medium leading-snug text-slate-400 sm:text-xs sm:text-slate-500">
         {props.label}
       </p>
-      <p className="text-2xl sm:text-3xl lg:text-4xl font-semibold text-blue-600 mt-2 tracking-tight whitespace-nowrap">
+      <p className="mt-1.5 text-xl font-semibold tabular-nums tracking-tight text-orange-700 sm:mt-2 sm:text-2xl lg:text-3xl">
         {props.value}
       </p>
       {props.hint ? (
-        <p className="text-xs text-gray-500 mt-2 leading-snug break-keep">{props.hint}</p>
+        <p className="mt-1 text-[10px] leading-snug text-slate-400 break-keep sm:mt-2 sm:text-xs sm:text-slate-500">
+          {props.hint}
+        </p>
       ) : null}
     </div>
   );
@@ -131,12 +133,6 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
       months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
     }
   }
-  const monthHref = (m: string): string => {
-    const qs = new URLSearchParams();
-    qs.set('year_month', m);
-    return `/admin?${qs.toString()}`;
-  };
-
   const summaryCards = [
     {
       label: `${agg.year_month} 누적 신청 구좌 수`,
@@ -161,54 +157,29 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
   ];
 
   return (
-    <div className="p-4 sm:p-8 space-y-6 sm:space-y-8">
-      <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 sm:gap-6">
+    <div className="space-y-5 p-4 sm:space-y-8 sm:p-8">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">대시보드</h2>
-          
+          <h2 className="text-2xl font-bold tracking-tight text-slate-900">대시보드</h2>
         </div>
-        <div className="text-xs text-gray-500 sm:text-right">
+        <div className="text-xs text-slate-500 sm:text-right">
           <div>브리핑 생성일: {agg.briefing.run_date_ymd}</div>
           <div>브리핑 기준일(전날): {agg.briefing.base_date_ymd}</div>
         </div>
       </header>
 
-      {/* 월 선택 (집계 기준월) */}
-      <div className="flex gap-1 flex-wrap items-center">
-        <Link
-          href={monthHref(defaultYearMonth)}
-          className={`px-2.5 py-1 rounded text-xs border ${
-            year_month === defaultYearMonth
-              ? 'bg-slate-800 text-white border-slate-800'
-              : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
-          }`}
-        >
-          오늘(기준월)
-        </Link>
-        {months.map((m) => (
-          <Link
-            key={m}
-            href={monthHref(m)}
-            className={`px-2.5 py-1 rounded text-xs border ${
-              m === year_month
-                ? 'bg-slate-800 text-white border-slate-800'
-                : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
-            }`}
-          >
-            {m.slice(5)}월
-          </Link>
-        ))}
-      </div>
+      {/* 월 선택 (집계 기준월) — /admin?year_month=YYYY-MM */}
+      <AdminDashboardMonthNav yearMonth={year_month} defaultYearMonth={defaultYearMonth} months={months} />
 
-      {/* 1) 상단: 핵심 요약 카드 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      {/* 1) 상단: 핵심 요약 카드 — 모바일 2×2, 데스크톱 4열 */}
+      <div className="grid grid-cols-2 gap-1.5 lg:grid-cols-4 lg:gap-3">
         {summaryCards.map((c) => (
           <SummaryCard key={c.label} label={c.label} value={c.value} hint={c.hint} />
         ))}
       </div>
 
       {/* 2) 중단: 상세 데이터 테이블 */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 xl:gap-8">
         <SectionCard
           title={`${agg.year_month} 누적 신청 구좌 수`}
           subtitle={`${agg.month_window.start_date} ~ ${agg.month_window.end_date} (상태 전체 포함)`}
@@ -238,7 +209,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
       <SectionCard title="아침 브리핑 (복붙용)" subtitle="그대로 복사해서 공유">
         <div className="grid grid-cols-1 gap-3">
           <textarea
-            className="w-full min-h-[320px] resize-y rounded-lg border border-gray-200 bg-gray-50 p-4 font-mono text-xs leading-5 text-gray-900"
+            className="w-full min-h-[320px] resize-y rounded-lg border border-slate-200 bg-orange-50/30 p-4 font-mono text-xs leading-5 text-slate-900"
             readOnly
             value={agg.briefing.text}
           />
