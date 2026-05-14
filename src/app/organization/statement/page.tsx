@@ -50,7 +50,7 @@ export default async function OrganizationStatementPage({
   if (!memberId) {
     return (
       <div className="p-6 max-w-lg">
-        <TyLifePartnersLogo className="mb-5" />
+        <TyLifePartnersLogo className="mb-5" mobileSrc="/logo.png" />
         <p className="text-sm text-red-600">이 계정은 조직도에 연결된 권한(member_id)이 없습니다.</p>
         <Link className="text-sm text-blue-600 underline mt-2 inline-block" href="/organization">
           내 조직도로
@@ -103,7 +103,7 @@ export default async function OrganizationStatementPage({
     return (
       <div className="p-6">
         <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <TyLifePartnersLogo className="sm:pt-0.5 shrink-0" />
+          <TyLifePartnersLogo className="sm:pt-0.5 shrink-0" mobileSrc="/logo.png" />
           <div className="min-w-0 flex-1">
             <div className="text-xs text-gray-500">
               <Link className="text-blue-600 hover:underline" href={`/organization?year_month=${yearMonth}`}>
@@ -153,7 +153,7 @@ export default async function OrganizationStatementPage({
   return (
     <div className="p-4 sm:p-6">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <TyLifePartnersLogo />
+        <TyLifePartnersLogo mobileSrc="/logo.png" />
         <div className="text-xs text-gray-500 sm:text-right">
           <Link className="text-blue-600 hover:underline" href={`/organization?year_month=${yearMonth}`}>
             내 조직도

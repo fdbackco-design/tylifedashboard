@@ -110,7 +110,7 @@ export default async function OrganizationMyTreePage({
   if (!memberId) {
     return (
       <div className="p-6 max-w-lg">
-        <TyLifePartnersLogo className="mb-5" />
+        <TyLifePartnersLogo className="mb-5" mobileSrc="/logo.png" />
         <p className="text-sm text-red-600">이 계정은 조직도에 연결된 권한(member_id)이 없습니다.</p>
         <Link className="text-sm text-blue-600 underline mt-2 inline-block" href="/login">
           로그인으로 돌아가기
@@ -560,7 +560,7 @@ export default async function OrganizationMyTreePage({
       <header className="rounded-xl border border-gray-200 bg-gradient-to-b from-white to-slate-50/90 shadow-sm p-4 sm:p-5 mb-5 sm:mb-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
           <div className="shrink-0 border-b border-gray-100 pb-4 lg:border-b-0 lg:border-r lg:pr-8 lg:pb-0 lg:pt-0.5">
-            <TyLifePartnersLogo />
+            <TyLifePartnersLogo mobileSrc="/logo.png" />
           </div>
           <div className="flex min-w-0 flex-1 flex-col gap-3 lg:items-end">
             <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3 lg:max-w-4xl lg:grid-cols-3">
