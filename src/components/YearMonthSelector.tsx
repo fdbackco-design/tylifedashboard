@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useTransition } from 'react';
+import { useEffect, useMemo, useState, useTransition } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 function pad2(n: number): string {
@@ -41,9 +41,18 @@ export default function YearMonthSelector(props: {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [, startTransition] = useTransition();
+  const [isPending, startTransition] = useTransition();
+  /** URL 반영 전까지 셀렉트에 선택값을 즉시 맞춤 */
+  const [pendingYm, setPendingYm] = useState<string | null>(null);
 
-  const current = parseYearMonth(value) ?? parseYearMonth(todayValue) ?? { year: new Date().getFullYear(), month: 1 };
+  const urlYearMonth = searchParams.get('year_month');
+  const effectiveYm =
+    pendingYm ??
+    (urlYearMonth && parseYearMonth(urlYearMonth) ? urlYearMonth : null) ??
+    value;
+
+  const current =
+    parseYearMonth(effectiveYm) ?? parseYearMonth(todayValue) ?? { year: new Date().getFullYear(), month: 1 };
   const today = parseYearMonth(todayValue) ?? current;
 
   const monthOptions = useMemo(() => Array.from({ length: 12 }, (_, i) => i + 1), []);
@@ -60,9 +69,35 @@ export default function YearMonthSelector(props: {
     return `${pathname}?${qs.toString()}`;
   };
 
+  useEffect(() => {
+    if (!pendingYm) return;
+    if (urlYearMonth === pendingYm || (!urlYearMonth && value === pendingYm)) {
+      setPendingYm(null);
+    }
+  }, [urlYearMonth, value, pendingYm]);
+
+  useEffect(() => {
+    if (!isPending || !pendingYm) return;
+    const t = window.setTimeout(() => {
+      if (urlYearMonth !== pendingYm && value !== pendingYm) {
+        setPendingYm(null);
+      }
+    }, 12000);
+    return () => window.clearTimeout(t);
+  }, [isPending, pendingYm, urlYearMonth, value]);
+
   const push = (nextYearMonth: string) => {
+    if (nextYearMonth === (urlYearMonth ?? value)) {
+      setPendingYm(null);
+      return;
+    }
+    setPendingYm(nextYearMonth);
     const url = buildUrl(nextYearMonth);
-    // transition으로 UI 응답성은 유지하고, 실제 로딩 시간은 prefetch로 줄인다.
+    try {
+      router.prefetch(url);
+    } catch {
+      // ignore
+    }
     startTransition(() => {
       router.push(url);
     });
@@ -78,6 +113,21 @@ export default function YearMonthSelector(props: {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [todayValue, pathname]);
+
+  useEffect(() => {
+    const cur = parseYearMonth(value);
+    if (!cur) return;
+    const prevYm = cur.month === 1 ? toYearMonth(cur.year - 1, 12) : toYearMonth(cur.year, cur.month - 1);
+    const nextYm = cur.month === 12 ? toYearMonth(cur.year + 1, 1) : toYearMonth(cur.year, cur.month + 1);
+    try {
+      router.prefetch(buildUrl(prevYm));
+      router.prefetch(buildUrl(nextYm));
+      router.prefetch(buildUrl(value));
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, pathname, todayValue]);
 
   const onChangeYear = (yearStr: string) => {
     const y = Number(yearStr);
@@ -100,12 +150,12 @@ export default function YearMonthSelector(props: {
 
   const todayBtnClass = isCompactToolbar
     ? `shrink-0 h-9 rounded-lg border px-3 text-xs font-medium transition-colors ${
-        value === todayValue
+        effectiveYm === todayValue
           ? 'border-slate-300 bg-slate-100 text-slate-900 shadow-inner'
           : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
       }`
     : `w-full sm:w-auto px-2.5 py-1.5 rounded text-xs border ${
-        value === todayValue
+        effectiveYm === todayValue
           ? 'bg-slate-800 text-white border-slate-800'
           : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
       }`;
@@ -118,8 +168,11 @@ export default function YearMonthSelector(props: {
     ? 'h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-800 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200/80'
     : 'h-9 sm:h-7 w-full px-2 rounded text-xs border bg-white text-gray-700 border-gray-300';
 
+  const busy = isPending || (pendingYm != null && pendingYm !== (urlYearMonth ?? value));
+  const statusId = 'year-month-selector-status';
+
   return (
-    <div className={outerClass}>
+    <div className={outerClass} aria-busy={busy} aria-describedby={busy ? statusId : undefined}>
       <div
         className={
           isCompactToolbar
@@ -129,10 +182,11 @@ export default function YearMonthSelector(props: {
       >
         <button
           type="button"
+          disabled={busy}
           onClick={() => push(todayValue)}
           onMouseEnter={() => router.prefetch(buildUrl(todayValue))}
           onFocus={() => router.prefetch(buildUrl(todayValue))}
-          className={todayBtnClass}
+          className={`${todayBtnClass} disabled:pointer-events-none disabled:opacity-55`}
         >
           {todayLabel ?? '오늘(기준월)'}
         </button>
@@ -140,8 +194,9 @@ export default function YearMonthSelector(props: {
         <div className={selectShellClass}>
           <select
             value={String(current.year)}
+            disabled={busy}
             onChange={(e) => onChangeYear(e.target.value)}
-            className={selectClass}
+            className={`${selectClass} disabled:cursor-wait disabled:opacity-60`}
             aria-label="연도 선택"
           >
             {years.map((y) => (
@@ -153,8 +208,9 @@ export default function YearMonthSelector(props: {
 
           <select
             value={pad2(current.month)}
+            disabled={busy}
             onChange={(e) => onChangeMonth(e.target.value)}
-            className={selectClass}
+            className={`${selectClass} disabled:cursor-wait disabled:opacity-60`}
             aria-label="월 선택"
           >
             {monthOptions.map((m) => (
@@ -164,6 +220,20 @@ export default function YearMonthSelector(props: {
             ))}
           </select>
         </div>
+
+        {busy ? (
+          <div
+            id={statusId}
+            className="flex w-full min-w-0 items-center gap-2 rounded-lg border border-orange-100 bg-orange-50/90 px-2.5 py-1.5 text-xs font-medium text-orange-900 sm:w-auto sm:max-w-[14rem]"
+            role="status"
+          >
+            <span
+              className="inline-block size-3.5 shrink-0 animate-spin rounded-full border-2 border-orange-200 border-t-orange-600"
+              aria-hidden
+            />
+            <span className="min-w-0 truncate">조직도 불러오는 중…</span>
+          </div>
+        ) : null}
       </div>
     </div>
   );
