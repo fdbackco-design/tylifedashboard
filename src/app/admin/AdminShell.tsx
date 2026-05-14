@@ -2,9 +2,23 @@
 /* eslint-disable jsx-a11y/no-static-element-interactions */
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
+
+function ShieldMini(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className={props.className ?? 'h-3 w-3'}>
+      <path
+        d="M12 3l7 3v6c0 4.5-3.5 8.5-7 9-3.5-.5-7-4.5-7-9V6l7-3z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 type NavItem = { href: string; label: string };
 
@@ -119,21 +133,35 @@ export function AdminShell(props: {
   return (
     <div className="min-h-screen md:flex">
       {/* 모바일 상단바 */}
-      <header className="md:hidden fixed top-0 left-0 right-0 z-40 h-14 bg-white/90 backdrop-blur border-b border-gray-200">
-        <div className="h-full px-4 flex items-center gap-3">
+      <header className="fixed left-0 right-0 top-0 z-40 h-14 border-b border-slate-200/90 bg-white/90 backdrop-blur md:hidden">
+        <div className="flex h-full items-center gap-3 px-4">
           <button
             type="button"
             aria-label={open ? '메뉴 닫기' : '메뉴 열기'}
-            className="inline-flex items-center justify-center h-10 w-10 -ml-2 rounded-md hover:bg-gray-100 active:bg-gray-200"
+            className="-ml-2 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md hover:bg-slate-100 active:bg-slate-200"
             onClick={() => setOpen((v) => !v)}
           >
             {open ? <CloseIcon /> : <HamburgerIcon />}
           </button>
-          <div className="min-w-0">
-            <div className="text-sm font-semibold text-gray-900 truncate">
-              TY Life Dashboard
-            </div>
-            <div className="text-xs text-gray-500 truncate">관리자</div>
+          <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
+            <Link
+              href="/admin"
+              className="block min-h-[1.75rem] min-w-0 max-w-[min(100%,12rem)] shrink"
+              prefetch={true}
+            >
+              <Image
+                src="/logo.png"
+                alt="TY Life Partners"
+                width={200}
+                height={56}
+                priority
+                className="h-7 max-h-8 w-auto max-w-full object-contain object-left sm:h-8"
+              />
+            </Link>
+            <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 ring-1 ring-slate-900/[0.04]">
+              <ShieldMini />
+              Admin
+            </span>
           </div>
         </div>
       </header>
