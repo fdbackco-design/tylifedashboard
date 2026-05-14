@@ -557,44 +557,49 @@ export default async function OrganizationMyTreePage({
 
   return (
     <div className="p-3 sm:p-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4 sm:mb-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4 min-w-0">
-          <TyLifePartnersLogo className="sm:pt-0.5" />
-          <div className="min-w-0">
-            <h2 className="text-xl sm:text-2xl font-bold text-gray-800">내 조직도</h2>
-            <p className="text-sm text-gray-500 mt-0.5">
-              기준 {label_year_month} · {start_date}~{end_date}
-            </p>
+      <header className="rounded-xl border border-gray-200 bg-gradient-to-b from-white to-slate-50/90 shadow-sm p-4 sm:p-5 mb-5 sm:mb-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
+          <div className="shrink-0 border-b border-gray-100 pb-4 lg:border-b-0 lg:border-r lg:pr-8 lg:pb-0 lg:pt-0.5">
+            <TyLifePartnersLogo />
           </div>
-        </div>
-        <div className="flex flex-col gap-2 sm:items-end">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 w-full">
-            <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
-              <span className="text-gray-500">선택달 준비·대기 건수</span>
-              <span className="ml-2 font-bold text-gray-800">
-                {periodPendingTreeContractCount.toLocaleString('ko-KR')}건
-              </span>
-              <div className="text-[11px] text-gray-400 mt-0.5">
-                기준 {label_year_month} · {start_date}~{end_date}
+          <div className="flex min-w-0 flex-1 flex-col gap-3 lg:items-end">
+            <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3 lg:max-w-4xl lg:grid-cols-3">
+              <div className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm shadow-sm">
+                <span className="text-gray-500">선택달 준비·대기 건수</span>
+                <span className="ml-2 font-bold text-gray-800">
+                  {periodPendingTreeContractCount.toLocaleString('ko-KR')}건
+                </span>
+                <div className="mt-0.5 text-[11px] text-gray-400">
+                  기준 {label_year_month} · {start_date}~{end_date}
+                </div>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm shadow-sm">
+                <span className="text-gray-500">누적 가입 구좌 수</span>
+                <span className="ml-2 font-bold text-gray-800">{totalJoinUnits.toLocaleString('ko-KR')}구좌</span>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm shadow-sm sm:col-span-2 lg:col-span-1">
+                <span className="text-gray-500">선택달 가입 구좌 수</span>
+                <span className="ml-2 font-bold text-gray-800">{periodJoinUnits.toLocaleString('ko-KR')}구좌</span>
+                <div className="mt-0.5 text-[11px] text-gray-400">
+                  기준 {label_year_month} · {start_date}~{end_date}
+                </div>
               </div>
             </div>
-            <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
-              <span className="text-gray-500">누적 가입 구좌 수</span>
-              <span className="ml-2 font-bold text-gray-800">{totalJoinUnits.toLocaleString('ko-KR')}구좌</span>
-            </div>
-            <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm shadow-sm">
-              <span className="text-gray-500">선택달 가입 구좌 수</span>
-              <span className="ml-2 font-bold text-gray-800">{periodJoinUnits.toLocaleString('ko-KR')}구좌</span>
-              <div className="text-[11px] text-gray-400 mt-0.5">
-                기준 {label_year_month} · {start_date}~{end_date}
-              </div>
+            <div className="flex w-full justify-start border-t border-gray-100 pt-3 lg:justify-end lg:border-t-0 lg:pt-0">
+              <AccountActionsClient
+                showChangePassword={false}
+                redirectAfterLogout={`/login?redirect=${encodeURIComponent(`/organization?year_month=${yearMonth}`)}`}
+              />
             </div>
           </div>
-          <AccountActionsClient
-            showChangePassword={false}
-            redirectAfterLogout={`/login?redirect=${encodeURIComponent(`/organization?year_month=${yearMonth}`)}`}
-          />
         </div>
+      </header>
+
+      <div className="mb-4 sm:mb-5">
+        <h2 className="text-xl font-bold text-gray-800 sm:text-2xl">내 조직도</h2>
+        <p className="mt-0.5 text-sm text-gray-500">
+          기준 {label_year_month} · {start_date}~{end_date}
+        </p>
       </div>
 
       <YearMonthSelector value={yearMonth} todayValue={defaultYearMonth} years={yearsForPicker} />
