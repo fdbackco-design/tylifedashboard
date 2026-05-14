@@ -61,6 +61,8 @@ function CloseIcon(props: { className?: string }) {
 function SidebarContents(props: {
   navItems: NavItem[];
   onNavigate?: () => void;
+  /** 데스크톱 사이드바: TY Life 텍스트 대신 파트너 로고 */
+  brandAsLogo?: boolean;
 }) {
   const pathname = usePathname();
 
@@ -77,7 +79,25 @@ function SidebarContents(props: {
   return (
     <aside className="h-full w-full bg-slate-800 text-slate-200 flex flex-col">
       <div className="px-5 py-5 border-b border-slate-700">
-        <h1 className="text-lg font-bold text-white">TY Life</h1>
+        {props.brandAsLogo ? (
+          <Link
+            href="/admin"
+            prefetch={true}
+            onClick={props.onNavigate}
+            className="block outline-none ring-offset-2 ring-offset-slate-800 focus-visible:ring-2 focus-visible:ring-orange-400/80"
+          >
+            <Image
+              src="/ty-life-partners-logo.png"
+              alt="TY Life Partners"
+              width={440}
+              height={176}
+              priority
+              className="h-10 w-auto max-w-[9.25rem] object-contain object-left"
+            />
+          </Link>
+        ) : (
+          <h1 className="text-lg font-bold text-white">TY Life</h1>
+        )}
         <p className="text-xs text-slate-400 mt-0.5">계약·정산 관리</p>
       </div>
       <nav className="flex-1 px-3 py-4 space-y-1">
@@ -169,7 +189,7 @@ export function AdminShell(props: {
       {/* 데스크톱 고정 사이드바 */}
       <div className="hidden md:block md:w-56 md:shrink-0">
         <div className="h-full w-56">
-          <SidebarContents navItems={props.navItems} />
+          <SidebarContents navItems={props.navItems} brandAsLogo />
         </div>
       </div>
 
