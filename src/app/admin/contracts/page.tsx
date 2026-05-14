@@ -326,7 +326,6 @@ export default async function ContractsPage({ searchParams }: PageProps) {
                   '순번',
                   '가입일',
                   '고객명',
-                  '소속',
                   '담당사원',
                   '물품명',
                   '구좌수',
@@ -345,7 +344,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
             <tbody className="divide-y divide-gray-100">
               {aggregated.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
+                  <td colSpan={8} className="px-4 py-8 text-center text-gray-400">
                     계약 데이터가 없습니다.
                   </td>
                 </tr>
@@ -380,9 +379,6 @@ export default async function ContractsPage({ searchParams }: PageProps) {
                           </span>
                         )}
                       </div>
-                    </td>
-                    <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                      {c.affiliation_name ?? '-'}
                     </td>
                     <td className="px-4 py-3 text-gray-700">
                       {(c as { sales_link_status?: string }).sales_link_status ===
