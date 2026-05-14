@@ -330,7 +330,6 @@ export default async function ContractsPage({ searchParams }: PageProps) {
                   '구좌수',
                   '가입방법',
                   '상태',
-                  '취소반품',
                 ].map((h) => (
                   <th
                     key={h}
@@ -344,7 +343,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
             <tbody className="divide-y divide-gray-100">
               {aggregated.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-gray-400">
+                  <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
                     계약 데이터가 없습니다.
                   </td>
                 </tr>
@@ -403,9 +402,9 @@ export default async function ContractsPage({ searchParams }: PageProps) {
                     <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
                       {c.join_method}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="min-w-[7rem] whitespace-nowrap px-4 py-3">
                       <span
-                        className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
+                        className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${
                           displayStatus === '렌탈 미충족'
                             ? 'bg-orange-100 text-orange-800'
                             : (STATUS_COLORS[displayStatus as ContractStatus] ?? '')
@@ -415,13 +414,6 @@ export default async function ContractsPage({ searchParams }: PageProps) {
                           ? '렌탈 미충족'
                           : (STATUS_LABELS[displayStatus as ContractStatus] ?? displayStatus)}
                       </span>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {c.is_cancelled ? (
-                        <span className="text-red-600 font-bold">Y</span>
-                      ) : (
-                        <span className="text-gray-300">-</span>
-                      )}
                     </td>
                   </tr>
                 );
