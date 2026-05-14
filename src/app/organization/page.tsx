@@ -555,64 +555,101 @@ export default async function OrganizationMyTreePage({
     settlementWindow: { start_date, end_date, label_year_month },
   });
 
+  const [basisYear, basisMonth] = label_year_month.split('-');
+
   return (
     <div className="p-3 sm:p-6">
-      <header className="rounded-xl border border-gray-200 bg-gradient-to-b from-white to-slate-50/90 shadow-sm p-4 sm:p-5 mb-5 sm:mb-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
-          <div className="shrink-0 border-b border-gray-100 pb-4 lg:border-b-0 lg:border-r lg:pr-8 lg:pb-0 lg:pt-0.5">
-            <TyLifePartnersLogo mobileSrc="/logo.png" />
+      <header className="mb-4 overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.035] sm:mb-5">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-100/90 bg-gradient-to-r from-slate-50 to-white px-3 py-2 sm:px-4 sm:py-2.5">
+          <TyLifePartnersLogo mobileSrc="/logo.png" density="compact" />
+          <div className="min-w-0 text-right">
+            <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">정산 기준월</p>
+            <p className="text-base font-semibold tabular-nums tracking-tight text-slate-900 sm:text-lg">
+              {basisYear}년 {basisMonth}월
+            </p>
+            <p className="mt-0.5 hidden text-[11px] text-slate-500 sm:block">
+              {start_date} ~ {end_date}
+            </p>
           </div>
-          <div className="flex min-w-0 flex-1 flex-col gap-3 lg:items-end">
-            <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3 lg:max-w-4xl lg:grid-cols-3">
-              <div className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm shadow-sm">
-                <span className="text-gray-500">선택달 준비·대기 건수</span>
-                <span className="ml-2 font-bold text-gray-800">
-                  {periodPendingTreeContractCount.toLocaleString('ko-KR')}건
-                </span>
-                <div className="mt-0.5 text-[11px] text-gray-400">
-                  기준 {label_year_month} · {start_date}~{end_date}
-                </div>
-              </div>
-              <div className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm shadow-sm">
-                <span className="text-gray-500">누적 가입 구좌 수</span>
-                <span className="ml-2 font-bold text-gray-800">{totalJoinUnits.toLocaleString('ko-KR')}구좌</span>
-              </div>
-              <div className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm shadow-sm sm:col-span-2 lg:col-span-1">
-                <span className="text-gray-500">선택달 가입 구좌 수</span>
-                <span className="ml-2 font-bold text-gray-800">{periodJoinUnits.toLocaleString('ko-KR')}구좌</span>
-                <div className="mt-0.5 text-[11px] text-gray-400">
-                  기준 {label_year_month} · {start_date}~{end_date}
-                </div>
-              </div>
-            </div>
-            <div className="flex w-full justify-start border-t border-gray-100 pt-3 lg:justify-end lg:border-t-0 lg:pt-0">
-              <AccountActionsClient
-                showChangePassword={false}
-                showPrivacyPolicy={false}
-                redirectAfterLogout={`/login?redirect=${encodeURIComponent(`/organization?year_month=${yearMonth}`)}`}
-              />
-            </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-1.5 p-2 sm:gap-2 sm:p-3">
+          <div className="flex min-h-0 flex-col rounded-xl border border-slate-200/85 bg-gradient-to-b from-white to-slate-50/80 px-2 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)] sm:px-2.5 sm:py-2.5">
+            <p className="text-[10px] font-medium leading-tight text-slate-400 sm:text-[11px] sm:leading-snug">
+              <span className="sm:hidden">준비·대기</span>
+              <span className="hidden sm:inline">선택달 준비·대기</span>
+            </p>
+            <p className="mt-1.5 text-lg font-semibold tabular-nums tracking-tight text-slate-900 sm:mt-2 sm:text-xl">
+              {periodPendingTreeContractCount.toLocaleString('ko-KR')}
+              <span className="ml-0.5 text-[11px] font-semibold text-slate-500 sm:text-xs">건</span>
+            </p>
+            <p className="mt-auto pt-1 text-[9px] leading-tight text-slate-400 sm:text-[10px]">{label_year_month}</p>
           </div>
+          <div className="flex min-h-0 flex-col rounded-xl border border-slate-200/85 bg-gradient-to-b from-white to-slate-50/80 px-2 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)] sm:px-2.5 sm:py-2.5">
+            <p className="text-[10px] font-medium leading-tight text-slate-400 sm:text-[11px]">
+              <span className="sm:hidden">누적 가입</span>
+              <span className="hidden sm:inline">누적 가입 구좌</span>
+            </p>
+            <p className="mt-1.5 text-lg font-semibold tabular-nums tracking-tight text-slate-900 sm:mt-2 sm:text-xl">
+              {totalJoinUnits.toLocaleString('ko-KR')}
+              <span className="ml-0.5 text-[11px] font-semibold text-slate-500 sm:text-xs">구좌</span>
+            </p>
+          </div>
+          <div className="flex min-h-0 flex-col rounded-xl border border-slate-200/85 bg-gradient-to-b from-white to-slate-50/80 px-2 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)] sm:px-2.5 sm:py-2.5">
+            <p className="text-[10px] font-medium leading-tight text-slate-400 sm:text-[11px] sm:leading-snug">
+              <span className="sm:hidden">당월 가입</span>
+              <span className="hidden sm:inline">선택달 가입 구좌</span>
+            </p>
+            <p className="mt-1.5 text-lg font-semibold tabular-nums tracking-tight text-slate-900 sm:mt-2 sm:text-xl">
+              {periodJoinUnits.toLocaleString('ko-KR')}
+              <span className="ml-0.5 text-[11px] font-semibold text-slate-500 sm:text-xs">구좌</span>
+            </p>
+            <p className="mt-auto pt-1 text-[9px] leading-tight text-slate-400 sm:text-[10px]">{label_year_month}</p>
+          </div>
+        </div>
+
+        <div className="flex justify-end border-t border-slate-100 bg-slate-50/40 px-2 py-2 sm:px-3 sm:py-2">
+          <AccountActionsClient
+            showChangePassword={false}
+            showPrivacyPolicy={false}
+            redirectAfterLogout={`/login?redirect=${encodeURIComponent(`/organization?year_month=${yearMonth}`)}`}
+          />
         </div>
       </header>
 
-      <div className="mb-4 sm:mb-5">
-        <h2 className="text-xl font-bold text-gray-800 sm:text-2xl">내 조직도</h2>
-        <p className="mt-0.5 text-sm text-gray-500">
-          기준 {label_year_month} · {start_date}~{end_date}
+      <div className="mb-3 sm:mb-4">
+        <h2 className="text-lg font-bold tracking-tight text-slate-900 sm:text-xl">내 조직도</h2>
+        <p className="mt-0.5 text-xs text-slate-500 sm:text-sm">
+          정산 기간 {start_date} ~ {end_date}
         </p>
       </div>
 
-      <YearMonthSelector value={yearMonth} todayValue={defaultYearMonth} years={yearsForPicker} />
-
-      <div className="mb-4 flex justify-end">
-        <Link
-          href={`/organization/statement?year_month=${encodeURIComponent(yearMonth)}`}
-          className="inline-flex items-center px-3 py-2 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
-        >
-          명세서 보기
-        </Link>
-      </div>
+      <section className="mb-4 overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-3 shadow-sm ring-1 ring-slate-900/[0.035] sm:mb-5 sm:p-4">
+        <div className="mb-3 flex flex-col gap-1 border-b border-slate-100 pb-3 sm:flex-row sm:items-baseline sm:justify-between">
+          <p className="text-[13px] font-semibold tabular-nums text-slate-800 sm:text-sm">
+            {basisYear}년 {basisMonth}월 기준
+          </p>
+          <p className="text-[11px] text-slate-500 sm:text-xs">
+            월별 정산 구간에 맞춰 조직도를 불러옵니다.
+          </p>
+        </div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3">
+          <YearMonthSelector
+            layout="compact-toolbar"
+            className="min-w-0 flex-1 sm:min-w-[min(100%,22rem)]"
+            value={yearMonth}
+            todayValue={defaultYearMonth}
+            years={yearsForPicker}
+            todayLabel="오늘 기준월"
+          />
+          <Link
+            href={`/organization/statement?year_month=${encodeURIComponent(yearMonth)}`}
+            className="inline-flex h-11 w-full shrink-0 items-center justify-center rounded-xl bg-gradient-to-b from-orange-500 to-orange-600 px-4 text-sm font-semibold text-white shadow-md shadow-orange-900/20 ring-1 ring-orange-400/30 transition hover:from-orange-600 hover:to-orange-700 hover:shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 sm:h-10 sm:w-auto sm:min-w-[8.5rem]"
+          >
+            명세서 보기
+          </Link>
+        </div>
+      </section>
 
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
         <OrgTree

@@ -7,6 +7,8 @@ export type TyLifePartnersLogoProps = {
   priority?: boolean;
   /** 지정 시 640px 미만에서만 이 이미지를 쓰고, `sm` 이상에서는 기본 TY Life Partners 로고를 씁니다. */
   mobileSrc?: string;
+  /** `header`에서 모바일 높이·폭을 줄일 때 */
+  density?: 'default' | 'compact';
 };
 
 const variantWrap: Record<NonNullable<TyLifePartnersLogoProps['variant']>, string> = {
@@ -14,12 +16,19 @@ const variantWrap: Record<NonNullable<TyLifePartnersLogoProps['variant']>, strin
   header: 'w-full max-w-[200px] sm:max-w-[220px]',
 };
 
+const headerCompactWrap =
+  'w-full max-h-[38px] max-w-[min(100%,148px)] sm:max-h-none sm:max-w-[200px] lg:max-w-[220px]';
+
 export default function TyLifePartnersLogo({
   variant = 'header',
   className = '',
   priority = false,
   mobileSrc,
+  density = 'default',
 }: TyLifePartnersLogoProps) {
+  const wrap =
+    variant === 'header' && density === 'compact' ? headerCompactWrap : variantWrap[variant];
+
   const desktop = (
     <Image
       src="/ty-life-partners-logo.png"
@@ -32,7 +41,7 @@ export default function TyLifePartnersLogo({
   );
 
   return (
-    <div className={`${variantWrap[variant]} ${className}`.trim()}>
+    <div className={`${wrap} ${className}`.trim()}>
       {mobileSrc ? (
         <>
           <Image
@@ -40,7 +49,7 @@ export default function TyLifePartnersLogo({
             alt="TY Life Partners"
             width={440}
             height={176}
-            className="h-auto w-full object-contain object-left sm:hidden"
+            className={`h-auto w-full object-contain object-left sm:hidden ${density === 'compact' ? 'max-h-[38px]' : ''}`}
             priority={priority}
           />
           {desktop}

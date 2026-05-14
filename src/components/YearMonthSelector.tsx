@@ -32,8 +32,12 @@ export default function YearMonthSelector(props: {
   keepQuery?: Record<string, string | null | undefined>;
   /** 라벨 커스터마이즈 */
   todayLabel?: string;
+  /** 기본: 기존 레이아웃. `compact-toolbar`: 한 줄·줄바꿈 친화 툴바(조직 페이지 등) */
+  layout?: 'default' | 'compact-toolbar';
+  /** 최외곽 래퍼 클래스 */
+  className?: string;
 }) {
-  const { value, todayValue, years, keepQuery, todayLabel } = props;
+  const { value, todayValue, years, keepQuery, todayLabel, layout = 'default', className = '' } = props;
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -88,28 +92,56 @@ export default function YearMonthSelector(props: {
     push(toYearMonth(current.year, m));
   };
 
+  const isCompactToolbar = layout === 'compact-toolbar';
+
+  const outerClass = isCompactToolbar
+    ? ['mb-0', className].filter(Boolean).join(' ')
+    : ['-mx-3 px-3 sm:mx-0 sm:px-0 mb-4 sm:mb-5', className].filter(Boolean).join(' ');
+
+  const todayBtnClass = isCompactToolbar
+    ? `shrink-0 h-9 rounded-lg border px-3 text-xs font-medium transition-colors ${
+        value === todayValue
+          ? 'border-slate-300 bg-slate-100 text-slate-900 shadow-inner'
+          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+      }`
+    : `w-full sm:w-auto px-2.5 py-1.5 rounded text-xs border ${
+        value === todayValue
+          ? 'bg-slate-800 text-white border-slate-800'
+          : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
+      }`;
+
+  const selectShellClass = isCompactToolbar
+    ? 'flex min-w-0 flex-1 items-center gap-2 sm:flex-initial sm:max-w-md'
+    : 'grid grid-cols-2 gap-2 w-full sm:w-auto';
+
+  const selectClass = isCompactToolbar
+    ? 'h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-800 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200/80'
+    : 'h-9 sm:h-7 w-full px-2 rounded text-xs border bg-white text-gray-700 border-gray-300';
+
   return (
-    <div className="-mx-3 px-3 sm:mx-0 sm:px-0 mb-4 sm:mb-5">
-      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+    <div className={outerClass}>
+      <div
+        className={
+          isCompactToolbar
+            ? 'flex flex-wrap items-center gap-2'
+            : 'flex flex-col gap-2 sm:flex-row sm:items-center'
+        }
+      >
         <button
           type="button"
           onClick={() => push(todayValue)}
           onMouseEnter={() => router.prefetch(buildUrl(todayValue))}
           onFocus={() => router.prefetch(buildUrl(todayValue))}
-          className={`w-full sm:w-auto px-2.5 py-1.5 rounded text-xs border ${
-            value === todayValue
-              ? 'bg-slate-800 text-white border-slate-800'
-              : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
-          }`}
+          className={todayBtnClass}
         >
           {todayLabel ?? '오늘(기준월)'}
         </button>
 
-        <div className="grid grid-cols-2 gap-2 w-full sm:w-auto">
+        <div className={selectShellClass}>
           <select
             value={String(current.year)}
             onChange={(e) => onChangeYear(e.target.value)}
-            className="h-9 sm:h-7 w-full px-2 rounded text-xs border bg-white text-gray-700 border-gray-300"
+            className={selectClass}
             aria-label="연도 선택"
           >
             {years.map((y) => (
@@ -122,7 +154,7 @@ export default function YearMonthSelector(props: {
           <select
             value={pad2(current.month)}
             onChange={(e) => onChangeMonth(e.target.value)}
-            className="h-9 sm:h-7 w-full px-2 rounded text-xs border bg-white text-gray-700 border-gray-300"
+            className={selectClass}
             aria-label="월 선택"
           >
             {monthOptions.map((m) => (
