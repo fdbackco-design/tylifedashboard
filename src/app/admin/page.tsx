@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
-import AdminDashboardMonthNav from './AdminDashboardMonthNav';
+import YearMonthSelector from '@/components/YearMonthSelector';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { buildDashboardAggregations } from '@/lib/dashboard/aggregations';
 import { getSettlementWindowSeoul } from '@/lib/settlement/settlement-window';
@@ -122,17 +122,13 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
 
   const agg = await buildDashboardAggregations({ db, year_month });
 
-  // 월 목록: 현재 기준월(year_month)을 맨 앞에 두고 -1개월씩 나열
-  const months: string[] = [];
-  {
-    const [ys, ms] = year_month.split('-');
-    const baseY = parseInt(ys, 10);
-    const baseM = parseInt(ms, 10); // 1-12
-    for (let i = 0; i < 12; i++) {
-      const d = new Date(baseY, baseM - 1 - i, 1);
-      months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-    }
-  }
+  const yearsForPicker = (() => {
+    const base = parseInt(year_month.slice(0, 4), 10);
+    const out: number[] = [];
+    for (let y = base; y >= base - 4; y--) out.push(y);
+    return out;
+  })();
+
   const summaryCards = [
     {
       label: `${agg.year_month} 누적 신청 구좌 수`,
@@ -168,8 +164,17 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
         </div>
       </header>
 
-      {/* 월 선택 (집계 기준월) — /admin?year_month=YYYY-MM */}
-      <AdminDashboardMonthNav yearMonth={year_month} defaultYearMonth={defaultYearMonth} months={months} />
+      {/* 집계 기준월 — /organization과 동일 YearMonthSelector (연·월 분리) */}
+      <section className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-3 shadow-sm ring-1 ring-slate-900/[0.035] sm:p-4">
+        <YearMonthSelector
+          layout="compact-toolbar"
+          className="min-w-0"
+          value={year_month}
+          todayValue={defaultYearMonth}
+          years={yearsForPicker}
+          todayLabel="오늘 기준월"
+        />
+      </section>
 
       {/* 1) 상단: 핵심 요약 카드 — 모바일 2×2, 데스크톱 4열 */}
       <div className="grid grid-cols-2 gap-1.5 lg:grid-cols-4 lg:gap-3">
