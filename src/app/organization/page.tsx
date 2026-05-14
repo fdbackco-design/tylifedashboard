@@ -588,6 +588,7 @@ export default async function OrganizationMyTreePage({
             <div className="flex w-full justify-start border-t border-gray-100 pt-3 lg:justify-end lg:border-t-0 lg:pt-0">
               <AccountActionsClient
                 showChangePassword={false}
+                showPrivacyPolicy={false}
                 redirectAfterLogout={`/login?redirect=${encodeURIComponent(`/organization?year_month=${yearMonth}`)}`}
               />
             </div>

@@ -3,9 +3,15 @@
 import { useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
-export default function AccountActionsClient(props: { redirectAfterLogout?: string; showChangePassword?: boolean }) {
+export default function AccountActionsClient(props: {
+  redirectAfterLogout?: string;
+  showChangePassword?: boolean;
+  /** 기본 true. /organization 등에서만 false로 둘 수 있음 */
+  showPrivacyPolicy?: boolean;
+}) {
   const supabase = useMemo(() => createClient(), []);
   const showChangePassword = props.showChangePassword ?? true;
+  const showPrivacyPolicy = props.showPrivacyPolicy ?? true;
 
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
@@ -79,12 +85,14 @@ export default function AccountActionsClient(props: { redirectAfterLogout?: stri
       {message ? (
         <span className={`text-xs ${message.ok ? 'text-emerald-700' : 'text-red-600'}`}>{message.text}</span>
       ) : null}
-      <a
-        href="/privacy"
-        className="px-3 py-1.5 rounded text-xs border bg-white text-gray-700 border-gray-300 hover:border-gray-400"
-      >
-        개인정보처리방침
-      </a>
+      {showPrivacyPolicy ? (
+        <a
+          href="/privacy"
+          className="px-3 py-1.5 rounded text-xs border bg-white text-gray-700 border-gray-300 hover:border-gray-400"
+        >
+          개인정보처리방침
+        </a>
+      ) : null}
       {showChangePassword ? (
         <button
           type="button"
