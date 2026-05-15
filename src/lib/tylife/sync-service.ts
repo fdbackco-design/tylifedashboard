@@ -89,14 +89,17 @@ function getSeoulTodayYmd(): string {
   return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
-function minusOneMonthYmd(ymd: string): string {
+/** 동기화 시 join_date 컷오프: 서울 오늘로부터 이 일 수보다 오래된 목록 항목은 스킵 */
+const SYNC_JOIN_DATE_LOOKBACK_DAYS = 21;
+
+function minusDaysYmd(ymd: string, days: number): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
   if (!m) return '';
   const y = parseInt(m[1], 10);
   const mo = parseInt(m[2], 10);
   const d = parseInt(m[3], 10);
   const dt = new Date(y, mo - 1, d);
-  dt.setMonth(dt.getMonth() - 1);
+  dt.setDate(dt.getDate() - days);
   const yy = dt.getFullYear();
   const mm = String(dt.getMonth() + 1).padStart(2, '0');
   const dd = String(dt.getDate()).padStart(2, '0');
@@ -960,10 +963,10 @@ export async function syncContractPage(
   const listHtml = apiRes.data?.listHtml ?? '';
   const itemsAll = parseContractListHtml(listHtml);
 
-  // 성능 최적화(요구): 오늘(Seoul) 기준 최근 1개월보다 오래된 가입일(join_date)의 계약은 더 이상 수집하지 않는다.
+  // 성능 최적화(요구): 오늘(Seoul) 기준 최근 3주(21일)보다 오래된 가입일(join_date)의 계약은 더 이상 수집하지 않는다.
   // - 페이지 탐색 자체를 조기 종료해, UI 동기화 시간이 과도하게 늘어나는 것을 방지한다.
   const todayYmd = getSeoulTodayYmd();
-  const cutoffYmd = todayYmd ? minusOneMonthYmd(todayYmd) : '';
+  const cutoffYmd = todayYmd ? minusDaysYmd(todayYmd, SYNC_JOIN_DATE_LOOKBACK_DAYS) : '';
   const items =
     cutoffYmd === ''
       ? itemsAll
