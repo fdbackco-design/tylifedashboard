@@ -36,12 +36,6 @@ function DataTable(props: {
 }) {
   const { rows, showLatestJoinDate, showUnitBar = true } = props;
   const maxUnits = showUnitBar ? rows.reduce((m, r) => Math.max(m, r.unit_sum), 0) : 0;
-  const badgeForRank = (idx: number) => {
-    if (idx === 0) return '🥇';
-    if (idx === 1) return '🥈';
-    if (idx === 2) return '🥉';
-    return null;
-  };
   const colSpan = showLatestJoinDate ? 4 : 3;
 
   return (
@@ -64,15 +58,12 @@ function DataTable(props: {
                 <td className="px-4 py-2 text-gray-500 whitespace-nowrap">{r.parent_name}</td>
                 <td className="px-4 py-2 text-gray-900 whitespace-nowrap font-medium">
                   <span className="inline-flex items-center gap-2">
-                    {badgeForRank(idx) ? (
-                      <span className="text-base" aria-label={`rank-${idx + 1}`}>
-                        {badgeForRank(idx)}
-                      </span>
-                    ) : (
-                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-[11px] text-gray-600 tabular-nums">
-                        {idx + 1}
-                      </span>
-                    )}
+                    <span
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-[11px] text-gray-600 tabular-nums"
+                      aria-label={`순위 ${idx + 1}위`}
+                    >
+                      {idx + 1}
+                    </span>
                     <span className="font-medium">{r.member_name}</span>
                   </span>
                 </td>
@@ -118,13 +109,6 @@ function DataTable(props: {
 }
 
 function DirectPerfTable(props: { rows: DashboardDirectPerfRow[] }) {
-  const badgeForRank = (idx: number) => {
-    if (idx === 0) return '🥇';
-    if (idx === 1) return '🥈';
-    if (idx === 2) return '🥉';
-    return null;
-  };
-
   return (
     <div className="overflow-auto rounded-lg border border-slate-200/90 max-h-[420px] lg:max-h-[520px]">
       <table className="min-w-full text-sm">
@@ -136,17 +120,16 @@ function DirectPerfTable(props: { rows: DashboardDirectPerfRow[] }) {
         </thead>
         <tbody>
           {props.rows.length ? (
-            props.rows.map((r, idx) => {
-              const medal = badgeForRank(idx);
-              return (
+            props.rows.map((r, idx) => (
               <tr key={`${r.member_name}-${idx}`} className="border-t border-gray-100">
                 <td className="px-4 py-2 text-gray-900 whitespace-nowrap font-medium">
                   <span className="inline-flex items-center gap-2">
-                    {medal ? (
-                      <span className="text-base" aria-label={`순위 ${idx + 1}위`}>
-                        {medal}
-                      </span>
-                    ) : null}
+                    <span
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-[11px] text-gray-600 tabular-nums"
+                      aria-label={`순위 ${idx + 1}위`}
+                    >
+                      {idx + 1}
+                    </span>
                     <span>{r.member_name}</span>
                   </span>
                 </td>
@@ -154,8 +137,7 @@ function DirectPerfTable(props: { rows: DashboardDirectPerfRow[] }) {
                   {r.unit_sum.toLocaleString()}구좌
                 </td>
               </tr>
-            );
-            })
+            ))
           ) : (
             <tr>
               <td className="px-4 py-6 text-center text-gray-400" colSpan={2}>
