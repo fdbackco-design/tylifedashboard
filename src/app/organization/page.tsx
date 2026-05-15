@@ -575,9 +575,8 @@ export default async function OrganizationMyTreePage({
             className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 rounded-full bg-orange-200/25 blur-2xl sm:-right-4 sm:-top-6"
             aria-hidden
           />
-          <p className="relative text-[1.35rem] font-bold leading-snug tracking-tight text-slate-900 sm:text-2xl sm:leading-tight">
-            <span className="text-slate-900">{greetingDisplayName}</span>
-            <span className="text-orange-700">님</span>
+          <p className="relative text-[1.35rem] font-bold leading-snug tracking-tight text-orange-700 sm:text-2xl sm:leading-tight">
+            {greetingDisplayName}님, 안녕하세요.
           </p>
         </div>
         <div className="flex items-center justify-between gap-3 border-b border-slate-100/90 bg-gradient-to-r from-slate-50 to-white px-3 py-2 sm:px-4 sm:py-2.5">
