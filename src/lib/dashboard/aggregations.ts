@@ -44,6 +44,8 @@ export type DashboardAggregations = {
   monthlyTotalSlots: DashboardAggResult;
   dailyTotalSlots: DashboardAggResult;
   monthlyJoinedSlots: DashboardAggResult;
+  /** 기준월 정산 윈도우 + 가입 보류(해피콜 부재/계약취소 또는 렌탈신청번호 일치) */
+  monthlyJoinDeferredSlots: DashboardAggResult;
   allTimeJoinedSlots: DashboardAggResult;
   /** 기준월 정산 윈도우 + 가입완료, 구좌는 계약의 sales_member_id(직접) 기준 */
   monthlyDirectJoinedBySalesMember: { total_units: number; rows: DashboardDirectPerfRow[] };
@@ -70,6 +72,7 @@ type ContractRow = {
   rental_request_no?: string | null;
   invoice_no?: string | null;
   memo?: string | null;
+  happycall_result?: string | null;
 };
 
 function getSeoulYmd(now: Date = new Date()): string {
@@ -137,6 +140,15 @@ function buildMemberIdByCustomerId(members: MemberRow[]): Map<string, string> {
     }
   }
   return m;
+}
+
+/** 기준월 내 집계 시: 해피콜 결과 또는 렌탈신청번호가 가입 보류로 분류되는지 */
+function isJoinDeferredContract(c: ContractRow): boolean {
+  const hc = (c.happycall_result ?? '').trim();
+  if (hc === '부재' || hc === '계약취소') return true;
+  const rental = (c.rental_request_no ?? '').trim();
+  if (rental === '렌탈기준 미충족' || rental === '가입건 없음') return true;
+  return false;
 }
 
 function attributeSalesMemberId(
@@ -273,7 +285,7 @@ export async function buildDashboardAggregations(opts: {
     db
       .from('contracts')
       .select(
-        'id, join_date, unit_count, status, is_cancelled, sales_member_id, customer_id, sales_link_status, rental_request_no, invoice_no, memo',
+        'id, join_date, unit_count, status, is_cancelled, sales_member_id, customer_id, sales_link_status, rental_request_no, invoice_no, memo, happycall_result',
       ),
   ]);
 
@@ -333,6 +345,8 @@ export async function buildDashboardAggregations(opts: {
     }),
   );
 
+  const monthlyJoinDeferred = monthlyAll.filter(isJoinDeferredContract);
+
   const allTimeJoined = attributedContracts.filter((c) =>
     isContractJoinCompleted({
       status: c.status,
@@ -360,6 +374,14 @@ export async function buildDashboardAggregations(opts: {
   );
   const monthlyJoinedSlots = aggregateByMember(
     monthlyJoined,
+    memberNameById,
+    parentNameById,
+    parentIdByMemberId,
+    hqMemberId,
+    'units_desc',
+  );
+  const monthlyJoinDeferredSlots = aggregateByMember(
+    monthlyJoinDeferred,
     memberNameById,
     parentNameById,
     parentIdByMemberId,
@@ -411,6 +433,7 @@ export async function buildDashboardAggregations(opts: {
     monthlyTotalSlots,
     dailyTotalSlots,
     monthlyJoinedSlots,
+    monthlyJoinDeferredSlots,
     allTimeJoinedSlots,
     monthlyDirectJoinedBySalesMember,
     dailyPerformanceByMember,

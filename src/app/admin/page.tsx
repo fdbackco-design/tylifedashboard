@@ -206,6 +206,11 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
       hint: ``,
     },
     {
+      label: `${agg.year_month} 가입 보류 구좌 수`,
+      value: `${agg.monthlyJoinDeferredSlots.total_units.toLocaleString()}구좌`,
+      hint: '해피콜 부재·계약취소, 렌탈신청번호 렌탈기준 미충족·가입건 없음',
+    },
+    {
       label: '총 누적 가입완료 구좌 수',
       value: `${agg.allTimeJoinedSlots.total_units.toLocaleString()}구좌`,
       hint: '',
@@ -236,8 +241,8 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
         />
       </section>
 
-      {/* 1) 상단: 핵심 요약 카드 — 모바일 2×2, 데스크톱 4열 */}
-      <div className="grid grid-cols-2 gap-1.5 lg:grid-cols-4 lg:gap-3">
+      {/* 1) 상단: 핵심 요약 카드 — 5장: 모바일 2열, 중간 3열, 넓은 화면 5열 */}
+      <div className="grid grid-cols-2 gap-1.5 md:grid-cols-3 xl:grid-cols-5 xl:gap-3">
         {summaryCards.map((c) => (
           <SummaryCard key={c.label} label={c.label} value={c.value} hint={c.hint} />
         ))}
