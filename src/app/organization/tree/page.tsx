@@ -90,7 +90,7 @@ export default async function OrganizationTreePage({
             href={`/organization?year_month=${encodeURIComponent(yearMonth)}`}
             className="inline-flex min-h-9 flex-1 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 sm:flex-initial sm:min-h-10 sm:px-4 sm:text-sm"
           >
-            상세로
+            홈으로 돌아가기
           </Link>
           <div className="flex min-h-9 items-center justify-center sm:min-h-10">
             <AccountActionsClient

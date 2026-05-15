@@ -169,12 +169,6 @@ export default async function OrganizationMyTreePage({
 
       <section className="mb-4 overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-3 shadow-sm ring-1 ring-slate-900/[0.035] sm:mb-5 sm:p-4">
         <div className="mb-3 flex flex-col gap-3 border-b border-slate-100 pb-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-          <div className="min-w-0 flex-1 space-y-1">
-            <p className="text-[13px] font-semibold tabular-nums text-slate-800 sm:text-sm">
-              {basisYear}년 {basisMonth}월 기준
-            </p>
-            <p className="text-[11px] text-slate-500 sm:text-xs">월별 정산 구간에 맞춰 조직도를 불러옵니다.</p>
-          </div>
           <Link
             href={`/organization/tree?year_month=${encodeURIComponent(yearMonth)}`}
             className="inline-flex shrink-0 items-center justify-center rounded-lg bg-gradient-to-b from-orange-500 to-orange-600 px-3 py-2 text-xs font-semibold text-white shadow-sm shadow-orange-900/15 ring-1 ring-orange-400/25 transition hover:from-orange-600 hover:to-orange-700 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 sm:px-4 sm:py-2 sm:text-sm"
