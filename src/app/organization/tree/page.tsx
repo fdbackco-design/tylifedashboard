@@ -123,6 +123,7 @@ export default async function OrganizationTreePage({
           showForecast={true}
           hideHqRoot={true}
           contractDetailPresentation="bottom-sheet"
+          contractDetailHideProductAndContractCode
         />
       </div>
     </div>

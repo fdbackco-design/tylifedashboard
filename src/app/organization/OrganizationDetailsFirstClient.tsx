@@ -99,6 +99,7 @@ export default function OrganizationDetailsFirstClient({
             node={selectedNode}
             contracts={selectedContracts}
             onClose={() => setSelectedId(defaultMemberId)}
+            hideProductAndContractCodeColumns
           />
         </div>
       ) : (

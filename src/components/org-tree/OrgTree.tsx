@@ -112,12 +112,15 @@ export function OrgTreeContractDetailPanel({
   contracts,
   onClose,
   variant = 'default',
+  /** true면 상품·계약코드 열만 숨김(데이터·집계 로직은 동일) */
+  hideProductAndContractCodeColumns = false,
 }: {
   node: OrgTreeNodeType;
   contracts: ContractItem[];
   onClose: () => void;
   /** bottom-sheet 등: 상단 여백·구분선 축소, 닫기 버튼 숨김 */
   variant?: 'default' | 'embedded';
+  hideProductAndContractCodeColumns?: boolean;
 }) {
   const aggregated = aggregateContracts(contracts);
   const completedCount = contracts.filter(isJoinCompleted).length;
@@ -167,28 +170,31 @@ export function OrgTreeContractDetailPanel({
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
-                {['고객명', '상품', '물품명', '상태', '구좌', '가입일', '계약코드'].map((h) => (
-                  <th key={h} className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">
-                    {h}
-                  </th>
-                ))}
+                <th className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">고객명</th>
+                {!hideProductAndContractCodeColumns ? (
+                  <th className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">상품</th>
+                ) : null}
+                <th className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">물품명</th>
+                <th className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">상태</th>
+                <th className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">구좌</th>
+                <th className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">가입일</th>
+                {!hideProductAndContractCodeColumns ? (
+                  <th className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">계약코드</th>
+                ) : null}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {aggregated.map((c) => {
-                const codes =
-                  c.contract_codes.length <= 1
-                    ? c.contract_codes[0]
-                    : `${c.contract_codes[0]} 외 ${c.contract_codes.length - 1}건`;
-
                 return (
                   <tr key={c.key} className="hover:bg-gray-50">
                     <td className="px-3 py-2 font-medium text-gray-800 whitespace-nowrap">
                       {c.customer_name}
                     </td>
-                    <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
-                      {c.product_type ?? '-'}
-                    </td>
+                    {!hideProductAndContractCodeColumns ? (
+                      <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
+                        {c.product_type ?? '-'}
+                      </td>
+                    ) : null}
                     <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
                       {c.item_name ?? '-'}
                     </td>
@@ -206,12 +212,16 @@ export function OrgTreeContractDetailPanel({
                     <td className="px-3 py-2 text-gray-500 whitespace-nowrap tabular-nums">
                       {c.join_date?.slice(0, 10) ?? '-'}
                     </td>
-                    <td
-                      title={c.contract_codes.join(', ')}
-                      className="px-3 py-2 text-gray-400 font-mono whitespace-nowrap"
-                    >
-                      {codes}
-                    </td>
+                    {!hideProductAndContractCodeColumns ? (
+                      <td
+                        title={c.contract_codes.join(', ')}
+                        className="px-3 py-2 text-gray-400 font-mono whitespace-nowrap"
+                      >
+                        {c.contract_codes.length <= 1
+                          ? c.contract_codes[0]
+                          : `${c.contract_codes[0]} 외 ${c.contract_codes.length - 1}건`}
+                      </td>
+                    ) : null}
                   </tr>
                 );
               })}
@@ -248,6 +258,8 @@ interface Props {
   >;
   /** inline: 기존처럼 트리 아래 패널. bottom-sheet: 모바일형 하단 시트 */
   contractDetailPresentation?: 'inline' | 'bottom-sheet';
+  /** 멤버용 조직 페이지: 상세 테이블에서 상품·계약코드 열 숨김 */
+  contractDetailHideProductAndContractCode?: boolean;
 }
 
 export default function OrgTree({
@@ -260,6 +272,7 @@ export default function OrgTree({
   showForecast = false,
   hideHqRoot = false,
   contractDetailPresentation = 'inline',
+  contractDetailHideProductAndContractCode = false,
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
@@ -571,7 +584,7 @@ export default function OrgTree({
     <div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-3">
         <div className="text-xs text-gray-500">
-          {editMode ? '편집 모드: 노드를 드래그해서 부모 노드 위에 놓으면 소속이 변경됩니다.' : '보기 모드: 두 손가락으로 줌/이동'}
+          {editMode ? '편집 모드 : 노드를 드래그해서 부모 노드 위에 놓으면 소속이 변경됩니다.' : '보기 모드 : 두 손가락으로 줌/이동'}
         </div>
         <div className="flex flex-wrap items-center gap-2 justify-end">
           {editMessage && (
@@ -724,6 +737,7 @@ export default function OrgTree({
           node={selectedNode}
           contracts={selectedContracts}
           onClose={() => setSelectedId(null)}
+          hideProductAndContractCodeColumns={contractDetailHideProductAndContractCode}
         />
       ) : null}
 
@@ -757,6 +771,7 @@ export default function OrgTree({
                 node={selectedNode}
                 contracts={selectedContracts}
                 onClose={() => setSelectedId(null)}
+                hideProductAndContractCodeColumns={contractDetailHideProductAndContractCode}
               />
             </div>
           </div>
