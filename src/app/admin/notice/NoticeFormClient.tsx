@@ -11,7 +11,14 @@ import { sanitizeNoticeHtml } from '@/lib/notices/storage';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import NoticeContentEditor from './NoticeContentEditor';
 import { StatusBadge } from './notice-ui';
+import NoticePushResultModal from './NoticePushResultModal';
 import type { NoticePushOutcome } from '@/lib/notices/push-notify';
+
+type PushResultModalState = {
+  variant: 'success' | 'warning';
+  title: string;
+  message: string;
+};
 
 type Props = {
   mode: 'create' | 'edit';
@@ -47,6 +54,7 @@ export default function NoticeFormClient({ mode, noticeId }: Props) {
   const [attachments, setAttachments] = useState<NoticeAttachmentRow[]>([]);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [pushResultModal, setPushResultModal] = useState<PushResultModalState | null>(null);
 
   const load = useCallback(async () => {
     if (mode !== 'edit' || !noticeId) return;
@@ -131,16 +139,34 @@ export default function NoticeFormClient({ mode, noticeId }: Props) {
     }
   }
 
-  function applyPushOutcome(push: NoticePushOutcome | undefined) {
-    if (!push) return;
+  function pushOutcomeModalState(push: NoticePushOutcome | undefined): PushResultModalState | null {
+    if (!push || !sendPush) return null;
     if (push.sent) {
       const { sent, failed, removed } = push.result;
-      window.alert(
-        `푸시 발송 완료\n성공: ${sent}건${failed ? `, 실패: ${failed}건` : ''}${removed ? `, 만료 구독 삭제: ${removed}건` : ''}`,
-      );
-    } else if (sendPush) {
-      window.alert(`푸시 미발송: ${push.reason}`);
+      const parts = [`성공 ${sent}건`];
+      if (failed) parts.push(`실패 ${failed}건`);
+      if (removed) parts.push(`만료 구독 삭제 ${removed}건`);
+      return {
+        variant: 'success',
+        title: '푸시 발송 완료',
+        message: parts.join(' · '),
+      };
     }
+    return {
+      variant: 'warning',
+      title: '푸시 미발송',
+      message: push.reason,
+    };
+  }
+
+  function goToNoticeList() {
+    router.push('/admin/notice');
+    router.refresh();
+  }
+
+  function closePushResultModal() {
+    setPushResultModal(null);
+    goToNoticeList();
   }
 
   async function save() {
@@ -224,9 +250,12 @@ export default function NoticeFormClient({ mode, noticeId }: Props) {
       }
 
       if (id && pendingFiles.length) await uploadPending(id);
-      applyPushOutcome(lastPush);
-      router.push('/admin/notice');
-      router.refresh();
+      const pushModal = pushOutcomeModalState(lastPush);
+      if (pushModal) {
+        setPushResultModal(pushModal);
+        return;
+      }
+      goToNoticeList();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -239,6 +268,14 @@ export default function NoticeFormClient({ mode, noticeId }: Props) {
   }
 
   return (
+    <>
+      <NoticePushResultModal
+        open={pushResultModal !== null}
+        variant={pushResultModal?.variant ?? 'success'}
+        title={pushResultModal?.title ?? ''}
+        message={pushResultModal?.message ?? ''}
+        onClose={closePushResultModal}
+      />
     <div className="space-y-6 max-w-3xl">
       {displayStatus ? (
         <div className="flex items-center gap-2">
@@ -398,6 +435,7 @@ export default function NoticeFormClient({ mode, noticeId }: Props) {
         </LoadingButton>
       </div>
     </div>
+    </>
   );
 }
 

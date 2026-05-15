@@ -69,8 +69,7 @@ export default function AdminPushClient() {
       <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-900">
         <p className="font-medium">개인정보 안내</p>
         <p className="mt-1 text-xs leading-relaxed text-amber-800/90">
-          푸시 본문에는 고객 실명, 주민번호, 계약 상세 등 민감 정보를 넣지 마세요. 제목·짧은 안내·이동 URL만
-          사용하세요.
+          푸시 본문에는 주민번호, 계약 상세 등 민감 정보를 넣지 마세요.
         </p>
         {/* TODO: 개인정보처리방침에 푸시 알림, 기기 push endpoint/keys, user_agent 수집·이용 목적 반영 여부 검토 */}
       </div>
