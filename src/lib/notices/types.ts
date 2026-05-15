@@ -16,6 +16,7 @@ export type NoticeRow = {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  view_count?: number;
 };
 
 export type NoticeAttachmentRow = {

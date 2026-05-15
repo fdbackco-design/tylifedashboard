@@ -12,6 +12,7 @@ import TyLifePartnersLogo from '@/components/TyLifePartnersLogo';
 import AccountActionsClient from './AccountActionsClient';
 import OrganizationDetailsFirstClient from './OrganizationDetailsFirstClient';
 import KakaoChatbotFab from './KakaoChatbotFab';
+import OrganizationNavMenu from '@/components/organization/OrganizationNavMenu';
 import { buildMyOrganizationTreeViewModel } from './my-org-tree-view-model';
 
 export const metadata: Metadata = { title: '내 조직도' };
@@ -94,11 +95,14 @@ export default async function OrganizationMyTreePage({
             className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 rounded-full bg-orange-200/25 blur-2xl sm:-right-4 sm:-top-6"
             aria-hidden
           />
-          <p className="relative text-[1.35rem] font-bold leading-snug tracking-tight text-orange-700 sm:text-2xl sm:leading-tight">
-            {greetingDisplayRank
-              ? `${greetingDisplayName} ${greetingDisplayRank}님 환영합니다`
-              : `${greetingDisplayName}님 환영합니다`}
-          </p>
+          <div className="relative flex items-start gap-2.5 sm:gap-3">
+            <OrganizationNavMenu />
+            <p className="min-w-0 flex-1 text-[1.35rem] font-bold leading-snug tracking-tight text-orange-700 sm:text-2xl sm:leading-tight">
+              {greetingDisplayRank
+                ? `${greetingDisplayName} ${greetingDisplayRank}님 환영합니다`
+                : `${greetingDisplayName}님 환영합니다`}
+            </p>
+          </div>
         </div>
         <div className="flex items-center justify-between gap-3 border-b border-slate-100/90 bg-gradient-to-r from-slate-50 to-white px-3 py-2 sm:px-4 sm:py-2.5">
           <TyLifePartnersLogo mobileSrc="/logo.png" density="compact" />
