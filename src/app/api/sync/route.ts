@@ -13,12 +13,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { runSync, syncContractPage } from '@/lib/tylife/sync-service';
+import { verifyBearerMatchesEnvSecret } from '@/lib/api/verify-bearer-env-secret';
 
 function isAuthorized(req: NextRequest): boolean {
-  const authHeader = req.headers.get('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) return false;
-
-  const token = authHeader.slice(7);
   const secret = process.env.SYNC_API_SECRET;
 
   if (!secret) {
@@ -26,17 +23,7 @@ function isAuthorized(req: NextRequest): boolean {
     return false;
   }
 
-  const encoder = new TextEncoder();
-  const tokenBytes = encoder.encode(token);
-  const secretBytes = encoder.encode(secret);
-
-  if (tokenBytes.length !== secretBytes.length) return false;
-
-  let diff = 0;
-  for (let i = 0; i < tokenBytes.length; i++) {
-    diff |= tokenBytes[i] ^ secretBytes[i];
-  }
-  return diff === 0;
+  return verifyBearerMatchesEnvSecret(req, secret);
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {

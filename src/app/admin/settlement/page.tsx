@@ -18,6 +18,7 @@ import {
 import {
   loadStatementDownlineSharedData,
   computeStatementDownlineUnitsWithSharedContext,
+  loadGlobalStatementWindowContractPool,
 } from '@/lib/organization/statement-downline-units';
 
 export const metadata: Metadata = { title: '정산 현황' };
@@ -82,7 +83,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const [membersRes, edgesRes, eligibleBaseRes, rulesRes] = await Promise.all([
     db
       .from('organization_members')
-      .select('id, name, rank, external_id, phone, source_customer_id')
+      .select('id, name, rank, external_id, phone, source_customer_id, leader_rank_effective_at')
       .eq('is_active', true),
     db.from('organization_edges').select('parent_id, child_id'),
     db
@@ -95,6 +96,10 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const membersRaw = (((membersRes.data ?? []) as unknown as any[]) ?? []).map((m) =>
     m.name === '안성준' ? { ...m, rank: '본사' as const } : m,
   );
+  const leaderRankEffectiveAtByMemberId: Record<string, string | null> = {};
+  for (const m of membersRaw as Array<{ id: string; leader_rank_effective_at?: string | null }>) {
+    leaderRankEffectiveAtByMemberId[String(m.id)] = (m.leader_rank_effective_at ?? null) as string | null;
+  }
   const edgesRaw = (edgesRes.data ?? []) as Array<{ parent_id: string | null; child_id: string }>;
 
   const hqIdsRaw = new Set(
@@ -510,7 +515,6 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     ),
   ];
   const statementDirectUnitsByMemberId: Record<string, number> = {};
-  const leaderRankEffectiveAtByMemberId: Record<string, string | null> = {};
   for (const r of (settlements ?? []) as Array<{
     member_id?: string | null;
     direct_unit_count?: number | null;
@@ -519,23 +523,14 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     if (!mid) continue;
     statementDirectUnitsByMemberId[mid] = Math.max(0, Math.floor(Number(r.direct_unit_count ?? 0) || 0));
   }
-  if (settlementMemberIds.length > 0) {
-    const { data: leaderRows } = await db
-      .from('organization_members')
-      .select('id, leader_rank_effective_at')
-      .in('id', settlementMemberIds);
-    for (const row of (leaderRows ?? []) as Array<{ id: string; leader_rank_effective_at?: string | null }>) {
-      if (!row?.id) continue;
-      leaderRankEffectiveAtByMemberId[row.id] = (row.leader_rank_effective_at ?? null) as string | null;
-    }
-  }
   const statementDownlineUnitsByMemberId: Record<string, number> = {};
   if (settlementMemberIds.length > 0) {
     const sharedDownline = await loadStatementDownlineSharedData(db);
     const window = { start_date, end_date };
-    const PAR = 12;
-    for (let i = 0; i < settlementMemberIds.length; i += PAR) {
-      const slice = settlementMemberIds.slice(i, i + PAR);
+    const preloadedGlobalPool = await loadGlobalStatementWindowContractPool(db, sharedDownline, window);
+    const BATCH = 48;
+    for (let i = 0; i < settlementMemberIds.length; i += BATCH) {
+      const slice = settlementMemberIds.slice(i, i + BATCH);
       const results = await Promise.all(
         slice.map((mid) =>
           computeStatementDownlineUnitsWithSharedContext(
@@ -545,6 +540,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
             window,
             statementDirectUnitsByMemberId[mid] ?? 0,
             leaderRankEffectiveAtByMemberId[mid] ?? null,
+            { preloadedGlobalPool },
           ),
         ),
       );
@@ -555,33 +551,28 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     }
   }
 
-  // DB 저장된 "본인 계약 수당 인정" 설정 로드 (월/라인 단위)
-  // - 새 테이블/마이그레이션이 아직 적용되지 않은 환경에서도 페이지 렌더가 깨지지 않게 방어한다.
+  // DB 저장된 "본인 계약 수당 인정" / "산하 분리 보기" 설정 (월/라인 단위)
   const selfIncludedInitialByTopId: Record<string, boolean> = {};
+  const splitOpenInitialByTopId: Record<string, boolean> = {};
   try {
-    const { data: prefRows, error: prefErr } = await db
-      .from('settlement_self_contract_preferences')
-      .select('top_line_id, included')
-      .eq('year_month', yearMonth);
-    if (!prefErr) {
-      for (const r of (prefRows ?? []) as Array<{ top_line_id: string; included: boolean }>) {
+    const [selfRes, splitRes] = await Promise.all([
+      db
+        .from('settlement_self_contract_preferences')
+        .select('top_line_id, included')
+        .eq('year_month', yearMonth),
+      db
+        .from('settlement_line_split_preferences')
+        .select('top_line_id, is_split')
+        .eq('year_month', yearMonth),
+    ]);
+    if (!selfRes.error) {
+      for (const r of (selfRes.data ?? []) as Array<{ top_line_id: string; included: boolean }>) {
         if (!r?.top_line_id) continue;
         selfIncludedInitialByTopId[String(r.top_line_id)] = Boolean(r.included);
       }
     }
-  } catch {
-    // ignore
-  }
-
-  // DB 저장된 "산하 분리 보기" 설정 로드 (월/라인 단위)
-  const splitOpenInitialByTopId: Record<string, boolean> = {};
-  try {
-    const { data: splitRows, error: splitErr } = await db
-      .from('settlement_line_split_preferences')
-      .select('top_line_id, is_split')
-      .eq('year_month', yearMonth);
-    if (!splitErr) {
-      for (const r of (splitRows ?? []) as Array<{ top_line_id: string; is_split: boolean }>) {
+    if (!splitRes.error) {
+      for (const r of (splitRes.data ?? []) as Array<{ top_line_id: string; is_split: boolean }>) {
         if (!r?.top_line_id) continue;
         splitOpenInitialByTopId[String(r.top_line_id)] = Boolean(r.is_split);
       }

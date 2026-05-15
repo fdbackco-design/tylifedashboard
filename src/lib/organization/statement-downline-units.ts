@@ -130,6 +130,162 @@ export async function loadStatementDownlineSharedData(db: SupabaseClient): Promi
   };
 }
 
+const CONTRACT_SELECT_FOR_STATEMENT =
+  'id, contract_code, join_date, status, unit_count, sales_member_id, customer_id, is_cancelled, sales_link_status, rental_request_no, invoice_no, memo, created_at, customers(name, phone)';
+
+function hqWindowRemapInputFromRow(row: {
+  sales_member_id?: string | null;
+  customer_id?: string | null;
+  status?: string;
+  rental_request_no?: string | null;
+  invoice_no?: string | null;
+  memo?: string | null;
+  customers?: { phone?: string | null; name?: string | null } | null;
+  contract_code?: string | null;
+}) {
+  return {
+    sales_member_id: String(row.sales_member_id ?? ''),
+    customer_id: String(row.customer_id ?? ''),
+    status: String(row.status ?? ''),
+    rental_request_no: row.rental_request_no ?? null,
+    invoice_no: row.invoice_no ?? null,
+    memo: row.memo ?? null,
+    customer_phone: row.customers?.phone ?? null,
+    contract_code: row.contract_code ?? null,
+    customer_name: row.customers?.name ?? null,
+  } as const;
+}
+
+/**
+ * 정산 윈도우 안의 계약을 멤버별 산하 집계에 필요한 범위로 한 번만 조회한다.
+ * (기존: 루트마다 subtree별로 contracts를 반복 조회 → N배 DB 비용)
+ */
+export async function loadGlobalStatementWindowContractPool(
+  db: SupabaseClient,
+  shared: StatementDownlineSharedData,
+  window: { start_date: string; end_date: string },
+): Promise<Record<string, unknown>[]> {
+  const { start_date, end_date } = window;
+  const allMemberIds = shared.membersFiltered.map((m) => m.id);
+  const allOwnCustomerIds = [
+    ...new Set(
+      shared.membersFiltered
+        .map((m) => m.source_customer_id)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0),
+    ),
+  ];
+
+  const contractChunks = chunk(allMemberIds, 500);
+  const contractResList = await Promise.all(
+    contractChunks.map((ids) =>
+      ids.length === 0
+        ? Promise.resolve({ data: [] as Record<string, unknown>[] })
+        : db
+            .from('contracts')
+            .select(CONTRACT_SELECT_FOR_STATEMENT)
+            .in('sales_member_id', ids)
+            .gte('join_date', start_date)
+            .lte('join_date', end_date)
+            .order('join_date', { ascending: false })
+            .limit(20000),
+    ),
+  );
+
+  let contractsRaw = contractResList.flatMap((r) => (r.data ?? []) as Record<string, unknown>[]);
+
+  if (shared.hqSalesMemberIds.length > 0) {
+    const { data: hqWindowRows } = await db
+      .from('contracts')
+      .select(CONTRACT_SELECT_FOR_STATEMENT)
+      .in('sales_member_id', shared.hqSalesMemberIds)
+      .gte('join_date', start_date)
+      .lte('join_date', end_date)
+      .order('join_date', { ascending: false })
+      .limit(20000);
+    const seenWin = new Set(contractsRaw.map((c) => String(c.id ?? '')));
+    for (const row of (hqWindowRows ?? []) as Record<string, unknown>[]) {
+      const rid = String(row?.id ?? '');
+      if (!rid || seenWin.has(rid)) continue;
+      seenWin.add(rid);
+      contractsRaw.push(row);
+    }
+  }
+
+  if (allOwnCustomerIds.length > 0) {
+    const seenOwn = new Set(contractsRaw.map((c) => String(c.id ?? '')));
+    for (const custChunk of chunk(allOwnCustomerIds, 120)) {
+      const { data: ownWinRows } = await db
+        .from('contracts')
+        .select(CONTRACT_SELECT_FOR_STATEMENT)
+        .in('customer_id', custChunk)
+        .gte('join_date', start_date)
+        .lte('join_date', end_date)
+        .order('join_date', { ascending: false })
+        .limit(20000);
+      for (const row of (ownWinRows ?? []) as Record<string, unknown>[]) {
+        const rid = String(row?.id ?? '');
+        if (!rid || seenOwn.has(rid)) continue;
+        seenOwn.add(rid);
+        contractsRaw.push(row);
+      }
+    }
+  }
+
+  return contractsRaw.filter((c) =>
+    contractJoinYmdInInclusiveWindow(c.join_date as string, start_date, end_date),
+  );
+}
+
+function narrowPreloadedPoolForRootSubtree(
+  pool: Record<string, unknown>[],
+  shared: StatementDownlineSharedData,
+  subtreeIdSet: Set<string>,
+  subtreeMemberIds: string[],
+  subtreeMemberOwnCustomerIds: string[],
+): Record<string, unknown>[] {
+  const subtreeSalesSet = new Set(subtreeMemberIds);
+  const subtreeCustomerSet = new Set(subtreeMemberOwnCustomerIds);
+  const hqSet = new Set(shared.hqSalesMemberIds);
+  const seen = new Set<string>();
+  const out: Record<string, unknown>[] = [];
+
+  for (const row of pool) {
+    const id = String(row.id ?? '');
+    if (!id || seen.has(id)) continue;
+
+    const rawSales = String(row.sales_member_id ?? '');
+    if (subtreeSalesSet.has(rawSales)) {
+      seen.add(id);
+      out.push(row);
+      continue;
+    }
+
+    if (hqSet.size > 0 && hqSet.has(rawSales)) {
+      const winInput = hqWindowRemapInputFromRow(row as any);
+      const eff = shared.resolveContractOriginForSubtree(winInput, subtreeIdSet);
+      if (subtreeIdSet.has(eff)) {
+        seen.add(id);
+        out.push(row);
+      }
+      continue;
+    }
+
+    if (subtreeCustomerSet.size > 0) {
+      const cid = String(row.customer_id ?? '');
+      if (cid && subtreeCustomerSet.has(cid)) {
+        const winInput = hqWindowRemapInputFromRow(row as any);
+        const eff = shared.resolveContractOriginForSubtree(winInput, subtreeIdSet);
+        if (subtreeIdSet.has(eff)) {
+          seen.add(id);
+          out.push(row);
+        }
+      }
+    }
+  }
+
+  return out;
+}
+
 export async function computeStatementDownlineUnitsWithSharedContext(
   db: SupabaseClient,
   shared: StatementDownlineSharedData,
@@ -137,7 +293,7 @@ export async function computeStatementDownlineUnitsWithSharedContext(
   window: { start_date: string; end_date: string },
   directUnitCountFromSettlement: number,
   rootLeaderRankEffectiveAt: string | null,
-  opts?: { debug?: boolean },
+  opts?: { debug?: boolean; preloadedGlobalPool?: Record<string, unknown>[] },
 ): Promise<
   | number
   | {
@@ -220,87 +376,77 @@ export async function computeStatementDownlineUnitsWithSharedContext(
   ];
 
   const { start_date, end_date } = window;
-  const contractSelect =
-    'id, contract_code, join_date, status, unit_count, sales_member_id, customer_id, is_cancelled, sales_link_status, rental_request_no, invoice_no, memo, created_at, customers(name, phone)';
 
-  const hqWindowRemapInput = (row: {
-    sales_member_id?: string | null;
-    customer_id?: string | null;
-    status?: string;
-    rental_request_no?: string | null;
-    invoice_no?: string | null;
-    memo?: string | null;
-    customers?: { phone?: string | null } | null;
-    contract_code?: string | null;
-  }) =>
-    ({
-      sales_member_id: String(row.sales_member_id ?? ''),
-      customer_id: String(row.customer_id ?? ''),
-      status: String(row.status ?? ''),
-      rental_request_no: row.rental_request_no ?? null,
-      invoice_no: row.invoice_no ?? null,
-      memo: row.memo ?? null,
-      customer_phone: row.customers?.phone ?? null,
-      contract_code: row.contract_code ?? null,
-      customer_name: (row.customers as { name?: string | null } | null)?.name ?? null,
-    }) as const;
+  let contractsRaw: Record<string, unknown>[];
 
-  const contractChunks = chunk(subtreeMemberIds, 500);
-  const contractResList = await Promise.all(
-    contractChunks.map((ids) =>
-      ids.length === 0
-        ? Promise.resolve({ data: [] as Record<string, unknown>[] })
-        : db
-            .from('contracts')
-            .select(contractSelect)
-            .in('sales_member_id', ids)
-            .gte('join_date', start_date)
-            .lte('join_date', end_date)
-            .order('join_date', { ascending: false })
-            .limit(20000),
-    ),
-  );
+  if (opts?.preloadedGlobalPool != null) {
+    contractsRaw = narrowPreloadedPoolForRootSubtree(
+      opts.preloadedGlobalPool,
+      shared,
+      subtreeIdSet,
+      subtreeMemberIds,
+      subtreeMemberOwnCustomerIds,
+    );
+  } else {
+    const contractSelect = CONTRACT_SELECT_FOR_STATEMENT;
 
-  let contractsRaw = contractResList.flatMap((r) => (r.data ?? []) as Record<string, unknown>[]);
+    const contractChunks = chunk(subtreeMemberIds, 500);
+    const contractResList = await Promise.all(
+      contractChunks.map((ids) =>
+        ids.length === 0
+          ? Promise.resolve({ data: [] as Record<string, unknown>[] })
+          : db
+              .from('contracts')
+              .select(contractSelect)
+              .in('sales_member_id', ids)
+              .gte('join_date', start_date)
+              .lte('join_date', end_date)
+              .order('join_date', { ascending: false })
+              .limit(20000),
+      ),
+    );
 
-  if (hqSalesMemberIds.length > 0) {
-    const { data: hqWindowRows } = await db
-      .from('contracts')
-      .select(contractSelect)
-      .in('sales_member_id', hqSalesMemberIds)
-      .gte('join_date', start_date)
-      .lte('join_date', end_date)
-      .order('join_date', { ascending: false })
-      .limit(20000);
-    const seenWin = new Set(contractsRaw.map((c) => c.id as string));
-    for (const row of (hqWindowRows ?? []) as Record<string, unknown>[]) {
-      if (!row?.id || seenWin.has(row.id as string)) continue;
-      const winInput = hqWindowRemapInput(row as any);
-      const eff = resolveContractOriginForSubtree(winInput, subtreeIdSet);
-      if (!subtreeIdSet.has(eff)) continue;
-      seenWin.add(row.id as string);
-      contractsRaw.push(row);
-    }
-  }
+    contractsRaw = contractResList.flatMap((r) => (r.data ?? []) as Record<string, unknown>[]);
 
-  if (subtreeMemberOwnCustomerIds.length > 0) {
-    const seenOwn = new Set(contractsRaw.map((c) => c.id as string));
-    for (const custChunk of chunk(subtreeMemberOwnCustomerIds, 120)) {
-      const { data: ownWinRows } = await db
+    if (hqSalesMemberIds.length > 0) {
+      const { data: hqWindowRows } = await db
         .from('contracts')
         .select(contractSelect)
-        .in('customer_id', custChunk)
+        .in('sales_member_id', hqSalesMemberIds)
         .gte('join_date', start_date)
         .lte('join_date', end_date)
         .order('join_date', { ascending: false })
         .limit(20000);
-      for (const row of (ownWinRows ?? []) as Record<string, unknown>[]) {
-        if (!row?.id || seenOwn.has(row.id as string)) continue;
-        const winInput = hqWindowRemapInput(row as any);
+      const seenWin = new Set(contractsRaw.map((c) => c.id as string));
+      for (const row of (hqWindowRows ?? []) as Record<string, unknown>[]) {
+        if (!row?.id || seenWin.has(row.id as string)) continue;
+        const winInput = hqWindowRemapInputFromRow(row as any);
         const eff = resolveContractOriginForSubtree(winInput, subtreeIdSet);
         if (!subtreeIdSet.has(eff)) continue;
-        seenOwn.add(row.id as string);
+        seenWin.add(row.id as string);
         contractsRaw.push(row);
+      }
+    }
+
+    if (subtreeMemberOwnCustomerIds.length > 0) {
+      const seenOwn = new Set(contractsRaw.map((c) => c.id as string));
+      for (const custChunk of chunk(subtreeMemberOwnCustomerIds, 120)) {
+        const { data: ownWinRows } = await db
+          .from('contracts')
+          .select(contractSelect)
+          .in('customer_id', custChunk)
+          .gte('join_date', start_date)
+          .lte('join_date', end_date)
+          .order('join_date', { ascending: false })
+          .limit(20000);
+        for (const row of (ownWinRows ?? []) as Record<string, unknown>[]) {
+          if (!row?.id || seenOwn.has(row.id as string)) continue;
+          const winInput = hqWindowRemapInputFromRow(row as any);
+          const eff = resolveContractOriginForSubtree(winInput, subtreeIdSet);
+          if (!subtreeIdSet.has(eff)) continue;
+          seenOwn.add(row.id as string);
+          contractsRaw.push(row);
+        }
       }
     }
   }
@@ -477,7 +623,7 @@ export async function sumDownlineAttributedUnitsInSettlementWindow(
   window: { start_date: string; end_date: string },
   directUnitCountFromSettlement: number,
   rootLeaderRankEffectiveAt: string | null,
-  opts?: { debug?: boolean },
+  opts?: { debug?: boolean; preloadedGlobalPool?: Record<string, unknown>[] },
 ): Promise<
   | number
   | {
