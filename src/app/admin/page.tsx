@@ -5,6 +5,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import {
   buildDashboardAggregations,
   type DashboardAggRow,
+  type DashboardDirectPerfRow,
 } from '@/lib/dashboard/aggregations';
 import { getSettlementWindowSeoul } from '@/lib/settlement/settlement-window';
 
@@ -106,6 +107,39 @@ function DataTable(props: {
           ) : (
             <tr>
               <td className="px-4 py-6 text-center text-gray-400" colSpan={colSpan}>
+                데이터 없음
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function DirectPerfTable(props: { rows: DashboardDirectPerfRow[] }) {
+  return (
+    <div className="overflow-auto rounded-lg border border-slate-200/90 max-h-[420px] lg:max-h-[520px]">
+      <table className="min-w-full text-sm">
+        <thead className="sticky top-0 z-10 bg-orange-50/80">
+          <tr className="text-xs uppercase tracking-wide text-slate-500">
+            <th className="text-left font-medium px-4 py-2 whitespace-nowrap">담당자</th>
+            <th className="text-right font-medium px-4 py-2 whitespace-nowrap">구좌 수</th>
+          </tr>
+        </thead>
+        <tbody>
+          {props.rows.length ? (
+            props.rows.map((r, idx) => (
+              <tr key={`${r.member_name}-${idx}`} className="border-t border-gray-100">
+                <td className="px-4 py-2 text-gray-900 whitespace-nowrap font-medium">{r.member_name}</td>
+                <td className="px-4 py-2 text-right tabular-nums text-gray-900">
+                  {r.unit_sum.toLocaleString()}구좌
+                </td>
+              </tr>
+            ))
+          ) : (
+            <tr>
+              <td className="px-4 py-6 text-center text-gray-400" colSpan={2}>
                 데이터 없음
               </td>
             </tr>
@@ -237,6 +271,13 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
 
         {/* "담당자별 전날 영업 실적" 섹션은 숨김 처리 */}
       </div>
+
+      <SectionCard
+        title={`${agg.year_month} 담당자별 실적`}
+        subtitle={`${agg.month_window.start_date} ~ ${agg.month_window.end_date} · 가입완료 계약을 판매 담당자(sales_member_id) 기준 직접 구좌로 합산`}
+      >
+        <DirectPerfTable rows={agg.monthlyDirectJoinedBySalesMember.rows} />
+      </SectionCard>
 
       {/* 3) 하단: 텍스트 브리핑 박스 */}
       <SectionCard title="아침 브리핑 (복붙용)" subtitle="그대로 복사해서 공유">

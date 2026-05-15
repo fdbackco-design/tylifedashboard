@@ -27,6 +27,12 @@ export type DailyPerformanceRow = {
   unit_sum: number;
 };
 
+/** 기준월 내 가입완료 계약을 `sales_member_id`(직접 영업) 기준으로 합산한 행 */
+export type DashboardDirectPerfRow = {
+  member_name: string;
+  unit_sum: number;
+};
+
 export type DashboardAggregations = {
   year_month: string;
   month_window: { start_date: string; end_date: string };
@@ -39,6 +45,8 @@ export type DashboardAggregations = {
   dailyTotalSlots: DashboardAggResult;
   monthlyJoinedSlots: DashboardAggResult;
   allTimeJoinedSlots: DashboardAggResult;
+  /** 기준월 정산 윈도우 + 가입완료, 구좌는 계약의 sales_member_id(직접) 기준 */
+  monthlyDirectJoinedBySalesMember: { total_units: number; rows: DashboardDirectPerfRow[] };
   dailyPerformanceByMember: { total_units: number; rows: DailyPerformanceRow[] };
 };
 
@@ -209,6 +217,38 @@ function formatBriefingLines(rows: DashboardAggRow[], limit: number = 20): strin
     .join('\n');
 }
 
+function buildMonthlyDirectJoinedBySalesMember(
+  monthlyJoined: Array<ContractRow & { __attributed_member_id: string | null }>,
+  memberNameById: Map<string, string>,
+): { total_units: number; rows: DashboardDirectPerfRow[] } {
+  const unitBySalesId = new Map<string, number>();
+  for (const c of monthlyJoined) {
+    const sid = (c.sales_member_id ?? null) as string | null;
+    if (!sid) continue;
+    const unit = Number(c.unit_count ?? 0) || 0;
+    if (unit <= 0) continue;
+    unitBySalesId.set(sid, (unitBySalesId.get(sid) ?? 0) + unit);
+  }
+  let total_units = 0;
+  const rows: DashboardDirectPerfRow[] = [];
+  for (const [memberId, unit_sum] of unitBySalesId.entries()) {
+    total_units += unit_sum;
+    const rawName = memberNameById.get(memberId);
+    rows.push({
+      member_name:
+        rawName !== undefined && rawName !== null
+          ? stripCustomerMemberNamePrefix(rawName) || '(알수없음)'
+          : '(알수없음)',
+      unit_sum,
+    });
+  }
+  rows.sort((a, b) => {
+    if (b.unit_sum !== a.unit_sum) return b.unit_sum - a.unit_sum;
+    return a.member_name.localeCompare(b.member_name, 'ko');
+  });
+  return { total_units, rows };
+}
+
 export async function buildDashboardAggregations(opts: {
   db: {
     from: (table: string) => any;
@@ -335,6 +375,11 @@ export async function buildDashboardAggregations(opts: {
     'latest_join_desc',
   );
 
+  const monthlyDirectJoinedBySalesMember = buildMonthlyDirectJoinedBySalesMember(
+    monthlyJoined,
+    memberNameById,
+  );
+
   // 담당자별 당일 영업 실적: dailyAll을 담당자별로 합산한 것(= dailyTotalSlots와 동일하지만, 카드/표 의미를 분리)
   const dailyPerformanceByMember = {
     total_units: dailyTotalSlots.total_units,
@@ -367,6 +412,7 @@ export async function buildDashboardAggregations(opts: {
     dailyTotalSlots,
     monthlyJoinedSlots,
     allTimeJoinedSlots,
+    monthlyDirectJoinedBySalesMember,
     dailyPerformanceByMember,
   };
 }
