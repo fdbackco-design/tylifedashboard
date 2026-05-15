@@ -12,6 +12,8 @@ export type DashboardAggRow = {
   parent_name: string; // 누구 산하인지 (표시용)
   member_name: string;
   unit_sum: number;
+  /** 집계에 포함된 계약 중 가장 늦은 가입일(YYYY-MM-DD); 없으면 null */
+  latest_join_date: string | null;
 };
 
 export type DashboardAggResult = {
@@ -98,6 +100,20 @@ function sortRows(rows: DashboardAggRow[]): DashboardAggRow[] {
   });
 }
 
+/** 가입일(해당 집계 구간 내 최신 가입일) 내림차순, 동일 시 구좌 수 내림차순 */
+function sortRowsByLatestJoinDateDesc(rows: DashboardAggRow[]): DashboardAggRow[] {
+  return [...rows].sort((a, b) => {
+    const ja = a.latest_join_date;
+    const jb = b.latest_join_date;
+    if (ja && jb) {
+      if (jb !== ja) return jb.localeCompare(ja);
+    } else if (jb && !ja) return 1;
+    else if (ja && !jb) return -1;
+    if (b.unit_sum !== a.unit_sum) return b.unit_sum - a.unit_sum;
+    return a.member_name.localeCompare(b.member_name, 'ko');
+  });
+}
+
 function buildMemberIdByCustomerId(members: MemberRow[]): Map<string, string> {
   const m = new Map<string, string>();
   for (const row of members as any[]) {
@@ -148,13 +164,20 @@ function aggregateByMember(
   parentNameById: Map<string, string>,
   parentIdByMemberId: Map<string, string | null>,
   hqMemberId: string | null,
+  sort: 'units_desc' | 'latest_join_desc',
 ): DashboardAggResult {
   const unitByMember = new Map<string, number>();
+  const latestJoinByMember = new Map<string, string>();
   for (const c of contracts) {
     const mid = c.__attributed_member_id;
     if (!mid) continue;
     const unit = Number(c.unit_count ?? 0) || 0;
     unitByMember.set(mid, (unitByMember.get(mid) ?? 0) + unit);
+    const jd = c.join_date;
+    if (jd) {
+      const prev = latestJoinByMember.get(mid);
+      if (!prev || jd > prev) latestJoinByMember.set(mid, jd);
+    }
   }
 
   const rows: DashboardAggRow[] = [];
@@ -171,9 +194,12 @@ function aggregateByMember(
           ? stripCustomerMemberNamePrefix(rawName) || '(알수없음)'
           : '(알수없음)',
       unit_sum,
+      latest_join_date: latestJoinByMember.get(mid) ?? null,
     });
   }
-  return { total_units, rows: sortRows(rows) };
+  const sorted =
+    sort === 'latest_join_desc' ? sortRowsByLatestJoinDateDesc(rows) : sortRows(rows);
+  return { total_units, rows: sorted };
 }
 
 function formatBriefingLines(rows: DashboardAggRow[], limit: number = 20): string {
@@ -282,6 +308,7 @@ export async function buildDashboardAggregations(opts: {
     parentNameById,
     parentIdByMemberId,
     hqMemberId,
+    'units_desc',
   );
   const dailyTotalSlots = aggregateByMember(
     dailyAll,
@@ -289,6 +316,7 @@ export async function buildDashboardAggregations(opts: {
     parentNameById,
     parentIdByMemberId,
     hqMemberId,
+    'units_desc',
   );
   const monthlyJoinedSlots = aggregateByMember(
     monthlyJoined,
@@ -296,6 +324,7 @@ export async function buildDashboardAggregations(opts: {
     parentNameById,
     parentIdByMemberId,
     hqMemberId,
+    'units_desc',
   );
   const allTimeJoinedSlots = aggregateByMember(
     allTimeJoined,
@@ -303,6 +332,7 @@ export async function buildDashboardAggregations(opts: {
     parentNameById,
     parentIdByMemberId,
     hqMemberId,
+    'latest_join_desc',
   );
 
   // 담당자별 당일 영업 실적: dailyAll을 담당자별로 합산한 것(= dailyTotalSlots와 동일하지만, 카드/표 의미를 분리)

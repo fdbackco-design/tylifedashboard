@@ -2,7 +2,10 @@ import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import YearMonthSelector from '@/components/YearMonthSelector';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
-import { buildDashboardAggregations } from '@/lib/dashboard/aggregations';
+import {
+  buildDashboardAggregations,
+  type DashboardAggRow,
+} from '@/lib/dashboard/aggregations';
 import { getSettlementWindowSeoul } from '@/lib/settlement/settlement-window';
 
 export const metadata: Metadata = { title: '대시보드' };
@@ -23,14 +26,20 @@ function SectionCard(props: { title: string; subtitle?: string; children: ReactN
   );
 }
 
-function DataTable(props: { rows: Array<{ parent_name: string; member_name: string; unit_sum: number }> }) {
-  const maxUnits = props.rows.reduce((m, r) => Math.max(m, r.unit_sum), 0);
+function DataTable(props: {
+  rows: DashboardAggRow[];
+  /** true면 가입완료 누적 표: 최근 가입일 열 표시(집계 구간 내 해당 담당자 기준 최신 join_date) */
+  showLatestJoinDate?: boolean;
+}) {
+  const { rows, showLatestJoinDate } = props;
+  const maxUnits = rows.reduce((m, r) => Math.max(m, r.unit_sum), 0);
   const badgeForRank = (idx: number) => {
     if (idx === 0) return '🥇';
     if (idx === 1) return '🥈';
     if (idx === 2) return '🥉';
     return null;
   };
+  const colSpan = showLatestJoinDate ? 4 : 3;
 
   return (
     <div className="overflow-auto rounded-lg border border-slate-200/90 max-h-[420px] lg:max-h-[520px]">
@@ -39,12 +48,15 @@ function DataTable(props: { rows: Array<{ parent_name: string; member_name: stri
           <tr className="text-xs uppercase tracking-wide text-slate-500">
             <th className="text-left font-medium px-4 py-2 whitespace-nowrap">상위 조직</th>
             <th className="text-left font-medium px-4 py-2 whitespace-nowrap">담당자</th>
+            {showLatestJoinDate ? (
+              <th className="text-right font-medium px-4 py-2 whitespace-nowrap">가입일</th>
+            ) : null}
             <th className="text-right font-medium px-4 py-2 whitespace-nowrap">구좌 수</th>
           </tr>
         </thead>
         <tbody>
-          {props.rows.length ? (
-            props.rows.map((r, idx) => (
+          {rows.length ? (
+            rows.map((r, idx) => (
               <tr key={`${r.member_name}-${idx}`} className="border-t border-gray-100">
                 <td className="px-4 py-2 text-gray-500 whitespace-nowrap">{r.parent_name}</td>
                 <td className="px-4 py-2 text-gray-900 whitespace-nowrap font-medium">
@@ -61,6 +73,11 @@ function DataTable(props: { rows: Array<{ parent_name: string; member_name: stri
                     <span className="font-medium">{r.member_name}</span>
                   </span>
                 </td>
+                {showLatestJoinDate ? (
+                  <td className="px-4 py-2 text-right tabular-nums text-gray-700 whitespace-nowrap">
+                    {r.latest_join_date ?? '—'}
+                  </td>
+                ) : null}
                 <td className="px-4 py-2 text-right tabular-nums text-gray-900">
                   <div className="flex items-center justify-end gap-3">
                     <span className="min-w-[64px] text-right font-medium">{r.unit_sum.toLocaleString()}구좌</span>
@@ -80,7 +97,7 @@ function DataTable(props: { rows: Array<{ parent_name: string; member_name: stri
             ))
           ) : (
             <tr>
-              <td className="px-4 py-6 text-center text-gray-400" colSpan={3}>
+              <td className="px-4 py-6 text-center text-gray-400" colSpan={colSpan}>
                 데이터 없음
               </td>
             </tr>
@@ -203,8 +220,11 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
           <DataTable rows={agg.monthlyJoinedSlots.rows} />
         </SectionCard>
 
-        <SectionCard title="전체 누적 가입완료 구좌 수" subtitle="전체 기간 (가입기준 충족)">
-          <DataTable rows={agg.allTimeJoinedSlots.rows} />
+        <SectionCard
+          title="전체 누적 가입완료 구좌 수"
+          subtitle="전체 기간(가입기준 충족) · 담당자별 가입일은 귀속 계약 중 가장 늦은 날짜, 그 순서로 정렬"
+        >
+          <DataTable rows={agg.allTimeJoinedSlots.rows} showLatestJoinDate />
         </SectionCard>
 
         {/* "담당자별 전날 영업 실적" 섹션은 숨김 처리 */}
