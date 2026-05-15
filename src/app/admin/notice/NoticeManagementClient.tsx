@@ -1,7 +1,7 @@
 'use client';
 
 import LoadingButton from '@/components/ui/LoadingButton';
-import { NOTICE_CATEGORIES, NOTICE_PAGE_SIZE } from '@/lib/notices/constants';
+import { NOTICE_CATEGORIES } from '@/lib/notices/constants';
 import { formatNoticeDateYmd } from '@/lib/notices/status';
 import type { NoticeListItem } from '@/lib/notices/types';
 import Link from 'next/link';
@@ -156,7 +156,7 @@ export default function NoticeManagementClient() {
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3">
         <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
           <p className="text-xs text-slate-500">전체 공지</p>
           <p className="mt-1 text-2xl font-bold text-slate-900 tabular-nums">{total}</p>
@@ -164,10 +164,6 @@ export default function NoticeManagementClient() {
         <div className="rounded-xl border border-orange-100 bg-orange-50/50 px-4 py-3 shadow-sm">
           <p className="text-xs text-orange-800/80">게시 중(대략)</p>
           <p className="mt-1 text-2xl font-bold text-orange-950 tabular-nums">{publishedApprox}</p>
-        </div>
-        <div className="col-span-2 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:col-span-1">
-          <p className="text-xs text-slate-500">페이지당</p>
-          <p className="mt-1 text-2xl font-bold text-slate-900 tabular-nums">{NOTICE_PAGE_SIZE}건</p>
         </div>
       </div>
 
