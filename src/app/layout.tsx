@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import PushNotificationNavigate from '@/components/push/PushNotificationNavigate';
 import './globals.css';
 
 const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
@@ -39,7 +40,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ko">
-      <body>{children}</body>
+      <body>
+        <PushNotificationNavigate />
+        {children}
+      </body>
     </html>
   );
 }

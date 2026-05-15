@@ -10,7 +10,60 @@ export type PushPayload = {
   url?: string;
 };
 
+/** organization 앱에서 service worker → 클라이언트 라우팅 */
+export const PUSH_NOTIFICATION_NAVIGATE = 'PUSH_NOTIFICATION_NAVIGATE';
+
 declare const self: ServiceWorkerGlobalScope;
+
+function resolveTargetPath(url: string): string {
+  try {
+    const u = new URL(url, self.location.origin);
+    if (u.origin !== self.location.origin) return '/organization';
+    return u.pathname + u.search + u.hash;
+  } catch {
+    return '/organization';
+  }
+}
+
+async function openNotificationUrl(url: string): Promise<void> {
+  const path = resolveTargetPath(url);
+  const targetHref = new URL(path, self.location.origin).href;
+
+  const windowClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  const sameOrigin = windowClients.filter((c) => {
+    try {
+      return new URL(c.url).origin === self.location.origin;
+    } catch {
+      return false;
+    }
+  });
+
+  for (const client of sameOrigin) {
+    const wc = client as WindowClient;
+    if ('navigate' in wc && typeof wc.navigate === 'function') {
+      try {
+        const focused = await wc.navigate(targetHref);
+        if (focused) {
+          await focused.focus();
+          return;
+        }
+      } catch {
+        // navigate 미지원·실패 시 postMessage / openWindow 로 폴백
+      }
+    }
+  }
+
+  if (sameOrigin.length > 0) {
+    const wc = sameOrigin[0] as WindowClient;
+    wc.postMessage({ type: PUSH_NOTIFICATION_NAVIGATE, url: path });
+    await wc.focus();
+    return;
+  }
+
+  if (self.clients.openWindow) {
+    await self.clients.openWindow(targetHref);
+  }
+}
 
 self.addEventListener('push', (event: PushEvent) => {
   const fallback: PushPayload = {
@@ -29,11 +82,12 @@ self.addEventListener('push', (event: PushEvent) => {
   }
 
   const title = payload.title ?? fallback.title!;
+  const clickUrl = payload.url ?? '/organization';
   const options: NotificationOptions = {
     body: payload.body ?? '',
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
-    data: { url: payload.url ?? '/organization' },
+    data: { url: clickUrl },
   };
 
   event.waitUntil(self.registration.showNotification(title, options));
@@ -43,18 +97,5 @@ self.addEventListener('notificationclick', (event: NotificationEvent) => {
   event.notification.close();
   const url =
     (event.notification.data as { url?: string } | undefined)?.url ?? '/organization';
-  const target = new URL(url, self.location.origin).href;
-
-  event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clientList) => {
-      for (const client of clientList) {
-        if (!client.url.startsWith(self.location.origin)) continue;
-        if ('navigate' in client && typeof (client as WindowClient).navigate === 'function') {
-          await (client as WindowClient).navigate(target);
-        }
-        if ('focus' in client) return client.focus();
-      }
-      if (self.clients.openWindow) return self.clients.openWindow(target);
-    }),
-  );
+  event.waitUntil(openNotificationUrl(url));
 });
