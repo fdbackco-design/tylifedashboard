@@ -490,7 +490,9 @@ export default function OrgTree({
 
         {/* 자식 서브트리 */}
         {hasChildren && (
-          <div className={`mt-6 pt-6 w-full ${isHqRoot ? 'overflow-x-auto' : ''}`}>
+          <div
+            className={`mt-6 pt-6 w-full touch-none ${isHqRoot ? 'overflow-x-visible' : ''}`}
+          >
             <div className="relative w-full">
               {/* 부모 -> 자식들 수직 라인 */}
               {hideCard ? null : (
@@ -583,11 +585,23 @@ export default function OrgTree({
     return () => el.removeEventListener('wheel', handler as EventListener);
   }, []);
 
+  // 모바일(Safari 등): 자식 overflow·기본 터치 제스처가 패닝/핀치를 가로채는 것을 막기 위해
+  // 뷰포트에서 touchmove를 비-passive로 막는다(Pointer 이벤트와 병행).
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length >= 1) e.preventDefault();
+    };
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    return () => el.removeEventListener('touchmove', onTouchMove);
+  }, []);
+
   return (
     <div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-3">
         <div className="text-xs text-gray-500">
-          {editMode ? '편집 모드 : 노드를 드래그해서 부모 노드 위에 놓으면 소속이 변경됩니다.' : '보기 모드 : 두 손가락으로 줌/이동'}
+          {editMode ? '편집 모드 : 노드를 드래그해서 부모 노드 위에 놓으면 소속이 변경됩니다.' : '보기 모드 : 한 손가락 이동 · 두 손가락 줌'}
         </div>
         <div className="flex flex-wrap items-center gap-2 justify-end">
           {editMessage && (
@@ -616,23 +630,21 @@ export default function OrgTree({
       <div
         ref={viewportRef}
         className={`w-full h-[60vh] sm:h-[70vh] lg:h-[75vh] overflow-hidden rounded-lg select-none touch-none ${dragRef.current.active ? 'cursor-grabbing' : 'cursor-grab'}`}
-        title="휠: 확대/축소 · 드래그: 이동"
+        title="휠: 확대/축소 · 한 손가락: 이동 · 두 손가락: 줌"
         onPointerDown={(e) => {
           // 캔버스처럼 패닝: pointer capture로 영역 밖으로 나가도 드래그 유지
           if (e.pointerType === 'mouse' && e.button !== 0) return;
           if (editMode) return;
 
+          const el = e.currentTarget as HTMLDivElement;
+
           // 터치 포인터는 핀치 줌을 위해 추적
           if (e.pointerType === 'touch') {
-            const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+            const rect = el.getBoundingClientRect();
             pinchRef.current.pointers.set(e.pointerId, { x: e.clientX - rect.left, y: e.clientY - rect.top });
-            try {
-              (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
-            } catch {
-              // ignore
-            }
 
             if (pinchRef.current.pointers.size === 2) {
+              e.preventDefault();
               const pts = [...pinchRef.current.pointers.values()];
               const dx = pts[0].x - pts[1].x;
               const dy = pts[0].y - pts[1].y;
@@ -642,6 +654,11 @@ export default function OrgTree({
               pinchRef.current.startPan = { ...pan };
               pinchRef.current.startMid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
               dragRef.current.active = false;
+              try {
+                el.setPointerCapture(e.pointerId);
+              } catch {
+                // ignore
+              }
               return;
             }
           }
@@ -652,7 +669,11 @@ export default function OrgTree({
           // 모바일(터치)에서는 카드 위에서도 패닝을 허용해야 노드가 잘리지 않음
           if (isOnCard && e.pointerType !== 'touch') return;
           e.preventDefault();
-          (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+          try {
+            el.setPointerCapture(e.pointerId);
+          } catch {
+            // ignore
+          }
           dragRef.current = {
             active: true,
             startX: e.clientX,
@@ -721,11 +742,11 @@ export default function OrgTree({
           }
         }}
       >
-        {/* 고정 레이아웃 트리를 transform(translate+scale)로만 확대/이동 */}
-        <div style={{ transform: `translate(${pan.x}px, ${pan.y}px)` }}>
-          <div style={{ transform: `scale(${scale})`, transformOrigin: '0 0' }}>
+        {/* 고정 레이아웃 트리를 transform(translate+scale)로만 확대/이동 · touch-none으로 브라우저 기본 제스처 경합 방지 */}
+        <div className="touch-none" style={{ transform: `translate(${pan.x}px, ${pan.y}px)` }}>
+          <div className="touch-none" style={{ transform: `scale(${scale})`, transformOrigin: '0 0' }}>
             {/* parent-child 기반 nested tree 렌더링 */}
-            <div className="flex flex-col items-center gap-10 py-6">
+            <div className="flex touch-none flex-col items-center gap-10 py-6">
               {displayRoots.map((r) => (
                 <TreeSubtree key={r.id} node={r} />
               ))}

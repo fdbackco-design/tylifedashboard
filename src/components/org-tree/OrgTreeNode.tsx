@@ -73,7 +73,7 @@ export default function OrgTreeNode({
       onClick={() => onSelect(node.id)}
       data-org-node-card="1"
       className={`
-        min-w-[130px] max-w-[180px] rounded-xl border-2 bg-white shadow-sm
+        touch-none min-w-[130px] max-w-[180px] rounded-xl border-2 bg-white shadow-sm
         cursor-pointer select-none transition-all
         ${style.border}
         ${isSelected
