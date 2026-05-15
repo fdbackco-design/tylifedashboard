@@ -3,13 +3,24 @@
 type Props = {
   open: boolean;
   title: string;
+  /** 2건 이상 선택 삭제 */
+  bulkCount?: number;
   loading?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 };
 
-export default function DeleteNoticeModal({ open, title, loading, onCancel, onConfirm }: Props) {
+export default function DeleteNoticeModal({
+  open,
+  title,
+  bulkCount,
+  loading,
+  onCancel,
+  onConfirm,
+}: Props) {
   if (!open) return null;
+
+  const isBulk = (bulkCount ?? 0) > 1;
 
   return (
     <div
@@ -36,17 +47,19 @@ export default function DeleteNoticeModal({ open, title, loading, onCancel, onCo
           </svg>
         </div>
         <h2 id="delete-notice-title" className="mt-4 text-center text-lg font-bold text-slate-900">
-          공지사항을 삭제하시겠습니까?
+          {isBulk ? `선택한 ${bulkCount}건을 삭제하시겠습니까?` : '공지사항을 삭제하시겠습니까?'}
         </h2>
         <p className="mt-2 text-center text-sm text-slate-500">
           삭제된 공지는 복구할 수 없으며,
           <br />
           영업자 앱에서도 즉시 사라집니다.
         </p>
-        <div className="mt-4 rounded-lg bg-slate-50 px-3 py-2.5 text-center">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">삭제 대상</p>
-          <p className="mt-1 truncate text-sm font-medium text-slate-800">{title}</p>
-        </div>
+        {!isBulk && title ? (
+          <div className="mt-4 rounded-lg bg-slate-50 px-3 py-2.5 text-center">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">삭제 대상</p>
+            <p className="mt-1 truncate text-sm font-medium text-slate-800">{title}</p>
+          </div>
+        ) : null}
         <div className="mt-5 flex gap-2">
           <button
             type="button"

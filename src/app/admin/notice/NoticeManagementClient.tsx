@@ -6,8 +6,13 @@ import { formatNoticeDateYmd } from '@/lib/notices/status';
 import type { NoticeListItem } from '@/lib/notices/types';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import SimpleAlertModal from '@/components/ui/SimpleAlertModal';
 import DeleteNoticeModal from './DeleteNoticeModal';
 import { CategoryBadge, StatusBadge } from './notice-ui';
+
+type DeleteModalState =
+  | { mode: 'single'; item: NoticeListItem }
+  | { mode: 'bulk'; count: number };
 
 type ListResponse = {
   success: boolean;
@@ -35,8 +40,9 @@ export default function NoticeManagementClient() {
   const [loading, setLoading] = useState(true);
   const [bulkLoading, setBulkLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<NoticeListItem | null>(null);
+  const [deleteModal, setDeleteModal] = useState<DeleteModalState | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteSuccessModal, setDeleteSuccessModal] = useState<{ message: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -85,7 +91,10 @@ export default function NoticeManagementClient() {
   async function bulkAction(action: 'stop' | 'delete') {
     const ids = [...selected];
     if (!ids.length) return;
-    if (action === 'delete' && !window.confirm(`선택한 ${ids.length}건을 삭제하시겠습니까?`)) return;
+    if (action === 'delete') {
+      setDeleteModal({ mode: 'bulk', count: ids.length });
+      return;
+    }
 
     setBulkLoading(true);
     setErr(null);
@@ -106,14 +115,29 @@ export default function NoticeManagementClient() {
   }
 
   async function confirmDelete() {
-    if (!deleteTarget) return;
+    if (!deleteModal) return;
+
     setDeleteLoading(true);
     setErr(null);
     try {
-      const res = await fetch(`/api/admin/notices/${deleteTarget.id}`, { method: 'DELETE' });
-      const json = (await res.json()) as { success?: boolean; error?: string };
-      if (!res.ok || !json.success) throw new Error(json.error ?? '삭제 실패');
-      setDeleteTarget(null);
+      if (deleteModal.mode === 'single') {
+        const res = await fetch(`/api/admin/notices/${deleteModal.item.id}`, { method: 'DELETE' });
+        const json = (await res.json()) as { success?: boolean; error?: string };
+        if (!res.ok || !json.success) throw new Error(json.error ?? '삭제 실패');
+        setDeleteModal(null);
+        setDeleteSuccessModal({ message: `「${deleteModal.item.title}」 공지가 삭제되었습니다.` });
+      } else {
+        const ids = [...selected];
+        const res = await fetch('/api/admin/notices/bulk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'delete', ids }),
+        });
+        const json = (await res.json()) as { success?: boolean; error?: string };
+        if (!res.ok || !json.success) throw new Error(json.error ?? '삭제 실패');
+        setDeleteModal(null);
+        setDeleteSuccessModal({ message: `선택한 ${ids.length}건의 공지가 삭제되었습니다.` });
+      }
       await load();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -285,7 +309,7 @@ export default function NoticeManagementClient() {
                       </Link>
                       <button
                         type="button"
-                        onClick={() => setDeleteTarget(row)}
+                        onClick={() => setDeleteModal({ mode: 'single', item: row })}
                         className="ml-3 text-red-600 hover:underline font-medium"
                       >
                         삭제
@@ -333,7 +357,7 @@ export default function NoticeManagementClient() {
                       </Link>
                       <button
                         type="button"
-                        onClick={() => setDeleteTarget(row)}
+                        onClick={() => setDeleteModal({ mode: 'single', item: row })}
                         className="text-sm font-medium text-red-600"
                       >
                         삭제
@@ -384,13 +408,21 @@ export default function NoticeManagementClient() {
       ) : null}
 
       <DeleteNoticeModal
-        open={Boolean(deleteTarget)}
-        title={deleteTarget?.title ?? ''}
+        open={deleteModal !== null}
+        title={deleteModal?.mode === 'single' ? deleteModal.item.title : ''}
+        bulkCount={deleteModal?.mode === 'bulk' ? deleteModal.count : undefined}
         loading={deleteLoading}
         onCancel={() => {
-          if (!deleteLoading) setDeleteTarget(null);
+          if (!deleteLoading) setDeleteModal(null);
         }}
         onConfirm={() => void confirmDelete()}
+      />
+      <SimpleAlertModal
+        open={deleteSuccessModal !== null}
+        variant="success"
+        title="삭제 완료"
+        message={deleteSuccessModal?.message ?? ''}
+        onClose={() => setDeleteSuccessModal(null)}
       />
     </div>
   );
