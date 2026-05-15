@@ -139,7 +139,7 @@ export default function AdminPushClient() {
               placeholder="예: 홍길동"
             />
             <p className="mt-1 text-[11px] text-slate-400">
-              조직원 이름과 일치하는 로그인 계정으로 발송합니다. 동명이인이 있으면 안내합니다.
+              조직도에 표시되는 이름(예: 홍길동)으로 검색합니다. [고객] 접두어는 입력하지 않아도 됩니다.
             </p>
           </label>
         ) : null}
