@@ -104,6 +104,7 @@ export default async function OrganizationMyTreePage({
                 ? `${greetingDisplayName} ${greetingDisplayRank}님 환영합니다`
                 : `${greetingDisplayName}님 환영합니다`}
             </p>
+            <PushSubscribeButton vapidPublicKey={getVapidPublicKey()} compact />
           </div>
         </div>
         <div className="flex items-center justify-between gap-3 border-b border-slate-100/90 bg-gradient-to-r from-slate-50 to-white px-3 py-2 sm:px-4 sm:py-2.5">
@@ -152,10 +153,6 @@ export default async function OrganizationMyTreePage({
             </p>
             <p className="mt-auto pt-1 text-[9px] leading-tight text-slate-400 sm:text-[10px]">{label_year_month}</p>
           </div>
-        </div>
-
-        <div className="border-t border-slate-100 bg-slate-50/40 px-3 py-2.5 sm:px-4">
-          <PushSubscribeButton vapidPublicKey={getVapidPublicKey()} />
         </div>
 
         <div className="flex items-center gap-2 border-t border-slate-100 bg-slate-50/40 px-2 py-2 sm:gap-3 sm:px-3 sm:py-2">

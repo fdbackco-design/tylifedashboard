@@ -66,3 +66,35 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   return NextResponse.json({ success: true, data: { id: (data as { id: string }).id, duplicate: false } });
 }
+
+export async function DELETE(req: NextRequest): Promise<NextResponse> {
+  const userId = await getAuthedUserIdFromRequest(req);
+  if (!userId) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  }
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ success: false, error: 'Invalid JSON' }, { status: 400 });
+  }
+
+  const endpoint = String((body as { endpoint?: string })?.endpoint ?? '').trim();
+  if (!endpoint) {
+    return NextResponse.json({ success: false, error: 'endpoint가 필요합니다.' }, { status: 400 });
+  }
+
+  const db = createAdminSupabaseClient();
+  const { error } = await db
+    .from('push_subscriptions')
+    .delete()
+    .eq('endpoint', endpoint)
+    .eq('user_id', userId);
+
+  if (error) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true });
+}

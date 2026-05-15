@@ -64,3 +64,22 @@ export async function subscribeToWebPush(vapidPublicKey: string): Promise<Client
   if (!json.endpoint || !p256dh || !auth) throw new Error('구독 정보를 읽을 수 없습니다.');
   return { endpoint: json.endpoint, keys: { p256dh, auth } };
 }
+
+/** 브라우저 구독 해제 + 서버 DB에서 endpoint 삭제 */
+export async function unsubscribeFromWebPush(): Promise<void> {
+  if (!isPushSupported()) return;
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  if (!sub) return;
+
+  const endpoint = sub.endpoint;
+  const res = await fetch('/api/push/subscribe', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ endpoint }),
+  });
+  const json = (await res.json()) as { success?: boolean; error?: string };
+  if (!res.ok || !json.success) throw new Error(json.error ?? '구독 해제 실패');
+
+  await sub.unsubscribe();
+}
