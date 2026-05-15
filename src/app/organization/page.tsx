@@ -11,6 +11,7 @@ import {
 import TyLifePartnersLogo from '@/components/TyLifePartnersLogo';
 import AccountActionsClient from './AccountActionsClient';
 import OrganizationDetailsFirstClient from './OrganizationDetailsFirstClient';
+import KakaoChatbotFab from './KakaoChatbotFab';
 import { buildMyOrganizationTreeViewModel } from './my-org-tree-view-model';
 
 export const metadata: Metadata = { title: '내 조직도' };
@@ -85,6 +86,7 @@ export default async function OrganizationMyTreePage({
   } = vm;
 
   return (
+    <>
     <div className="p-3 sm:p-6">
       <header className="mb-4 overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.035] sm:mb-5">
         <div className="relative border-b border-orange-100/70 bg-gradient-to-br from-orange-50/90 via-white to-slate-50/50 px-3 py-3 sm:px-5 sm:py-4">
@@ -197,5 +199,7 @@ export default async function OrganizationMyTreePage({
         defaultMemberId={memberId}
       />
     </div>
+    <KakaoChatbotFab />
+    </>
   );
 }
