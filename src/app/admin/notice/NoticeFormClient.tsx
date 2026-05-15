@@ -300,7 +300,7 @@ export default function NoticeFormClient({ mode, noticeId }: Props) {
         />
         <ToggleRow
           label="푸시 알림 발송"
-          hint="게시 중일 때 전체 푸시 구독자에게 발송"
+          hint="게시 즉시(또는 예약일 00:05 KST) 전체 구독자에게 발송 · 탭 시 공지 상세로 이동"
           checked={sendPush}
           onChange={setSendPush}
         />
@@ -324,7 +324,9 @@ export default function NoticeFormClient({ mode, noticeId }: Props) {
             />
           </label>
         </div>
-        <p className="text-xs text-slate-400">비워두면 상시 게시로 처리됩니다. 시작일이 미래면 예약 상태가 됩니다.</p>
+        <p className="text-xs text-slate-400">
+          비워두면 상시 게시로 처리됩니다. 시작일이 미래면 예약 상태이며, 해당일 00:05(한국시간)에 푸시가 발송됩니다.
+        </p>
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">

@@ -17,6 +17,8 @@ export type NoticeRow = {
   created_at: string;
   updated_at: string;
   view_count?: number;
+  /** 푸시 발송 완료 시각 (중복 발송 방지) */
+  push_sent_at?: string | null;
 };
 
 export type NoticeAttachmentRow = {

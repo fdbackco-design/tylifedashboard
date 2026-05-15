@@ -72,7 +72,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<NextResponse> {
   }
   if (body.content !== undefined) patch.content = String(body.content ?? '');
   if (body.is_pinned !== undefined) patch.is_pinned = Boolean(body.is_pinned);
-  if (body.send_push !== undefined) patch.send_push = Boolean(body.send_push);
+  if (body.send_push !== undefined) {
+    patch.send_push = Boolean(body.send_push);
+    if (!patch.send_push) patch.push_sent_at = null;
+  }
   if (body.is_draft !== undefined) patch.is_draft = Boolean(body.is_draft);
   if (body.is_stopped !== undefined) patch.is_stopped = Boolean(body.is_stopped);
   if (body.publish_start !== undefined) patch.publish_start = parseOptionalDate(body.publish_start);
@@ -86,7 +89,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<NextResponse> {
   if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 });
 
   const row = data as NoticeRow;
-  const push = await maybeSendNoticePush(db, existing as NoticeRow, row);
+  const push = await maybeSendNoticePush(db, row);
 
   const { data: attachments } = await db.from('notice_attachments').select('*').eq('notice_id', id);
   return NextResponse.json({
