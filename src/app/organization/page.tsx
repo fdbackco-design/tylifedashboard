@@ -29,6 +29,7 @@ import TyLifePartnersLogo from '@/components/TyLifePartnersLogo';
 import AccountActionsClient from './AccountActionsClient';
 import { stripOrgTreeNodesForDisplay } from '@/lib/organization/org-tree-display';
 import { buildOrgContractSalesRemap } from '@/lib/organization/org-contract-sales-remap';
+import { stripCustomerMemberNamePrefix } from '@/lib/dashboard/display-format';
 
 export const metadata: Metadata = { title: '내 조직도' };
 export const dynamic = 'force-dynamic';
@@ -557,9 +558,28 @@ export default async function OrganizationMyTreePage({
 
   const [basisYear, basisMonth] = label_year_month.split('-');
 
+  const selfMemberRow =
+    membersForTree.find((m) => m.id === memberId) ?? membersRaw.find((m) => m.id === memberId) ?? null;
+  const greetingDisplayName = (() => {
+    const raw = selfMemberRow?.name?.trim() ?? '';
+    if (!raw) return '회원';
+    const stripped = stripCustomerMemberNamePrefix(raw).trim();
+    return stripped || '회원';
+  })();
+
   return (
     <div className="p-3 sm:p-6">
       <header className="mb-4 overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.035] sm:mb-5">
+        <div className="relative border-b border-orange-100/70 bg-gradient-to-br from-orange-50/90 via-white to-slate-50/50 px-3 py-3 sm:px-5 sm:py-4">
+          <div
+            className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 rounded-full bg-orange-200/25 blur-2xl sm:-right-4 sm:-top-6"
+            aria-hidden
+          />
+          <p className="relative text-[1.35rem] font-bold leading-snug tracking-tight text-slate-900 sm:text-2xl sm:leading-tight">
+            <span className="text-slate-900">{greetingDisplayName}</span>
+            <span className="text-orange-700">님</span>
+          </p>
+        </div>
         <div className="flex items-center justify-between gap-3 border-b border-slate-100/90 bg-gradient-to-r from-slate-50 to-white px-3 py-2 sm:px-4 sm:py-2.5">
           <TyLifePartnersLogo mobileSrc="/logo.png" density="compact" />
           <div className="min-w-0 text-right">
