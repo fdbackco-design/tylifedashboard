@@ -1,7 +1,14 @@
 'use client';
 
 import LoadingButton from '@/components/ui/LoadingButton';
+import SimpleAlertModal from '@/components/ui/SimpleAlertModal';
 import { useEffect, useMemo, useState } from 'react';
+
+type AlertModalState = {
+  variant: 'success' | 'warning';
+  title: string;
+  message: string;
+};
 
 type CustomerRow = {
   id: string;
@@ -65,6 +72,8 @@ export default function AccountIssueClient() {
   const [isLoadingIssuedList, setIsLoadingIssuedList] = useState(false);
   const [issuedListError, setIssuedListError] = useState<string | null>(null);
 
+  const [alertModal, setAlertModal] = useState<AlertModalState | null>(null);
+
   const [issuedAccounts, setIssuedAccounts] = useState<
     Array<{
       id: string;
@@ -82,6 +91,10 @@ export default function AccountIssueClient() {
 
   const normalizedQuery = useMemo(() => query.trim(), [query]);
   const emailDomain = 'tylifedashboard.local';
+
+  function showAlert(variant: AlertModalState['variant'], title: string, message: string) {
+    setAlertModal({ variant, title, message });
+  }
 
   async function loadExistingProfile(memberId: string) {
     if (!memberId) return;
@@ -159,11 +172,7 @@ export default function AccountIssueClient() {
     if (!selectedCustomer) return;
     if (!selectedMemberId) return;
     if (!loginCode.trim() || !password) {
-      alert('로그인 ID와 비밀번호를 입력/자동생성 해주세요.');
-      return;
-    }
-    if (!password) {
-      alert('비밀번호를 입력/자동생성 해주세요.');
+      showAlert('warning', '입력 확인', '로그인 ID와 비밀번호를 입력하거나 자동 생성해 주세요.');
       return;
     }
 
@@ -202,10 +211,12 @@ export default function AccountIssueClient() {
             setPassword(digitsToTry);
           }
           const existed = json.data.existed === true;
-          alert(
+          showAlert(
+            'success',
+            existed ? '계정 반영 완료' : '계정 발급 완료',
             existed
               ? `이미 발급된 계정입니다. 상태만 반영했습니다.\n사용자 ID: ${json.data.user_id}`
-              : `계정 발급 완료\n사용자 ID: ${json.data.user_id}`,
+              : `계정이 발급되었습니다.\n사용자 ID: ${json.data.user_id}`,
           );
           void loadIssuedAccounts();
           return;
@@ -217,11 +228,11 @@ export default function AccountIssueClient() {
           continue;
         }
 
-        alert(lastError ?? '발급 실패');
+        showAlert('warning', '발급 실패', lastError ?? '발급에 실패했습니다.');
         return;
       }
 
-      alert(lastError ?? '발급 실패(중복 코드 재시도 초과)');
+      showAlert('warning', '발급 실패', lastError ?? '발급 실패(중복 코드 재시도 초과)');
     } finally {
       setIsIssuing(false);
     }
@@ -267,6 +278,14 @@ export default function AccountIssueClient() {
   }, []);
 
   return (
+    <>
+      <SimpleAlertModal
+        open={alertModal !== null}
+        variant={alertModal?.variant ?? 'success'}
+        title={alertModal?.title ?? ''}
+        message={alertModal?.message ?? ''}
+        onClose={() => setAlertModal(null)}
+      />
     <div className="space-y-6">
       <div className="bg-white border border-gray-200 rounded-xl p-4">
         <div className="flex gap-2 items-end flex-wrap">
@@ -494,6 +513,7 @@ export default function AccountIssueClient() {
         )}
       </div>
     </div>
+    </>
   );
 }
 
