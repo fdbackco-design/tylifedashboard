@@ -118,6 +118,13 @@ function DataTable(props: {
 }
 
 function DirectPerfTable(props: { rows: DashboardDirectPerfRow[] }) {
+  const badgeForRank = (idx: number) => {
+    if (idx === 0) return '🥇';
+    if (idx === 1) return '🥈';
+    if (idx === 2) return '🥉';
+    return null;
+  };
+
   return (
     <div className="overflow-auto rounded-lg border border-slate-200/90 max-h-[420px] lg:max-h-[520px]">
       <table className="min-w-full text-sm">
@@ -129,14 +136,26 @@ function DirectPerfTable(props: { rows: DashboardDirectPerfRow[] }) {
         </thead>
         <tbody>
           {props.rows.length ? (
-            props.rows.map((r, idx) => (
+            props.rows.map((r, idx) => {
+              const medal = badgeForRank(idx);
+              return (
               <tr key={`${r.member_name}-${idx}`} className="border-t border-gray-100">
-                <td className="px-4 py-2 text-gray-900 whitespace-nowrap font-medium">{r.member_name}</td>
+                <td className="px-4 py-2 text-gray-900 whitespace-nowrap font-medium">
+                  <span className="inline-flex items-center gap-2">
+                    {medal ? (
+                      <span className="text-base" aria-label={`순위 ${idx + 1}위`}>
+                        {medal}
+                      </span>
+                    ) : null}
+                    <span>{r.member_name}</span>
+                  </span>
+                </td>
                 <td className="px-4 py-2 text-right tabular-nums text-gray-900">
                   {r.unit_sum.toLocaleString()}구좌
                 </td>
               </tr>
-            ))
+            );
+            })
           ) : (
             <tr>
               <td className="px-4 py-6 text-center text-gray-400" colSpan={2}>
@@ -274,7 +293,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
 
       <SectionCard
         title={`${agg.year_month} 담당자별 실적`}
-        subtitle={`${agg.month_window.start_date} ~ ${agg.month_window.end_date} · 가입완료 계약을 판매 담당자(sales_member_id) 기준 직접 구좌로 합산`}
+        subtitle={`${agg.month_window.start_date} ~ ${agg.month_window.end_date}`}
       >
         <DirectPerfTable rows={agg.monthlyDirectJoinedBySalesMember.rows} />
       </SectionCard>
