@@ -42,18 +42,11 @@ export default async function OrganizationNoticeListPage() {
       <div className="min-h-[100dvh] bg-slate-50/80">
         <div className="mx-auto w-full max-w-lg bg-white min-h-[100dvh] shadow-sm ring-1 ring-slate-900/[0.04]">
           <header className="sticky top-0 z-20 border-b border-slate-100 bg-white">
-            <div className="flex items-center gap-2 px-3 py-3">
-              <OrganizationNavMenu />
-              <Link
-                href="/organization"
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100"
-                aria-label="뒤로"
-              >
-                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M15 6l-6 6 6 6" />
-                </svg>
-              </Link>
-              <h1 className="flex-1 text-center text-base font-bold text-slate-900 pr-9">공지사항</h1>
+            <div className="relative flex items-center justify-center px-3 py-3">
+              <div className="absolute left-3 top-1/2 -translate-y-1/2">
+                <OrganizationNavMenu />
+              </div>
+              <h1 className="text-base font-bold text-slate-900">공지사항</h1>
             </div>
           </header>
 

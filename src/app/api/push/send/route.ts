@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { isAdminAuthed } from '@/lib/admin-auth';
+import { resolvePushTargetUserId } from '@/lib/push/resolve-target';
 import { loadSubscriptionsForSend, sendWebPushToSubscriptions } from '@/lib/push/send';
 import type { PushSendBody } from '@/lib/push/types';
 
@@ -23,7 +24,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const title = String(body.title ?? '').trim();
   const pushBody = String(body.body ?? '').trim();
   const url = String(body.url ?? '/organization').trim() || '/organization';
-  const targetUserId = body.targetUserId ? String(body.targetUserId).trim() : undefined;
+  const targetInput = body.targetUserName
+    ? String(body.targetUserName).trim()
+    : body.targetUserId
+      ? String(body.targetUserId).trim()
+      : undefined;
 
   if (!title) {
     return NextResponse.json({ success: false, error: '제목을 입력해주세요.' }, { status: 400 });
@@ -34,10 +39,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const db = createAdminSupabaseClient();
 
-  if (targetUserId) {
-    const { data: profile } = await db.from('user_profiles').select('id').eq('id', targetUserId).maybeSingle();
-    if (!profile) {
-      return NextResponse.json({ success: false, error: '대상 사용자를 찾을 수 없습니다.' }, { status: 404 });
+  let targetUserId: string | undefined;
+  let targetLabel: string | undefined;
+  if (targetInput) {
+    try {
+      const resolved = await resolvePushTargetUserId(db, targetInput);
+      targetUserId = resolved.userId;
+      targetLabel = resolved.label;
+    } catch (e) {
+      return NextResponse.json(
+        { success: false, error: e instanceof Error ? e.message : String(e) },
+        { status: 404 },
+      );
     }
   }
 
@@ -65,7 +78,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       body: pushBody,
       url,
     });
-    return NextResponse.json({ success: true, data: result });
+    return NextResponse.json({
+      success: true,
+      data: { ...result, targetLabel },
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (msg.includes('VAPID')) {

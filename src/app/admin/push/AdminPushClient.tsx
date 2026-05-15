@@ -16,7 +16,7 @@ export default function AdminPushClient() {
   const [body, setBody] = useState('');
   const [url, setUrl] = useState('/organization');
   const [targetMode, setTargetMode] = useState<'all' | 'user'>('all');
-  const [targetUserId, setTargetUserId] = useState('');
+  const [targetUserName, setTargetUserName] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SendResult | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -26,8 +26,8 @@ export default function AdminPushClient() {
       setErr('제목과 내용을 입력해주세요.');
       return;
     }
-    if (targetMode === 'user' && !targetUserId.trim()) {
-      setErr('대상 사용자 ID를 입력해주세요.');
+    if (targetMode === 'user' && !targetUserName.trim()) {
+      setErr('대상 사용자 이름을 입력해주세요.');
       return;
     }
 
@@ -42,12 +42,21 @@ export default function AdminPushClient() {
           title: title.trim(),
           body: body.trim(),
           url: url.trim() || '/organization',
-          ...(targetMode === 'user' ? { targetUserId: targetUserId.trim() } : {}),
+          ...(targetMode === 'user' ? { targetUserName: targetUserName.trim() } : {}),
         }),
       });
-      const json = (await res.json()) as { success?: boolean; error?: string; data?: SendResult };
+      const json = (await res.json()) as {
+        success?: boolean;
+        error?: string;
+        data?: SendResult & { targetLabel?: string };
+      };
       if (!res.ok || !json.success) throw new Error(json.error ?? '발송 실패');
-      setResult(json.data ?? null);
+      const data = json.data ?? null;
+      if (data?.targetLabel && targetMode === 'user') {
+        setResult({ ...data, message: `${data.targetLabel} 님에게 발송` });
+      } else {
+        setResult(data);
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -122,13 +131,16 @@ export default function AdminPushClient() {
         </div>
         {targetMode === 'user' ? (
           <label className="block">
-            <span className="text-xs font-medium text-slate-600">사용자 ID (auth.users UUID)</span>
+            <span className="text-xs font-medium text-slate-600">사용자 이름</span>
             <input
-              value={targetUserId}
-              onChange={(e) => setTargetUserId(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono"
-              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+              value={targetUserName}
+              onChange={(e) => setTargetUserName(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              placeholder="예: 홍길동"
             />
+            <p className="mt-1 text-[11px] text-slate-400">
+              조직원 이름과 일치하는 로그인 계정으로 발송합니다. 동명이인이 있으면 안내합니다.
+            </p>
           </label>
         ) : null}
       </section>

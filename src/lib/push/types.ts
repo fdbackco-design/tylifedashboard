@@ -21,8 +21,10 @@ export type PushSendBody = {
   title: string;
   body: string;
   url?: string;
-  /** 지정 시 해당 사용자 구독 기기에만 발송 */
+  /** 지정 시 해당 사용자 구독 기기에만 발송 (UUID) */
   targetUserId?: string;
+  /** 지정 시 조직원 이름으로 대상 조회 (예: 홍길동) */
+  targetUserName?: string;
 };
 
 export type PushSendResult = {
