@@ -1,30 +1,65 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-
-const MSG_TYPE = 'PUSH_NOTIFICATION_NAVIGATE';
+import { useLayoutEffect } from 'react';
+import {
+  PUSH_NAV_CHANNEL,
+  PUSH_NAV_MSG_TYPE,
+  applyPushNavigation,
+  drainPendingPushNavigation,
+} from '@/lib/push/push-navigate-client';
 
 /**
- * Service Worker notificationclick 폴백: 앱이 열려 있을 때 Next.js 라우터로 이동.
- * (공지 푸시 → /organization/notice/[id] 등)
+ * 푸시 알림 탭 시 공지 상세 등으로 이동.
+ * SW postMessage / BroadcastChannel + sessionStorage로 React 마운트 전 메시지 유실을 방지한다.
  */
 export default function PushNotificationNavigate() {
-  const router = useRouter();
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined') return;
 
-  useEffect(() => {
-    if (!('serviceWorker' in navigator)) return;
+    const onNavigate = (url: unknown) => {
+      if (typeof url !== 'string' || !url) return;
+      applyPushNavigation(url);
+    };
 
     const onMessage = (event: MessageEvent) => {
       const data = event.data as { type?: string; url?: string } | null;
-      if (!data || data.type !== MSG_TYPE || typeof data.url !== 'string') return;
-      const path = data.url.startsWith('/') ? data.url : `/${data.url}`;
-      router.push(path);
+      if (!data || data.type !== PUSH_NAV_MSG_TYPE) return;
+      onNavigate(data.url);
     };
 
-    navigator.serviceWorker.addEventListener('message', onMessage);
-    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
-  }, [router]);
+    let bc: BroadcastChannel | null = null;
+    try {
+      bc = new BroadcastChannel(PUSH_NAV_CHANNEL);
+      bc.onmessage = (event) => {
+        const data = event.data as { type?: string; url?: string } | null;
+        if (!data || data.type !== PUSH_NAV_MSG_TYPE) return;
+        onNavigate(data.url);
+      };
+    } catch {
+      /* ignore */
+    }
+
+    window.addEventListener('message', onMessage);
+    navigator.serviceWorker?.addEventListener('message', onMessage);
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') drainPendingPushNavigation();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('pageshow', drainPendingPushNavigation);
+    window.addEventListener('focus', drainPendingPushNavigation);
+
+    drainPendingPushNavigation();
+
+    return () => {
+      window.removeEventListener('message', onMessage);
+      navigator.serviceWorker?.removeEventListener('message', onMessage);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('pageshow', drainPendingPushNavigation);
+      window.removeEventListener('focus', drainPendingPushNavigation);
+      bc?.close();
+    };
+  }, []);
 
   return null;
 }

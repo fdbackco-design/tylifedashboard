@@ -10,8 +10,8 @@ export type PushPayload = {
   url?: string;
 };
 
-/** organization 앱에서 service worker → 클라이언트 라우팅 */
-export const PUSH_NOTIFICATION_NAVIGATE = 'PUSH_NOTIFICATION_NAVIGATE';
+export const PUSH_NAV_CHANNEL = 'tylife-push-navigate';
+export const PUSH_NAV_MSG_TYPE = 'PUSH_NOTIFICATION_NAVIGATE';
 
 declare const self: ServiceWorkerGlobalScope;
 
@@ -23,6 +23,21 @@ function resolveTargetPath(url: string): string {
   } catch {
     return '/organization';
   }
+}
+
+function broadcastNavigate(path: string): void {
+  try {
+    const bc = new BroadcastChannel(PUSH_NAV_CHANNEL);
+    bc.postMessage({ type: PUSH_NAV_MSG_TYPE, url: path });
+    bc.close();
+  } catch {
+    /* BroadcastChannel 미지원 환경 */
+  }
+}
+
+function postNavigateToClient(client: Client, path: string): void {
+  client.postMessage({ type: PUSH_NAV_MSG_TYPE, url: path });
+  broadcastNavigate(path);
 }
 
 async function openNotificationUrl(url: string): Promise<void> {
@@ -38,28 +53,34 @@ async function openNotificationUrl(url: string): Promise<void> {
     }
   });
 
+  // 1) navigate API (Chrome desktop·일부 Android)
   for (const client of sameOrigin) {
     const wc = client as WindowClient;
     if ('navigate' in wc && typeof wc.navigate === 'function') {
       try {
-        const focused = await wc.navigate(targetHref);
-        if (focused) {
-          await focused.focus();
+        const next = await wc.navigate(targetHref);
+        if (next) {
+          postNavigateToClient(next, path);
+          await next.focus();
           return;
         }
       } catch {
-        // navigate 미지원·실패 시 postMessage / openWindow 로 폴백
+        /* fall through */
       }
     }
   }
 
+  // 2) 앱이 이미 열려 있으면 메시지 + 포커스 (페이지에서 location.assign 처리)
   if (sameOrigin.length > 0) {
-    const wc = sameOrigin[0] as WindowClient;
-    wc.postMessage({ type: PUSH_NOTIFICATION_NAVIGATE, url: path });
-    await wc.focus();
+    for (const client of sameOrigin) {
+      postNavigateToClient(client, path);
+    }
+    const first = sameOrigin[0] as WindowClient;
+    await first.focus();
     return;
   }
 
+  // 3) 앱이 닫혀 있으면 URL로 새 창/앱 실행 (TWA·PWA cold start)
   if (self.clients.openWindow) {
     await self.clients.openWindow(targetHref);
   }
@@ -83,11 +104,14 @@ self.addEventListener('push', (event: PushEvent) => {
 
   const title = payload.title ?? fallback.title!;
   const clickUrl = payload.url ?? '/organization';
+  const path = resolveTargetPath(clickUrl);
+  const href = new URL(path, self.location.origin).href;
+
   const options: NotificationOptions = {
     body: payload.body ?? '',
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
-    data: { url: clickUrl },
+    data: { url: path, href },
   };
 
   event.waitUntil(self.registration.showNotification(title, options));
@@ -95,7 +119,7 @@ self.addEventListener('push', (event: PushEvent) => {
 
 self.addEventListener('notificationclick', (event: NotificationEvent) => {
   event.notification.close();
-  const url =
-    (event.notification.data as { url?: string } | undefined)?.url ?? '/organization';
+  const data = event.notification.data as { url?: string; href?: string } | undefined;
+  const url = data?.href ?? data?.url ?? '/organization';
   event.waitUntil(openNotificationUrl(url));
 });

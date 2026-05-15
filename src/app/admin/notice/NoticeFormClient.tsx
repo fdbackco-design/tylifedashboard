@@ -337,7 +337,7 @@ export default function NoticeFormClient({ mode, noticeId }: Props) {
         />
         <ToggleRow
           label="푸시 알림 발송"
-          hint="게시 즉시(또는 예약일 00:05 KST) 전체 구독자에게 발송 · 탭 시 공지 상세로 이동"
+          hint="게시 즉시(또는 예약일 11시) 전체 구독자에게 발송"
           checked={sendPush}
           onChange={setSendPush}
         />
@@ -362,14 +362,14 @@ export default function NoticeFormClient({ mode, noticeId }: Props) {
           </label>
         </div>
         <p className="text-xs text-slate-400">
-          비워두면 상시 게시로 처리됩니다. 시작일이 미래면 예약 상태이며, 해당일 00:05(한국시간)에 푸시가 발송됩니다.
+          비워두면 상시 게시로 처리됩니다.
         </p>
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
         <h3 className="text-sm font-semibold text-orange-950">첨부 파일</h3>
         <p className="text-xs text-slate-500">
-          PDF, 문서 등 다운로드용 첨부 · 파일당 최대 10MB (본문 이미지는 위 내용란에서 삽입)
+          파일당 최대 10MB
         </p>
         <input
           ref={fileInputRef}

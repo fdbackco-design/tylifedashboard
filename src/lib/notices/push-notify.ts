@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { noticeContentSummary } from './content-utils';
 import { getNoticeDisplayStatus } from './status';
 import type { NoticeRow } from './types';
+import { noticeDetailPath, resolvePushNotificationUrl } from '@/lib/push/notification-url';
 import { loadSubscriptionsForSend, sendWebPushToSubscriptions } from '@/lib/push/send';
 import type { PushSendResult } from '@/lib/push/types';
 import { assertVapidConfigured } from '@/lib/push/vapid';
@@ -62,7 +63,7 @@ export async function maybeSendNoticePush(db: SupabaseClient, row: NoticeRow): P
     subscriptions,
     title: row.title,
     body,
-    url: `/organization/notice/${row.id}`,
+    url: resolvePushNotificationUrl(noticeDetailPath(row.id)),
   });
 
   if (result.sent > 0) {
