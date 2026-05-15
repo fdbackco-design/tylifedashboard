@@ -56,17 +56,7 @@ function DataTable(props: {
             rows.map((r, idx) => (
               <tr key={`${r.member_name}-${idx}`} className="border-t border-gray-100">
                 <td className="px-4 py-2 text-gray-500 whitespace-nowrap">{r.parent_name}</td>
-                <td className="px-4 py-2 text-gray-900 whitespace-nowrap font-medium">
-                  <span className="inline-flex items-center gap-2">
-                    <span
-                      className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-[11px] text-gray-600 tabular-nums"
-                      aria-label={`순위 ${idx + 1}위`}
-                    >
-                      {idx + 1}
-                    </span>
-                    <span className="font-medium">{r.member_name}</span>
-                  </span>
-                </td>
+                <td className="px-4 py-2 font-medium text-gray-900 whitespace-nowrap">{r.member_name}</td>
                 {showLatestJoinDate ? (
                   <td className="px-4 py-2 text-right tabular-nums text-gray-700 whitespace-nowrap">
                     {r.latest_join_date ?? '—'}
