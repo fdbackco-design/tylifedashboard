@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { isAdminAuthed } from '@/lib/admin-auth';
 import { NOTICE_STORAGE_BUCKET } from '@/lib/notices/constants';
+import { removeNoticeInlineStorage } from '@/lib/notices/storage';
 import { getNoticeDisplayStatus } from '@/lib/notices/status';
 import type { NoticeAttachmentRow, NoticeListItem, NoticeRow } from '@/lib/notices/types';
 import { assertPinnedLimit, parseNoticeCategory, parseOptionalDate } from '@/lib/notices/validation';
@@ -107,6 +108,8 @@ export async function DELETE(req: NextRequest, ctx: Ctx): Promise<NextResponse> 
   if (paths.length > 0) {
     await db.storage.from(NOTICE_STORAGE_BUCKET).remove(paths);
   }
+
+  await removeNoticeInlineStorage(db, id);
 
   return NextResponse.json({ success: true });
 }

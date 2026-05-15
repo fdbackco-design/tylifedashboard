@@ -13,6 +13,10 @@ export function parseOptionalDate(v: unknown): string | null {
   return s;
 }
 
+export function isAllowedInlineImageMime(mime: string): boolean {
+  return mime.toLowerCase().startsWith('image/');
+}
+
 export function isAllowedUploadMime(mime: string): boolean {
   const m = mime.toLowerCase();
   if (m === 'application/pdf') return true;

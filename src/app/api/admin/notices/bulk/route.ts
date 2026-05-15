@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { isAdminAuthed } from '@/lib/admin-auth';
 import { NOTICE_STORAGE_BUCKET } from '@/lib/notices/constants';
+import { removeNoticeInlineStorage } from '@/lib/notices/storage';
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!(await isAdminAuthed(req))) {
@@ -38,6 +39,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     if (paths.length > 0) {
       await db.storage.from(NOTICE_STORAGE_BUCKET).remove(paths);
+    }
+    for (const nid of ids) {
+      await removeNoticeInlineStorage(db, nid);
     }
     return NextResponse.json({ success: true, deleted: ids.length });
   }

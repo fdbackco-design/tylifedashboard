@@ -6,7 +6,10 @@ import type { NoticeCategory } from '@/lib/notices/constants';
 import type { NoticeAttachmentRow, NoticeListItem } from '@/lib/notices/types';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { resolveNoticeContentBlobImages } from '@/lib/notices/inline-images-client';
+import { sanitizeNoticeHtml } from '@/lib/notices/storage';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import NoticeContentEditor from './NoticeContentEditor';
 import { StatusBadge } from './notice-ui';
 
 type Props = {
@@ -25,6 +28,7 @@ function formatBytes(n: number): string {
 export default function NoticeFormClient({ mode, noticeId }: Props) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pendingBlobImagesRef = useRef<Map<string, File>>(new Map());
 
   const [loading, setLoading] = useState(mode === 'edit');
   const [saving, setSaving] = useState(false);
@@ -126,7 +130,7 @@ export default function NoticeFormClient({ mode, noticeId }: Props) {
     }
   }
 
-  async function save(isDraft: boolean) {
+  async function save() {
     if (!title.trim()) {
       setErr('제목을 입력해주세요.');
       return;
@@ -134,27 +138,57 @@ export default function NoticeFormClient({ mode, noticeId }: Props) {
     setSaving(true);
     setErr(null);
     try {
-      const payload = {
-        category,
-        title: title.trim(),
-        content,
-        is_pinned: isPinned,
-        send_push: sendPush,
-        is_draft: isDraft,
-        publish_start: publishStart || null,
-        publish_end: publishEnd || null,
-      };
+      let resolvedContent = sanitizeNoticeHtml(content);
 
       let id = noticeId;
       if (mode === 'create') {
         const res = await fetch('/api/admin/notices', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            category,
+            title: title.trim(),
+            content: '',
+            is_pinned: isPinned,
+            send_push: sendPush,
+            is_draft: false,
+            publish_start: publishStart || null,
+            publish_end: publishEnd || null,
+          }),
         });
         const json = (await res.json()) as { success?: boolean; error?: string; data?: NoticeListItem };
         if (!res.ok || !json.success || !json.data) throw new Error(json.error ?? '저장 실패');
         id = json.data.id;
+      }
+
+      if (id && pendingBlobImagesRef.current.size > 0) {
+        resolvedContent = await resolveNoticeContentBlobImages(
+          id,
+          resolvedContent,
+          pendingBlobImagesRef.current,
+        );
+        pendingBlobImagesRef.current.clear();
+      }
+
+      const payload = {
+        category,
+        title: title.trim(),
+        content: resolvedContent,
+        is_pinned: isPinned,
+        send_push: sendPush,
+        is_draft: false,
+        publish_start: publishStart || null,
+        publish_end: publishEnd || null,
+      };
+
+      if (mode === 'create' && id) {
+        const res = await fetch(`/api/admin/notices/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const json = (await res.json()) as { success?: boolean; error?: string };
+        if (!res.ok || !json.success) throw new Error(json.error ?? '저장 실패');
       } else if (noticeId) {
         const res = await fetch(`/api/admin/notices/${noticeId}`, {
           method: 'PATCH',
@@ -216,16 +250,19 @@ export default function NoticeFormClient({ mode, noticeId }: Props) {
             placeholder="공지 제목"
           />
         </label>
-        <label className="block">
+        <div className="block">
           <span className="text-xs font-medium text-slate-600">내용</span>
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            rows={10}
-            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-orange-400 focus:outline-none focus:ring-2 focus:ring-orange-200"
-            placeholder="공지 내용을 입력하세요"
-          />
-        </label>
+          <div className="mt-1">
+            <NoticeContentEditor
+              value={content}
+              onChange={setContent}
+              noticeId={mode === 'edit' ? noticeId : undefined}
+              onError={setErr}
+              pendingBlobImagesRef={pendingBlobImagesRef}
+              disabled={saving || uploading}
+            />
+          </div>
+        </div>
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
@@ -267,12 +304,15 @@ export default function NoticeFormClient({ mode, noticeId }: Props) {
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
         <h3 className="text-sm font-semibold text-orange-950">첨부 파일</h3>
-        <p className="text-xs text-slate-500">PDF, 이미지, 문서 · 파일당 최대 10MB</p>
+        <p className="text-xs text-slate-500">
+          PDF, 문서 등 다운로드용 첨부 · 파일당 최대 10MB (본문 이미지는 위 내용란에서 삽입)
+        </p>
         <input
           ref={fileInputRef}
           type="file"
           multiple
           className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-orange-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-orange-800"
+          accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,application/pdf,application/msword,application/vnd.*,text/plain"
           onChange={(e) => onPickFiles(e.target.files)}
         />
         {attachments.length > 0 ? (
@@ -321,24 +361,14 @@ export default function NoticeFormClient({ mode, noticeId }: Props) {
         >
           목록으로
         </Link>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <LoadingButton
-            type="button"
-            isLoading={saving}
-            onClick={() => void save(true)}
-            className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-          >
-            임시저장
-          </LoadingButton>
-          <LoadingButton
-            type="button"
-            isLoading={saving || uploading}
-            onClick={() => void save(false)}
-            className="rounded-lg bg-orange-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-50"
-          >
-            게시
-          </LoadingButton>
-        </div>
+        <LoadingButton
+          type="button"
+          isLoading={saving || uploading}
+          onClick={() => void save()}
+          className="rounded-lg bg-orange-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-50"
+        >
+          게시
+        </LoadingButton>
       </div>
     </div>
   );
