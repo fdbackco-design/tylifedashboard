@@ -13,6 +13,8 @@ import AccountActionsClient from './AccountActionsClient';
 import OrganizationDetailsFirstClient from './OrganizationDetailsFirstClient';
 import KakaoChatbotFab from './KakaoChatbotFab';
 import OrganizationNavMenu from '@/components/organization/OrganizationNavMenu';
+import PushSubscribeButton from '@/components/push/PushSubscribeButton';
+import { getVapidPublicKey } from '@/lib/push/vapid';
 import { buildMyOrganizationTreeViewModel } from './my-org-tree-view-model';
 
 export const metadata: Metadata = { title: '내 조직도' };
@@ -150,6 +152,10 @@ export default async function OrganizationMyTreePage({
             </p>
             <p className="mt-auto pt-1 text-[9px] leading-tight text-slate-400 sm:text-[10px]">{label_year_month}</p>
           </div>
+        </div>
+
+        <div className="border-t border-slate-100 bg-slate-50/40 px-3 py-2.5 sm:px-4">
+          <PushSubscribeButton vapidPublicKey={getVapidPublicKey()} />
         </div>
 
         <div className="flex items-center gap-2 border-t border-slate-100 bg-slate-50/40 px-2 py-2 sm:gap-3 sm:px-3 sm:py-2">

@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { href: '/admin/organization', label: '조직도' },
   { href: '/admin/settlement', label: '정산 현황' },
   { href: '/admin/notice', label: '공지사항' },
+  { href: '/admin/push', label: '푸시 발송' },
 ] as const;
 
 export default function AdminLayout({
