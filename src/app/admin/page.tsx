@@ -208,7 +208,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
     {
       label: `${agg.year_month} 가입 보류 구좌 수`,
       value: `${agg.monthlyJoinDeferredSlots.total_units.toLocaleString()}구좌`,
-      hint: '해피콜 부재·계약취소, 렌탈신청번호 렌탈기준 미충족·가입건 없음',
+      hint: '',
     },
     {
       label: '총 누적 가입완료 구좌 수',
