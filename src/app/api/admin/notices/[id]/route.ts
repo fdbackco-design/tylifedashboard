@@ -5,6 +5,7 @@ import { NOTICE_STORAGE_BUCKET } from '@/lib/notices/constants';
 import { removeNoticeInlineStorage } from '@/lib/notices/storage';
 import { getNoticeDisplayStatus } from '@/lib/notices/status';
 import type { NoticeAttachmentRow, NoticeListItem, NoticeRow } from '@/lib/notices/types';
+import { maybeSendNoticePush } from '@/lib/notices/push-notify';
 import { assertPinnedLimit, parseNoticeCategory, parseOptionalDate } from '@/lib/notices/validation';
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -84,10 +85,14 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<NextResponse> {
   const { data, error } = await db.from('notices').update(patch).eq('id', id).select('*').single();
   if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 });
 
+  const row = data as NoticeRow;
+  const push = await maybeSendNoticePush(db, existing as NoticeRow, row);
+
   const { data: attachments } = await db.from('notice_attachments').select('*').eq('notice_id', id);
   return NextResponse.json({
     success: true,
-    data: mapDetail(data as NoticeRow, (attachments ?? []) as NoticeAttachmentRow[]),
+    data: mapDetail(row, (attachments ?? []) as NoticeAttachmentRow[]),
+    push,
   });
 }
 

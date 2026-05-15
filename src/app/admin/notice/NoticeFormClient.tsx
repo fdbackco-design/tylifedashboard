@@ -11,6 +11,7 @@ import { sanitizeNoticeHtml } from '@/lib/notices/storage';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import NoticeContentEditor from './NoticeContentEditor';
 import { StatusBadge } from './notice-ui';
+import type { NoticePushOutcome } from '@/lib/notices/push-notify';
 
 type Props = {
   mode: 'create' | 'edit';
@@ -130,6 +131,18 @@ export default function NoticeFormClient({ mode, noticeId }: Props) {
     }
   }
 
+  function applyPushOutcome(push: NoticePushOutcome | undefined) {
+    if (!push) return;
+    if (push.sent) {
+      const { sent, failed, removed } = push.result;
+      window.alert(
+        `푸시 발송 완료\n성공: ${sent}건${failed ? `, 실패: ${failed}건` : ''}${removed ? `, 만료 구독 삭제: ${removed}건` : ''}`,
+      );
+    } else if (sendPush) {
+      window.alert(`푸시 미발송: ${push.reason}`);
+    }
+  }
+
   async function save() {
     if (!title.trim()) {
       setErr('제목을 입력해주세요.');
@@ -138,6 +151,7 @@ export default function NoticeFormClient({ mode, noticeId }: Props) {
     setSaving(true);
     setErr(null);
     try {
+      let lastPush: NoticePushOutcome | undefined;
       let resolvedContent = sanitizeNoticeHtml(content);
 
       let id = noticeId;
@@ -187,19 +201,30 @@ export default function NoticeFormClient({ mode, noticeId }: Props) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        const json = (await res.json()) as { success?: boolean; error?: string };
+        const json = (await res.json()) as {
+          success?: boolean;
+          error?: string;
+          push?: NoticePushOutcome;
+        };
         if (!res.ok || !json.success) throw new Error(json.error ?? '저장 실패');
+        lastPush = json.push;
       } else if (noticeId) {
         const res = await fetch(`/api/admin/notices/${noticeId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        const json = (await res.json()) as { success?: boolean; error?: string };
+        const json = (await res.json()) as {
+          success?: boolean;
+          error?: string;
+          push?: NoticePushOutcome;
+        };
         if (!res.ok || !json.success) throw new Error(json.error ?? '저장 실패');
+        lastPush = json.push;
       }
 
       if (id && pendingFiles.length) await uploadPending(id);
+      applyPushOutcome(lastPush);
       router.push('/admin/notice');
       router.refresh();
     } catch (e) {
@@ -275,7 +300,7 @@ export default function NoticeFormClient({ mode, noticeId }: Props) {
         />
         <ToggleRow
           label="푸시 알림 발송"
-          hint="게시 시 영업자 앱 푸시(연동 시)"
+          hint="게시 중일 때 전체 푸시 구독자에게 발송"
           checked={sendPush}
           onChange={setSendPush}
         />
