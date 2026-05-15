@@ -57,6 +57,8 @@ export type OrganizationMyTreeViewModel = {
   end_date: string;
   yearsForPicker: number[];
   greetingDisplayName: string;
+  /** 인사말용 직급(없으면 빈 문자열) */
+  greetingDisplayRank: string;
   treeForDisplay: OrgTreeNode[];
   contractsByMember: Record<string, ContractItem[]>;
   orgMetricsById: Record<
@@ -527,6 +529,7 @@ export async function buildMyOrganizationTreeViewModel(
     const stripped = stripCustomerMemberNamePrefix(raw).trim();
     return stripped || '회원';
   })();
+  const greetingDisplayRank = (selfMemberRow?.rank ?? '').trim();
 
   return {
     yearMonth,
@@ -535,6 +538,7 @@ export async function buildMyOrganizationTreeViewModel(
     end_date,
     yearsForPicker,
     greetingDisplayName,
+    greetingDisplayRank,
     treeForDisplay: treeForDisplay as OrgTreeNode[],
     contractsByMember,
     orgMetricsById: orgMetricsById as OrganizationMyTreeViewModel['orgMetricsById'],

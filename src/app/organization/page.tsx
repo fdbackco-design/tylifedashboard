@@ -74,6 +74,7 @@ export default async function OrganizationMyTreePage({
     end_date,
     yearsForPicker,
     greetingDisplayName,
+    greetingDisplayRank,
     treeForDisplay,
     contractsByMember,
     periodPendingTreeContractCount,
@@ -92,7 +93,9 @@ export default async function OrganizationMyTreePage({
             aria-hidden
           />
           <p className="relative text-[1.35rem] font-bold leading-snug tracking-tight text-orange-700 sm:text-2xl sm:leading-tight">
-            {greetingDisplayName}님 실적 요약
+            {greetingDisplayRank
+              ? `${greetingDisplayName} ${greetingDisplayRank}님 환영합니다`
+              : `${greetingDisplayName}님 환영합니다`}
           </p>
         </div>
         <div className="flex items-center justify-between gap-3 border-b border-slate-100/90 bg-gradient-to-r from-slate-50 to-white px-3 py-2 sm:px-4 sm:py-2.5">
