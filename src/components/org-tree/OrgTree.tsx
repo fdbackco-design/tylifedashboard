@@ -571,7 +571,7 @@ export default function OrgTree({
     <div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-3">
         <div className="text-xs text-gray-500">
-          {editMode ? '편집 모드: 노드를 드래그해서 부모 노드 위에 놓으면 소속이 변경됩니다.' : '보기 모드'}
+          {editMode ? '편집 모드: 노드를 드래그해서 부모 노드 위에 놓으면 소속이 변경됩니다.' : '보기 모드: 두 손가락으로 줌/이동'}
         </div>
         <div className="flex flex-wrap items-center gap-2 justify-end">
           {editMessage && (
