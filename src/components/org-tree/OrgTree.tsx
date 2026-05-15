@@ -127,7 +127,7 @@ export function OrgTreeContractDetailPanel({
       className={
         variant === 'embedded'
           ? 'border-0 pt-0 mt-0'
-          : 'mt-6 border-t-2 border-gray-200 pt-4'
+          : 'mt-4 pt-1'
       }
     >
       <div className="mb-3 px-1">
