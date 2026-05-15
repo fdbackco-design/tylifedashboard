@@ -30,9 +30,11 @@ function DataTable(props: {
   rows: DashboardAggRow[];
   /** true면 가입완료 누적 표: 최근 가입일 열 표시(집계 구간 내 해당 담당자 기준 최신 join_date) */
   showLatestJoinDate?: boolean;
+  /** false면 구좌 수 옆 비율 막대 숨김 */
+  showUnitBar?: boolean;
 }) {
-  const { rows, showLatestJoinDate } = props;
-  const maxUnits = rows.reduce((m, r) => Math.max(m, r.unit_sum), 0);
+  const { rows, showLatestJoinDate, showUnitBar = true } = props;
+  const maxUnits = showUnitBar ? rows.reduce((m, r) => Math.max(m, r.unit_sum), 0) : 0;
   const badgeForRank = (idx: number) => {
     if (idx === 0) return '🥇';
     if (idx === 1) return '🥈';
@@ -79,18 +81,24 @@ function DataTable(props: {
                   </td>
                 ) : null}
                 <td className="px-4 py-2 text-right tabular-nums text-gray-900">
-                  <div className="flex items-center justify-end gap-3">
+                  <div
+                    className={
+                      showUnitBar ? 'flex items-center justify-end gap-3' : 'flex items-center justify-end'
+                    }
+                  >
                     <span className="min-w-[64px] text-right font-medium">{r.unit_sum.toLocaleString()}구좌</span>
-                    <div className="w-28">
-                      <div className="h-2 rounded-full bg-gray-100">
-                        <div
-                          className="h-2 rounded-full bg-orange-500"
-                          style={{
-                            width: `${maxUnits > 0 ? Math.round((r.unit_sum / maxUnits) * 100) : 0}%`,
-                          }}
-                        />
+                    {showUnitBar ? (
+                      <div className="w-28">
+                        <div className="h-2 rounded-full bg-gray-100">
+                          <div
+                            className="h-2 rounded-full bg-orange-500"
+                            style={{
+                              width: `${maxUnits > 0 ? Math.round((r.unit_sum / maxUnits) * 100) : 0}%`,
+                            }}
+                          />
+                        </div>
                       </div>
-                    </div>
+                    ) : null}
                   </div>
                 </td>
               </tr>
@@ -222,9 +230,9 @@ export default async function DashboardPage(props: { searchParams?: Promise<Reco
 
         <SectionCard
           title="전체 누적 가입완료 구좌 수"
-          subtitle="전체 기간(가입기준 충족) · 담당자별 가입일은 귀속 계약 중 가장 늦은 날짜, 그 순서로 정렬"
+          subtitle="전체 기간(가입기준 충족)"
         >
-          <DataTable rows={agg.allTimeJoinedSlots.rows} showLatestJoinDate />
+          <DataTable rows={agg.allTimeJoinedSlots.rows} showLatestJoinDate showUnitBar={false} />
         </SectionCard>
 
         {/* "담당자별 전날 영업 실적" 섹션은 숨김 처리 */}
