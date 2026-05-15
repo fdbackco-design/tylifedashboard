@@ -114,6 +114,8 @@ export function OrgTreeContractDetailPanel({
   variant = 'default',
   /** true면 상품·계약코드 열만 숨김(데이터·집계 로직은 동일) */
   hideProductAndContractCodeColumns = false,
+  /** true면 닫기 버튼 숨김(항상 표시 페이지 등) */
+  hideCloseButton = false,
 }: {
   node: OrgTreeNodeType;
   contracts: ContractItem[];
@@ -121,6 +123,7 @@ export function OrgTreeContractDetailPanel({
   /** bottom-sheet 등: 상단 여백·구분선 축소, 닫기 버튼 숨김 */
   variant?: 'default' | 'embedded';
   hideProductAndContractCodeColumns?: boolean;
+  hideCloseButton?: boolean;
 }) {
   const aggregated = aggregateContracts(contracts);
   const completedCount = contracts.filter(isJoinCompleted).length;
@@ -152,7 +155,7 @@ export function OrgTreeContractDetailPanel({
             </div>
           </div>
 
-          {variant === 'default' ? (
+          {variant === 'default' && !hideCloseButton ? (
             <button
               onClick={onClose}
               className="shrink-0 text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded hover:bg-gray-100 whitespace-nowrap"
