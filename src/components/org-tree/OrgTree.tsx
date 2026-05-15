@@ -17,20 +17,18 @@ import {
   isHiddenLeafSalesMemberByContracts,
 } from '@/lib/organization/org-tree-display';
 
-// ── 유틸 ─────────────────────────────────────────────────
-
-/** id로 노드 찾기 */
-function findNode(nodes: OrgTreeNodeType[], id: string): OrgTreeNodeType | null {
+/** id로 노드 찾기 (외부 상세 UI용 export) */
+export function findOrgTreeNode(nodes: OrgTreeNodeType[], id: string): OrgTreeNodeType | null {
   for (const n of nodes) {
     if (n.id === id) return n;
-    const found = findNode(n.children, id);
+    const found = findOrgTreeNode(n.children, id);
     if (found) return found;
   }
   return null;
 }
 
-/** 선택된 노드의 산하 계약 전체 수집 */
-function collectSubtreeContracts(
+/** 선택된 노드의 산하 계약 전체 수집 (외부 상세 UI용 export) */
+export function collectOrgTreeSubtreeContracts(
   node: OrgTreeNodeType,
   map: Record<string, ContractItem[]>,
   extraIds?: string[],
@@ -41,7 +39,6 @@ function collectSubtreeContracts(
     .sort((a, b) => (b.join_date ?? '').localeCompare(a.join_date ?? ''));
 }
 
-// ── 상태 색상 ─────────────────────────────────────────────
 const STATUS_COLOR: Record<string, string> = {
   준비: 'text-gray-400', 대기: 'text-yellow-500', 상담중: 'text-blue-400',
   가입: 'text-green-600', 해피콜완료: 'text-cyan-600', 배송준비: 'text-purple-500',
@@ -110,20 +107,29 @@ function aggregateContracts(contracts: ContractItem[]): AggregatedContract[] {
 }
 
 // ── 계약 패널 ─────────────────────────────────────────────
-function ContractPanel({
+export function OrgTreeContractDetailPanel({
   node,
   contracts,
   onClose,
+  variant = 'default',
 }: {
   node: OrgTreeNodeType;
   contracts: ContractItem[];
   onClose: () => void;
+  /** bottom-sheet 등: 상단 여백·구분선 축소, 닫기 버튼 숨김 */
+  variant?: 'default' | 'embedded';
 }) {
   const aggregated = aggregateContracts(contracts);
   const completedCount = contracts.filter(isJoinCompleted).length;
 
   return (
-    <div className="mt-6 border-t-2 border-gray-200 pt-4">
+    <div
+      className={
+        variant === 'embedded'
+          ? 'border-0 pt-0 mt-0'
+          : 'mt-6 border-t-2 border-gray-200 pt-4'
+      }
+    >
       <div className="mb-3 px-1">
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
@@ -143,12 +149,14 @@ function ContractPanel({
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="shrink-0 text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded hover:bg-gray-100 whitespace-nowrap"
-          >
-            닫기 ✕
-          </button>
+          {variant === 'default' ? (
+            <button
+              onClick={onClose}
+              className="shrink-0 text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded hover:bg-gray-100 whitespace-nowrap"
+            >
+              닫기 ✕
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -238,6 +246,8 @@ interface Props {
       paidCommissionWon: number;
     }
   >;
+  /** inline: 기존처럼 트리 아래 패널. bottom-sheet: 모바일형 하단 시트 */
+  contractDetailPresentation?: 'inline' | 'bottom-sheet';
 }
 
 export default function OrgTree({
@@ -249,6 +259,7 @@ export default function OrgTree({
   showCommissionMetrics = true,
   showForecast = false,
   hideHqRoot = false,
+  contractDetailPresentation = 'inline',
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
@@ -359,9 +370,18 @@ export default function OrgTree({
     }
   }, [editMode]);
 
-  const selectedNode = selectedId ? findNode(displayRoots, selectedId) : null;
+  useEffect(() => {
+    if (contractDetailPresentation !== 'bottom-sheet' || !selectedId) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [contractDetailPresentation, selectedId]);
+
+  const selectedNode = selectedId ? findOrgTreeNode(displayRoots, selectedId) : null;
   const selectedContracts = selectedNode
-    ? collectSubtreeContracts(
+    ? collectOrgTreeSubtreeContracts(
         selectedNode,
         contractsByMember,
         selectedNode.id === '__hq_root__' ? strippedNodeIds : undefined,
@@ -698,14 +718,50 @@ export default function OrgTree({
         </div>
       </div>
 
-      {/* 선택된 멤버의 산하 계약 패널 */}
-      {selectedNode && (
-        <ContractPanel
+      {/* 선택된 멤버의 산하 계약 */}
+      {contractDetailPresentation === 'inline' && selectedNode ? (
+        <OrgTreeContractDetailPanel
           node={selectedNode}
           contracts={selectedContracts}
           onClose={() => setSelectedId(null)}
         />
-      )}
+      ) : null}
+
+      {contractDetailPresentation === 'bottom-sheet' && selectedNode ? (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <button
+            type="button"
+            aria-label="배경 닫기"
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setSelectedId(null)}
+          />
+          <div className="relative z-10 flex max-h-[min(88vh,900px)] w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-3xl sm:rounded-2xl sm:shadow-xl">
+            <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-4 py-3">
+              <span className="text-sm font-semibold text-gray-800">산하 계약</span>
+              <button
+                type="button"
+                onClick={() => setSelectedId(null)}
+                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                aria-label="닫기"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-6 pt-2">
+              <OrgTreeContractDetailPanel
+                variant="embedded"
+                node={selectedNode}
+                contracts={selectedContracts}
+                onClose={() => setSelectedId(null)}
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
