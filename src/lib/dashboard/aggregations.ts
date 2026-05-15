@@ -44,7 +44,7 @@ export type DashboardAggregations = {
   monthlyTotalSlots: DashboardAggResult;
   dailyTotalSlots: DashboardAggResult;
   monthlyJoinedSlots: DashboardAggResult;
-  /** 기준월 정산 윈도우 + 가입 보류(해피콜 부재/계약취소 또는 렌탈신청번호 일치) */
+  /** 기준월 정산 윈도우 + 가입 보류(해약·해피콜 부재/계약취소·렌탈신청번호 일치) */
   monthlyJoinDeferredSlots: DashboardAggResult;
   allTimeJoinedSlots: DashboardAggResult;
   /** 기준월 정산 윈도우 + 가입완료, 구좌는 계약의 sales_member_id(직접) 기준 */
@@ -142,8 +142,9 @@ function buildMemberIdByCustomerId(members: MemberRow[]): Map<string, string> {
   return m;
 }
 
-/** 기준월 내 집계 시: 해피콜 결과 또는 렌탈신청번호가 가입 보류로 분류되는지 */
+/** 기준월 내 집계 시: 해피콜·렌탈신청번호·가입 상태(해약) 중 가입 보류로 분류되는지 */
 function isJoinDeferredContract(c: ContractRow): boolean {
+  if ((c.status ?? '').trim() === '해약') return true;
   const hc = (c.happycall_result ?? '').trim();
   if (hc === '부재' || hc === '계약취소') return true;
   const rental = (c.rental_request_no ?? '').trim();
