@@ -196,6 +196,14 @@ export default async function OrganizationPage({
 
   const members = membersRaw.filter((m: any) => !customerMergeTo.has((m as { id: string }).id));
   const memberIdSet = new Set((members as any[]).map((m) => (m as { id: string }).id));
+  const memberNameById = new Map(
+    (members as any[]).map((m) => [(m as { id: string }).id, normName((m as { name: string }).name)]),
+  );
+  const salesMemberDisplayName = (salesMemberId: string | null | undefined): string => {
+    const id = remapMemberId(String(salesMemberId ?? ''));
+    if (!id) return '-';
+    return memberNameById.get(id) ?? '-';
+  };
   const edges = (edgesRaw as any[]).map((e) => ({
     parent_id: (e as any).parent_id ? remapMemberId((e as any).parent_id) : null,
     child_id: remapMemberId((e as any).child_id),
@@ -515,7 +523,7 @@ export default async function OrganizationPage({
       customer_name: c.customers?.name ?? '',
     }));
     if (!contractsByMember[key]) contractsByMember[key] = [];
-    contractsByMember[key].push({
+    const contractItem: ContractItem = {
       id: c.id,
       contract_code: c.contract_code,
       join_date: c.join_date,
@@ -527,26 +535,16 @@ export default async function OrganizationPage({
       status: c.status,
       unit_count: c.unit_count,
       customer_name: c.customers?.name ?? '',
-    });
+      sales_member_name: salesMemberDisplayName(c.sales_member_id),
+    };
+    contractsByMember[key].push(contractItem);
 
     // 표시용 보강: 담당자 기준 key와 customer 기준 key가 다르면 customer 노드에도 동일 계약을 포함시킨다.
     // (본인이 고객인 계약이 현재 노드에 포함되게)
     const customerKey = remapMemberId(customerMemberIdByCustomerId.get(c.customer_id) ?? '');
     if (customerKey && customerKey !== key) {
       if (!contractsByMember[customerKey]) contractsByMember[customerKey] = [];
-      contractsByMember[customerKey].push({
-        id: c.id,
-        contract_code: c.contract_code,
-        join_date: c.join_date,
-        product_type: c.product_type,
-        item_name: c.item_name ?? null,
-        rental_request_no: c.rental_request_no ?? null,
-        invoice_no: c.invoice_no ?? null,
-        memo: c.memo ?? null,
-        status: c.status,
-        unit_count: c.unit_count,
-        customer_name: c.customers?.name ?? '',
-      });
+      contractsByMember[customerKey].push(contractItem);
     }
   }
 
