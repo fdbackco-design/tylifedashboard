@@ -166,6 +166,14 @@ export async function buildMyOrganizationTreeViewModel(
 
     // 계약은 subtree에 속한 sales_member_id만 조회(월 버튼 클릭 시 지연 감소)
     const subtreeMemberIds = [...subtreeIdSet.values()];
+    const memberNameById = new Map(
+      membersForTree.map((m) => [m.id, stripCustomerMemberNamePrefix(m.name) || m.name]),
+    );
+    const salesMemberDisplayName = (salesMemberId: string | null | undefined): string => {
+      const id = remapMemberId(String(salesMemberId ?? ''));
+      if (!id) return '-';
+      return memberNameById.get(id) ?? '-';
+    };
     const chunk = <T,>(arr: T[], size: number): T[][] => {
       const out: T[][] = [];
       for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
@@ -476,6 +484,7 @@ export async function buildMyOrganizationTreeViewModel(
         status: (c as any).status as string,
         unit_count: (c as any).unit_count ?? null,
         customer_name: (c as any).customers?.name ?? '',
+        sales_member_name: salesMemberDisplayName((c as any).sales_member_id),
       };
 
       if (!contractsByMember[key]) contractsByMember[key] = [];

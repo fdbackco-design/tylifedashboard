@@ -48,6 +48,7 @@ const STATUS_COLOR: Record<string, string> = {
 
 type AggregatedContract = {
   key: string;
+  sales_member_name: string;
   customer_name: string;
   join_date: string | null;
   product_type: string | null;
@@ -85,6 +86,7 @@ function aggregateContracts(contracts: ContractItem[]): AggregatedContract[] {
     if (!existing) {
       map.set(key, {
         key,
+        sales_member_name: c.sales_member_name?.trim() || '-',
         customer_name: c.customer_name,
         join_date: c.join_date,
         product_type: c.product_type ?? null,
@@ -98,6 +100,9 @@ function aggregateContracts(contracts: ContractItem[]): AggregatedContract[] {
     }
 
     existing.unit_count += c.unit_count ?? 0;
+    if (existing.sales_member_name === '-' && c.sales_member_name?.trim()) {
+      existing.sales_member_name = c.sales_member_name.trim();
+    }
     if (!existing.item_name && c.item_name) existing.item_name = c.item_name;
     if (isRentalUnmet(c)) existing.show_rental_unmet = true;
     existing.contract_codes.push(c.contract_code);
@@ -173,6 +178,7 @@ export function OrgTreeContractDetailPanel({
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">담당자</th>
                 <th className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">고객명</th>
                 {!hideProductAndContractCodeColumns ? (
                   <th className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">상품</th>
@@ -190,6 +196,9 @@ export function OrgTreeContractDetailPanel({
               {aggregated.map((c) => {
                 return (
                   <tr key={c.key} className="hover:bg-gray-50">
+                    <td className="px-3 py-2 text-gray-700 whitespace-nowrap">
+                      {c.sales_member_name}
+                    </td>
                     <td className="px-3 py-2 font-medium text-gray-800 whitespace-nowrap">
                       {c.customer_name}
                     </td>

@@ -17,6 +17,8 @@ export interface ContractItem {
   status: string;
   unit_count: number | null;
   customer_name: string;
+  /** 계약 담당 조직원 표시명 */
+  sales_member_name?: string;
 }
 
 const CARD_STATUSES = ['준비', '대기', '해약', '가입'] as const;
