@@ -162,6 +162,14 @@ export default async function OrganizationMyTreePage({
           >
             명세서 보기
           </Link>
+          <a
+            href="https://n.ty-life.co.kr/auth/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex min-h-9 min-w-0 flex-1 items-center justify-center rounded-lg bg-gradient-to-b from-orange-500 to-orange-600 px-3 text-xs font-semibold text-white shadow-sm shadow-orange-900/15 ring-1 ring-orange-400/25 transition hover:from-orange-600 hover:to-orange-700 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 sm:min-h-10 sm:text-sm"
+          >
+            모바일 계약서
+          </a>
           <div className="shrink-0">
             <AccountActionsClient
               showChangePassword={false}
