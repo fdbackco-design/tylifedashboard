@@ -6,7 +6,7 @@ export function noticeInlineStoragePath(noticeId: string, fileName: string): str
 }
 
 export function noticeInlineMediaUrl(noticeId: string, storagePath: string): string {
-  return `/api/admin/notices/${noticeId}/media?path=${encodeURIComponent(storagePath)}`;
+  return `/api/notices/${noticeId}/media?path=${encodeURIComponent(storagePath)}`;
 }
 
 export function isValidNoticeInlineStoragePath(noticeId: string, storagePath: string): boolean {
