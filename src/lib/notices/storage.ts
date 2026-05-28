@@ -1,8 +1,15 @@
 import { NOTICE_STORAGE_BUCKET } from './constants';
 
+function sanitizeStorageFileName(fileName: string): string {
+  return fileName.replace(/[^\w.\-가-힣]/g, '_').slice(0, 180) || 'file';
+}
+
 export function noticeInlineStoragePath(noticeId: string, fileName: string): string {
-  const safeName = fileName.replace(/[^\w.\-가-힣]/g, '_').slice(0, 180);
-  return `${noticeId}/inline/${Date.now()}_${safeName}`;
+  return `${noticeId}/inline/${Date.now()}_${sanitizeStorageFileName(fileName)}`;
+}
+
+export function noticeAttachmentStoragePath(noticeId: string, fileName: string): string {
+  return `${noticeId}/${Date.now()}_${sanitizeStorageFileName(fileName)}`;
 }
 
 export function noticeInlineMediaUrl(noticeId: string, storagePath: string): string {
@@ -12,6 +19,13 @@ export function noticeInlineMediaUrl(noticeId: string, storagePath: string): str
 export function isValidNoticeInlineStoragePath(noticeId: string, storagePath: string): boolean {
   const prefix = `${noticeId}/inline/`;
   return storagePath.startsWith(prefix) && !storagePath.includes('..');
+}
+
+export function isValidNoticeAttachmentStoragePath(noticeId: string, storagePath: string): boolean {
+  const prefix = `${noticeId}/`;
+  if (!storagePath.startsWith(prefix) || storagePath.includes('..')) return false;
+  // 인라인 이미지 경로(`{id}/inline/...`)는 첨부파일이 아님
+  return !storagePath.startsWith(`${noticeId}/inline/`);
 }
 
 /** 본문 HTML에 허용할 최소 태그만 유지 */

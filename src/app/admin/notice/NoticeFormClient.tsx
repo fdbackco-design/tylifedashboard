@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { resolveNoticeContentBlobImages } from '@/lib/notices/inline-images-client';
 import { sanitizeNoticeHtml } from '@/lib/notices/storage';
+import { uploadNoticeFile } from '@/lib/notices/upload-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import NoticeContentEditor from './NoticeContentEditor';
 import { StatusBadge } from './notice-ui';
@@ -108,11 +109,16 @@ export default function NoticeFormClient({ mode, noticeId }: Props) {
     setUploading(true);
     try {
       for (const pf of pendingFiles) {
-        const fd = new FormData();
-        fd.append('file', pf.file);
+        const { storage_path } = await uploadNoticeFile(targetId, pf.file, 'attachment');
         const res = await fetch(`/api/admin/notices/${targetId}/attachments`, {
           method: 'POST',
-          body: fd,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            storage_path,
+            file_name: pf.file.name,
+            file_size: pf.file.size,
+            mime_type: pf.file.type || 'application/octet-stream',
+          }),
         });
         const json = (await res.json()) as { success?: boolean; error?: string; data?: NoticeAttachmentRow };
         if (!res.ok || !json.success) throw new Error(json.error ?? '첨부 업로드 실패');

@@ -2,6 +2,7 @@
 
 import { NOTICE_MAX_FILE_BYTES } from '@/lib/notices/constants';
 import { sanitizeNoticeHtml } from '@/lib/notices/storage';
+import { uploadNoticeFile } from '@/lib/notices/upload-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 type Props = {
@@ -14,9 +15,12 @@ type Props = {
 };
 
 async function uploadInlineImage(noticeId: string, file: File): Promise<string> {
-  const fd = new FormData();
-  fd.append('file', file);
-  const res = await fetch(`/api/admin/notices/${noticeId}/content-images`, { method: 'POST', body: fd });
+  const { storage_path } = await uploadNoticeFile(noticeId, file, 'inline');
+  const res = await fetch(`/api/admin/notices/${noticeId}/content-images`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ storage_path }),
+  });
   const json = (await res.json()) as { success?: boolean; error?: string; data?: { url: string } };
   if (!res.ok || !json.success || !json.data?.url) {
     throw new Error(json.error ?? '이미지 업로드 실패');
