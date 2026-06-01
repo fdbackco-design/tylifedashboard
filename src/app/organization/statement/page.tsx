@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import TyLifePartnersLogo from '@/components/TyLifePartnersLogo';
+import YearMonthSelector from '@/components/YearMonthSelector';
 import { createAdminSupabaseClient, createServerSupabaseClient } from '@/lib/supabase/server';
 import { sumDownlineAttributedUnitsInSettlementWindow } from '@/lib/organization/statement-downline-units';
 import {
@@ -30,6 +31,14 @@ export default async function OrganizationStatementPage({
     coalesceYearMonthSearchParam(sp.year_month as string | string[] | undefined) ?? defaultYearMonth;
   const yearMonth = normalizeYearMonthLabel(requestedYearMonthRaw) ?? defaultYearMonth;
   const { start_date, end_date, label_year_month } = getSettlementWindowForYearMonth(yearMonth);
+
+  // 기준월 선택 UI에 표시할 연도 목록 (현재 기준월 연도부터 4년 전까지, /organization 등과 동일)
+  const yearsForPicker = (() => {
+    const base = parseInt(label_year_month.slice(0, 4), 10);
+    const out: number[] = [];
+    for (let y = base; y >= base - 4; y--) out.push(y);
+    return out;
+  })();
 
   const userDb = await createServerSupabaseClient();
   const {
@@ -102,7 +111,7 @@ export default async function OrganizationStatementPage({
   if (!s) {
     return (
       <div className="p-6">
-        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <TyLifePartnersLogo className="sm:pt-0.5 shrink-0" mobileSrc="/logo.png" />
           <div className="min-w-0 flex-1">
             <div className="text-xs text-gray-500">
@@ -117,6 +126,16 @@ export default async function OrganizationStatementPage({
               기준 {label_year_month} · {start_date}~{end_date}
             </p>
           </div>
+        </div>
+
+        <div className="mb-4">
+          <YearMonthSelector
+            layout="compact-toolbar"
+            value={label_year_month}
+            todayValue={defaultYearMonth}
+            years={yearsForPicker}
+            todayLabel="오늘 기준월"
+          />
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
@@ -153,7 +172,7 @@ export default async function OrganizationStatementPage({
 
   return (
     <div className="p-4 sm:p-6">
-      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <TyLifePartnersLogo mobileSrc="/logo.png" />
         <div className="text-xs text-gray-500 sm:text-right">
           <Link className="text-blue-600 hover:underline" href={`/organization?year_month=${yearMonth}`}>
@@ -162,6 +181,16 @@ export default async function OrganizationStatementPage({
           <span className="mx-1">/</span>
           <span>지급 명세서</span>
         </div>
+      </div>
+
+      <div className="mb-4">
+        <YearMonthSelector
+          layout="compact-toolbar"
+          value={label_year_month}
+          todayValue={defaultYearMonth}
+          years={yearsForPicker}
+          todayLabel="오늘 기준월"
+        />
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.035]">
