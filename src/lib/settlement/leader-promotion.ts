@@ -208,6 +208,72 @@ export function subtreeJoinUnitsJoinOnlyInWindow(params: {
   return sum;
 }
 
+/**
+ * 루트 멤버를 포함한 subtree를 모으되, 자식 중 "리더 이상" 직급(리더/센터장/사업본부장/본사)
+ * 노드는 그 노드와 그 후손을 모두 제외한다.
+ *
+ * 유지장려금 집계 전용 — 하위 리더 조직의 구좌가 상위 리더의 유지장려금에 합산되지 않도록 한다.
+ * (롤업수당 등 다른 계산은 기존 `collectSubtreeMemberIdsDownstream`을 그대로 사용한다.)
+ */
+function collectSubtreeMemberIdsExcludingDownLeaders(
+  rootId: string,
+  childrenByParent: Map<string, string[]>,
+  rankById: Map<string, RankType>,
+): Set<string> {
+  const out = new Set<string>();
+  const stack: string[] = [rootId];
+  while (stack.length) {
+    const id = stack.pop()!;
+    if (out.has(id)) continue;
+    out.add(id);
+    for (const ch of childrenByParent.get(id) ?? []) {
+      const r = rankById.get(ch);
+      // 자식 노드가 리더 이상이면, 그 노드와 그 후손은 유지장려금 집계에서 제외
+      if (r === '리더' || r === '센터장' || r === '사업본부장' || r === '본사') continue;
+      stack.push(ch);
+    }
+  }
+  return out;
+}
+
+/**
+ * 정산 윈도우(start~end) 내 산하 '가입' 구좌 합 — **유지장려금 전용**.
+ *
+ * `subtreeJoinUnitsJoinOnlyInWindow`와 동일한 입력을 받지만, subtree를 구성할 때
+ * 자식 중 리더 이상 직급 노드를 만나면 해당 노드와 그 후손을 모두 컷한다.
+ *
+ * 예) 리더 A 산하에 리더 B → 영업사원 C(10구좌)가 있을 때:
+ *  - A 호출: 10구좌가 합산되지 않는다(B부터 컷).
+ *  - B 호출: 자기 자신의 subtree(B + C)에서 10구좌가 합산된다.
+ */
+export function subtreeJoinUnitsForLeaderMaintenanceInWindow(params: {
+  memberId: string;
+  treeRows: OrgTreeRow[];
+  joinContractsAttributed: AttributedJoinContractRow[];
+  startInclusive: string;
+  endInclusive: string;
+}): number {
+  const childrenByParent = buildChildrenByParentFromRows(params.treeRows);
+  const rankById = new Map<string, RankType>();
+  for (const r of params.treeRows) rankById.set(r.id, r.rank);
+
+  const subtree = collectSubtreeMemberIdsExcludingDownLeaders(
+    params.memberId,
+    childrenByParent,
+    rankById,
+  );
+  const start = params.startInclusive.slice(0, 10);
+  const end = params.endInclusive.slice(0, 10);
+  let sum = 0;
+  for (const c of params.joinContractsAttributed) {
+    if (!subtree.has(c.sales_member_id)) continue;
+    const jd = c.join_date.slice(0, 10);
+    if (jd < start || jd > end) continue;
+    sum += Math.max(0, c.unit_count ?? 0);
+  }
+  return sum;
+}
+
 export function isLeaderMaintenanceBonusEligible(params: {
   memberDbRank: RankType;
   promotionThreshold: SalesMemberPromotionThreshold | null;
