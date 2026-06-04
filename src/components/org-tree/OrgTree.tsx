@@ -272,6 +272,12 @@ interface Props {
   contractDetailPresentation?: 'inline' | 'bottom-sheet';
   /** 멤버용 조직 페이지: 상세 테이블에서 상품·계약코드 열 숨김 */
   contractDetailHideProductAndContractCode?: boolean;
+  /**
+   * 상단에 담당자 이름 검색창 노출 여부 (기본 true).
+   * - 검색 결과를 선택하면 해당 노드를 viewport 중앙으로 이동하고 일시적으로 강조 표시한다.
+   * - 기존 드래그/휠/핀치 줌 동작과 분리되어 동작한다.
+   */
+  showSearch?: boolean;
 }
 
 export default function OrgTree({
@@ -285,11 +291,21 @@ export default function OrgTree({
   hideHqRoot = false,
   contractDetailPresentation = 'inline',
   contractDetailHideProductAndContractCode = false,
+  showSearch = true,
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+
+  // ── 담당자 이름 검색 ────────────────────────────────────
+  // - searchQuery: 입력 중 검색어. 비어 있으면 결과 패널을 닫는다.
+  // - highlightedId: focusMember 호출 직후 일시적으로 강조할 노드 id (수 초 후 해제).
+  // - searchOpen: 입력에 포커스가 있고 검색어가 있을 때만 결과 드롭다운을 보여준다.
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [editMessage, setEditMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [dragChildId, setDragChildId] = useState<string | null>(null);
@@ -322,6 +338,78 @@ export default function OrgTree({
   // 트리를 평탄화해 전체 노드 목록 확보
   const allNodes = useMemo(() => flattenOrgTreeNodes(roots as OrgTreeNodeType[]), [roots]);
   const strippedNodeIds = useMemo(() => collectStrippedNodeIdsForDisplay(roots as OrgTreeNodeType[]), [roots]);
+
+  // ── 검색용 멤버 인덱스 ────────────────────────────────
+  // - 노드에 실제로 렌더되는 displayName(접두 '[고객] ' 제거)을 기준으로 한다.
+  // - '__hq_root__' 같은 가상 루트와 본사(person) 노드는 검색 결과에서 제외한다.
+  // - displayRoots 가 아닌 원본 roots 의 flatten 결과를 사용해, 본사 아래로 승격된 자식들의 실제 id 와 동일하게 잡힌다.
+  const searchableMembers = useMemo(() => {
+    type SearchItem = { id: string; name: string; rank: string };
+    const out: SearchItem[] = [];
+    for (const n of allNodes) {
+      if (!n?.id) continue;
+      if (n.id === '__hq_root__') continue;
+      const displayName = (n.name ?? '').replace(/^\[고객\]\s*/, '').trim();
+      if (!displayName) continue;
+      out.push({ id: n.id, name: displayName, rank: String(n.rank ?? '') });
+    }
+    return out;
+  }, [allNodes]);
+
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim();
+    if (!q) return [];
+    const qLower = q.toLowerCase();
+    return searchableMembers
+      .filter((m) => m.name.toLowerCase().includes(qLower))
+      .slice(0, 20);
+  }, [searchQuery, searchableMembers]);
+
+  /**
+   * 지정한 멤버 노드를 viewport 중앙으로 이동시키고 일시적으로 강조 표시한다.
+   * - 현재 transform: outer translate(pan) + inner scale(scale) 구조.
+   * - 노드 카드의 화면 좌표(getBoundingClientRect)와 viewport 중심의 차이만큼 pan 만 보정하면
+   *   scale 값에 관계없이 정확히 중앙에 위치한다. (scale 은 그대로 유지)
+   */
+  const focusMember = (memberId: string) => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    const card = vp.querySelector<HTMLElement>(
+      `[data-org-member-id="${(window as any).CSS && CSS.escape ? CSS.escape(memberId) : memberId}"]`,
+    );
+    if (!card) return;
+
+    const vpRect = vp.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+    const nodeCenterX = (cardRect.left + cardRect.right) / 2 - vpRect.left;
+    const nodeCenterY = (cardRect.top + cardRect.bottom) / 2 - vpRect.top;
+    const vpCenterX = vpRect.width / 2;
+    const vpCenterY = vpRect.height / 2;
+
+    setPan((prev) => ({
+      x: prev.x + (vpCenterX - nodeCenterX),
+      y: prev.y + (vpCenterY - nodeCenterY),
+    }));
+
+    setHighlightedId(memberId);
+    if (highlightTimerRef.current) {
+      clearTimeout(highlightTimerRef.current);
+    }
+    highlightTimerRef.current = setTimeout(() => {
+      setHighlightedId(null);
+      highlightTimerRef.current = null;
+    }, 2400);
+    setSearchOpen(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimerRef.current) {
+        clearTimeout(highlightTimerRef.current);
+        highlightTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // 개인 조직도 등 read-only 화면에서는 편집 모드를 강제로 끈다.
   useEffect(() => {
@@ -493,6 +581,7 @@ export default function OrgTree({
               nodeMetrics={metricsById?.[node.id] ?? null}
               selectedId={selectedId}
               onSelect={handleSelect}
+              isHighlighted={highlightedId === node.id}
             />
           </div>
         )}
@@ -634,6 +723,88 @@ export default function OrgTree({
           ) : null}
         </div>
       </div>
+
+      {/*
+        담당자 이름 검색 UI
+        - 편집 모드와 동시에 활성화돼도 viewport 의 포인터 이벤트와는 분리돼 있어 충돌하지 않는다.
+        - showSearch=false 이면 전체를 숨긴다.
+      */}
+      {showSearch ? (
+        <div className="mb-3">
+          <div className="relative w-full sm:w-80">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setSearchOpen(true);
+              }}
+              onFocus={() => {
+                if (searchQuery.trim()) setSearchOpen(true);
+              }}
+              onBlur={() => {
+                // 결과 항목 클릭이 가능하도록 약간 지연 후 닫기
+                setTimeout(() => setSearchOpen(false), 120);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  const q = searchQuery.trim();
+                  if (!q) return;
+                  if (searchResults.length === 0) return;
+                  // 정확 일치(대소문자 무시) 우선, 없으면 첫 결과
+                  const exact = searchResults.find((m) => m.name.toLowerCase() === q.toLowerCase());
+                  focusMember((exact ?? searchResults[0]).id);
+                } else if (e.key === 'Escape') {
+                  setSearchOpen(false);
+                }
+              }}
+              placeholder="담당자 이름 검색"
+              aria-label="담당자 이름 검색"
+              className="w-full h-9 rounded-lg border border-slate-300 bg-white pl-3 pr-8 text-sm shadow-sm outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200/80"
+            />
+            {searchQuery ? (
+              <button
+                type="button"
+                onMouseDown={(e) => {
+                  // input blur 보다 먼저 동작하도록 mousedown 사용
+                  e.preventDefault();
+                  setSearchQuery('');
+                  setSearchOpen(false);
+                }}
+                aria-label="검색어 지우기"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
+              >
+                ✕
+              </button>
+            ) : null}
+
+            {searchOpen && searchQuery.trim() ? (
+              <div
+                className="absolute z-20 mt-1 w-full max-h-72 overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg"
+                // 결과 영역 클릭은 input blur 보다 먼저 동작해 focusMember 가 호출되도록 mousedown 우선 처리
+                onMouseDown={(e) => e.preventDefault()}
+              >
+                {searchResults.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-slate-400">검색 결과 없음</div>
+                ) : (
+                  searchResults.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => focusMember(m.id)}
+                      className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                    >
+                      <span className="font-medium text-slate-800">{m.name}</span>
+                      <span className="text-[11px] text-slate-500">{m.rank || '-'}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {/* 줌 가능한 뷰포트 */}
       <div

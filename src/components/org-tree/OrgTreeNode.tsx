@@ -36,6 +36,11 @@ interface Props {
   };
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /**
+   * 검색에서 포커싱된 노드를 일시적으로 강조 표시한다.
+   * - 화면 중앙으로 이동된 직후 시각적으로 식별할 수 있게 ring/배경 강조를 더한다.
+   */
+  isHighlighted?: boolean;
 }
 
 export type OrgTreeNodeProps = Props;
@@ -56,6 +61,7 @@ export default function OrgTreeNode({
   nodeMetrics,
   selectedId,
   onSelect,
+  isHighlighted = false,
 }: Props) {
   const isSelected = selectedId === node.id;
   const style = RANK_STYLE[node.rank] ?? RANK_STYLE['영업사원'];
@@ -72,13 +78,17 @@ export default function OrgTreeNode({
     <div
       onClick={() => onSelect(node.id)}
       data-org-node-card="1"
+      data-org-member-id={node.id}
+      data-org-member-name={displayName}
       className={`
         touch-none min-w-[130px] max-w-[180px] rounded-xl border-2 bg-white shadow-sm
         cursor-pointer select-none transition-all
         ${style.border}
-        ${isSelected
-          ? 'ring-2 ring-offset-2 ring-indigo-400 shadow-md'
-          : 'hover:shadow-md hover:-translate-y-0.5'}
+        ${isHighlighted
+          ? 'ring-4 ring-offset-2 ring-amber-400 bg-amber-50 shadow-lg'
+          : isSelected
+            ? 'ring-2 ring-offset-2 ring-indigo-400 shadow-md'
+            : 'hover:shadow-md hover:-translate-y-0.5'}
       `}
     >
       <div className="px-3 py-3 flex flex-col items-center gap-1.5 text-center">
