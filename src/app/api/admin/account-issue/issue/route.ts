@@ -26,8 +26,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     typeof body.customer_id === 'string' ? body.customer_id.trim() : (body.customer_id ?? null);
   const customer_id = customerIdRaw && customerIdRaw.length > 0 ? customerIdRaw : null;
 
-  if (!member_id || !login_code || !password) {
-    return NextResponse.json({ success: false, error: 'missing fields' }, { status: 400 });
+  // member_id 는 자가가입(customer=영업사원 동일인) 케이스에서도 반드시 채워져야 한다.
+  // - DB CHECK 제약(user_profiles_member_id_required_for_member)도 동일하게 NULL 을 거부한다.
+  // - 화면에서 영업사원 노드가 선택되지 않은 채 제출되면 여기서 400 으로 막혀
+  //   user_profiles 가 NULL member_id 로 만들어지는 사고를 방지한다.
+  if (!member_id) {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          'member_id is required (자가가입 등 customer 와 동일인이라도 영업사원 노드 매핑이 필요합니다)',
+      },
+      { status: 400 },
+    );
+  }
+  if (!login_code || !password) {
+    return NextResponse.json({ success: false, error: 'login_code/password required' }, { status: 400 });
   }
 
   const EMAIL_DOMAIN = 'tylifedashboard.local';
