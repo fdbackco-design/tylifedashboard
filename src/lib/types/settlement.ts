@@ -68,8 +68,14 @@ export interface SettlementCalculationDetail {
   rollup_items: RollupItem[];
   incentive_applied: boolean;
   incentive_threshold: number | null;
+  /** 보너스 합계 = 리더 유지장려금 + 그룹 보너스(아래 group_bonus_amount) */
   incentive_amount: number;
   leader_promotion?: LeaderPromotionSettlementDetail | null;
+  /**
+   * 2026-06 한정 그룹 보너스(가입일+고객명+담당사원 그룹화, 2구좌당 5만원).
+   * 유지장려금과 별도로 계산되어 incentive_amount에 합산되어 들어간다.
+   */
+  group_bonus_amount?: number;
   /** 특정 멤버 예외/수동 조정(합계 수당에 가감) */
   manual_adjustment_won?: number;
   manual_adjustment_reason?: string | null;

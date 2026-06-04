@@ -13,6 +13,7 @@ import {
 } from '@/lib/settlement/leader-promotion';
 import type { Contract, OrganizationMember, SettlementRule } from '@/lib/types';
 import type { RankType } from '@/lib/types/organization';
+import type { GroupBonusContractInput } from '@/lib/settlement/group-bonus';
 
 function isSettlementDebugEnabled(): boolean {
   const v = process.env.SETTLEMENT_DEBUG;
@@ -55,17 +56,34 @@ export async function calculateMonthlySettlement(params: {
   const contractIds = normalizedContractsBase.map((c) => c.id).filter(Boolean);
   const { data: contractCustomerRows, error: ccErr } = await db
     .from('contracts')
-    .select('id, item_name, created_at')
+    .select('id, item_name, created_at, customer_id')
     .in('id', contractIds);
   if (ccErr) throw new Error(`contracts(item_name) 조회 실패: ${ccErr.message}`);
 
   const itemNameByContractId = new Map<string, string | null>();
   const createdAtByContractId = new Map<string, string | null>();
+  const customerIdByContractId = new Map<string, string | null>();
   for (const r of (contractCustomerRows ?? []) as any[]) {
     if (!r?.id) continue;
     const id = String(r.id);
     itemNameByContractId.set(id, (r.item_name ?? null) as string | null);
     createdAtByContractId.set(id, (r.created_at ?? null) as string | null);
+    customerIdByContractId.set(id, (r.customer_id ?? null) as string | null);
+  }
+
+  // 그룹 보너스 산정용 고객명 맵 (2구좌당 5만원, 가입일+고객명+담당사원 그룹화)
+  const customerIds = [...new Set([...customerIdByContractId.values()].filter((v): v is string => !!v))];
+  const customerNameById = new Map<string, string>();
+  if (customerIds.length > 0) {
+    const { data: customerRows, error: cuErr } = await db
+      .from('customers')
+      .select('id, name')
+      .in('id', customerIds);
+    if (cuErr) throw new Error(`customers(name) 조회 실패: ${cuErr.message}`);
+    for (const r of (customerRows ?? []) as any[]) {
+      if (!r?.id) continue;
+      customerNameById.set(String(r.id), String(r.name ?? '').trim());
+    }
   }
 
   const { data: rules, error: rErr } = await db.from('settlement_rules').select('*');
@@ -191,6 +209,24 @@ export async function calculateMonthlySettlement(params: {
     }
   }
 
+  // 2026-06 한정 그룹 보너스 입력: 정산 대상 계약 + 고객명을 묶어 전달.
+  // - 그룹 보너스는 group-bonus.ts에서 sales_member_id, join_date, customer_name으로 그룹화.
+  // - 해약은 제외(가입 인정 계약 기준).
+  const groupBonusContracts: GroupBonusContractInput[] = [];
+  for (const c of normalizedContractsBase) {
+    if (!c.sales_member_id) continue;
+    if (c.is_cancelled) continue;
+    const cid = customerIdByContractId.get(c.id) ?? null;
+    const customerName = cid ? customerNameById.get(cid) ?? '' : '';
+    if (!customerName) continue;
+    groupBonusContracts.push({
+      join_date: c.join_date,
+      customer_name: customerName,
+      sales_member_id: c.sales_member_id,
+      unit_count: c.unit_count,
+    });
+  }
+
   const leaderOpts: LeaderSettlementOpts = {
     treeRows,
     promotionThresholdByMemberId,
@@ -199,6 +235,7 @@ export async function calculateMonthlySettlement(params: {
     leaderMaintenanceBonusAlreadyPaidByMemberId: leaderMaintBlockByMemberId,
     previousLeaderByPromotedMemberId: prevLeaderByPromotedMemberId,
     leaderRankEffectiveAtByMemberId,
+    groupBonusContracts,
   };
 
   const contractsByMember = new Map<string, Contract[]>();

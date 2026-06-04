@@ -15,6 +15,10 @@ import {
   subtreeJoinUnitsForLeaderMaintenanceInWindow,
   subtreeJoinUnitsJoinOnlyAsOf,
 } from './leader-promotion';
+import {
+  calculateGroupBonusForMember,
+  type GroupBonusContractInput,
+} from './group-bonus';
 import type { Contract } from '../types/contract';
 import { RANK_ORDER } from '../types/organization';
 import {
@@ -252,6 +256,12 @@ export interface LeaderSettlementOpts {
    * 해당 시각 이후(≥) 생성된 계약은 threshold와 무관하게 리더 단가 후보가 된다.
    */
   leaderRankEffectiveAtByMemberId?: Map<string, string | null>;
+  /**
+   * 2026-06 한정 그룹 보너스(2구좌당 5만원) 계산용 입력.
+   * - 정산월이 2026-06이 아니면 무시된다.
+   * - 보너스 적용 기간/그룹화 규칙은 `lib/settlement/group-bonus.ts` 참고.
+   */
+  groupBonusContracts?: ReadonlyArray<GroupBonusContractInput>;
 }
 
 const LEADER_MAINTENANCE_BONUS_WON = 1_000_000;
@@ -602,8 +612,15 @@ export function calculateMemberSettlement(
     leaderMaintenanceBonus = eligible ? Math.floor(periodUnits / 20) * LEADER_MAINTENANCE_BONUS_WON : 0;
   }
 
-  const incentiveAmountCombined = ruleIncentiveAmount + leaderMaintenanceBonus;
-  let totalAmount = baseCommission + rollupCommission + leaderMaintenanceBonus;
+  // 2026-06 한정 그룹 보너스 (2구좌당 5만원, 가입일+고객명+담당사원 그룹화)
+  // - 직급 무관, 1구좌 그룹은 0원
+  // - 정산월이 2026-06이 아니거나 입력이 없으면 0원
+  const groupBonus = leaderOpts?.groupBonusContracts
+    ? calculateGroupBonusForMember(member.id, leaderOpts.groupBonusContracts, yearMonth)
+    : 0;
+
+  const bonusAmountCombined = ruleIncentiveAmount + leaderMaintenanceBonus + groupBonus;
+  let totalAmount = baseCommission + rollupCommission + leaderMaintenanceBonus + groupBonus;
 
   // 수동 예외 차감 규칙은 사용하지 않는다.
   const manualAdjustment = 0;
@@ -687,10 +704,11 @@ export function calculateMemberSettlement(
     rule_id: rule.id,
     direct_contracts: directItems,
     rollup_items: rollupItems,
-    incentive_applied: incentiveAmountCombined > 0,
+    incentive_applied: bonusAmountCombined > 0,
     incentive_threshold: null,
-    incentive_amount: leaderMaintenanceBonus,
+    incentive_amount: bonusAmountCombined,
     leader_promotion: leaderPromotion,
+    group_bonus_amount: groupBonus,
     manual_adjustment_won: manualAdjustment !== 0 ? manualAdjustment : undefined,
     manual_adjustment_reason: manualAdjustment !== 0 ? '고객 김동건 정산 예외(-60만원)' : undefined,
   };
@@ -705,7 +723,7 @@ export function calculateMemberSettlement(
     total_unit_count: totalUnitCount,
     base_commission: baseCommission,
     rollup_commission: rollupCommission,
-    incentive_amount: leaderMaintenanceBonus,
+    incentive_amount: bonusAmountCombined,
     total_amount: totalAmount,
     calculation_detail: detail,
     is_finalized: false,

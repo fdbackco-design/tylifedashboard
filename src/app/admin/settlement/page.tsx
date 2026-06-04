@@ -382,7 +382,9 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       const lp = detail?.leader_promotion ?? null;
       const base = zeroOut ? 0 : (s.base_commission as number) ?? 0;
       const rollup = zeroOut ? 0 : (s.rollup_commission as number) ?? 0;
-      const leaderMaint = zeroOut ? 0 : lp?.leader_maintenance_bonus_amount ?? 0;
+      // "보너스" = 기존 유지장려금 + 2026-06 그룹 보너스(2구좌당 5만원).
+      // 둘의 합은 monthly_settlements.incentive_amount에 그대로 저장돼 있다.
+      const leaderMaint = zeroOut ? 0 : Number((s as any).incentive_amount ?? 0);
       const total = zeroOut ? 0 : (s.total_amount as number) ?? 0;
       return {
         s,
@@ -471,12 +473,11 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     const topLineId = getTopLineId(memberId);
     topLineIdByMemberId[memberId] = topLineId;
     const direct = directByMember.get(memberId) ?? { contractIds: new Set<string>(), unitSum: 0 };
-    const detail = r.calculation_detail as SettlementCalculationDetail | null;
-    const lp = detail?.leader_promotion ?? null;
     const zeroOut = nameRaw === ZERO_OUT_MEMBER_NAME;
     const base = zeroOut ? 0 : Number(r.base_commission ?? 0);
     const rollup = zeroOut ? 0 : Number(r.rollup_commission ?? 0);
-    const leaderMaint = zeroOut ? 0 : Number(lp?.leader_maintenance_bonus_amount ?? 0);
+    // "보너스" = 기존 유지장려금 + 2026-06 그룹 보너스. 합산값은 incentive_amount에 그대로 들어 있다.
+    const leaderMaint = zeroOut ? 0 : Number(r.incentive_amount ?? 0);
     const total = zeroOut ? 0 : Number(r.total_amount ?? 0);
     memberAggById[memberId] = {
       memberId,

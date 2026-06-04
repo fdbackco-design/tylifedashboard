@@ -540,7 +540,7 @@ export default function SettlementLineTableClient(props: {
                   '산하구좌',
                   '기본수당',
                   '롤업수당',
-                  '유지장려(리더)',
+                  '보너스',
                   '본인계약 인정',
                   '합계',
                 ].map((h) => (
