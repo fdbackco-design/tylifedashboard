@@ -13,6 +13,7 @@ import AccountActionsClient from './AccountActionsClient';
 import OrganizationDetailsFirstClient from './OrganizationDetailsFirstClient';
 import KakaoChatbotFab from './KakaoChatbotFab';
 import OrganizationNavMenu from '@/components/organization/OrganizationNavMenu';
+import SignOutAndGoLoginButton from '@/components/organization/SignOutAndGoLoginButton';
 import PushSubscribeButton from '@/components/push/PushSubscribeButton';
 import { getVapidPublicKey } from '@/lib/push/vapid';
 import { buildMyOrganizationTreeViewModel } from './my-org-tree-view-model';
@@ -64,9 +65,7 @@ export default async function OrganizationMyTreePage({
       <div className="p-6 max-w-lg">
         <TyLifePartnersLogo className="mb-5" mobileSrc="/logo.png" />
         <p className="text-sm text-red-600">이 계정은 조직도에 연결된 권한(member_id)이 없습니다.</p>
-        <Link className="text-sm text-blue-600 underline mt-2 inline-block" href="/login">
-          로그인으로 돌아가기
-        </Link>
+        <SignOutAndGoLoginButton />
       </div>
     );
   }

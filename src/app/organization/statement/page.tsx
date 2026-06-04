@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import TyLifePartnersLogo from '@/components/TyLifePartnersLogo';
 import YearMonthSelector from '@/components/YearMonthSelector';
+import SignOutAndGoLoginButton from '@/components/organization/SignOutAndGoLoginButton';
 import { createAdminSupabaseClient, createServerSupabaseClient } from '@/lib/supabase/server';
 import { sumDownlineAttributedUnitsInSettlementWindow } from '@/lib/organization/statement-downline-units';
 import {
@@ -61,9 +62,7 @@ export default async function OrganizationStatementPage({
       <div className="p-6 max-w-lg">
         <TyLifePartnersLogo className="mb-5" mobileSrc="/logo.png" />
         <p className="text-sm text-red-600">이 계정은 조직도에 연결된 권한(member_id)이 없습니다.</p>
-        <Link className="text-sm text-blue-600 underline mt-2 inline-block" href="/organization">
-          내 조직도로
-        </Link>
+        <SignOutAndGoLoginButton />
       </div>
     );
   }

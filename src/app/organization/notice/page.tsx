@@ -1,10 +1,10 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { requireOrganizationMember } from '@/lib/organization/require-member';
 import { fetchPublishedNoticesForMember, mapPublishedListItem } from '@/lib/notices/public-queries';
 import TyLifePartnersLogo from '@/components/TyLifePartnersLogo';
 import OrganizationNavMenu from '@/components/organization/OrganizationNavMenu';
+import SignOutAndGoLoginButton from '@/components/organization/SignOutAndGoLoginButton';
 import KakaoChatbotFab from '../KakaoChatbotFab';
 import NoticeListClient from './NoticeListClient';
 
@@ -20,9 +20,7 @@ export default async function OrganizationNoticeListPage() {
       <div className="mx-auto max-w-lg p-6">
         <TyLifePartnersLogo className="mb-5" mobileSrc="/logo.png" />
         <p className="text-sm text-red-600">이 계정은 조직도에 연결된 권한(member_id)이 없습니다.</p>
-        <Link className="mt-2 inline-block text-sm text-blue-600 underline" href="/organization">
-          내 조직도로
-        </Link>
+        <SignOutAndGoLoginButton />
       </div>
     );
   }
