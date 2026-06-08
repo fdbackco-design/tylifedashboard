@@ -112,6 +112,29 @@ export default function AccountIssueClient() {
   const [busyProfileId, setBusyProfileId] = useState<string | null>(null);
   const [isReevaluating, setIsReevaluating] = useState(false);
 
+  // 구글 시트 동기화
+  type SheetSyncRow = {
+    rowNumber: number;
+    name: string;
+    phone?: string;
+    loginId: string;
+    result: 'SUCCESS' | 'FAILED' | 'SKIPPED';
+    reason?: string;
+  };
+  type SheetSyncSummary = {
+    sheetName: string;
+    totalRows: number;
+    targetRows: number;
+    successCount: number;
+    failedCount: number;
+    skippedCount: number;
+    results: SheetSyncRow[];
+  };
+  const [isSheetSyncing, setIsSheetSyncing] = useState(false);
+  const [sheetSyncResult, setSheetSyncResult] = useState<SheetSyncSummary | null>(null);
+  const [sheetSyncError, setSheetSyncError] = useState<string | null>(null);
+  const [sheetSyncOpen, setSheetSyncOpen] = useState(false);
+
   const [issuedAccounts, setIssuedAccounts] = useState<
     Array<{
       id: string;
@@ -455,6 +478,31 @@ export default function AccountIssueClient() {
     }
   }
 
+  async function runGoogleSheetSync() {
+    setIsSheetSyncing(true);
+    setSheetSyncError(null);
+    setSheetSyncResult(null);
+    setSheetSyncOpen(true);
+    try {
+      const res = await fetch('/api/admin/account-issue/sync-sheet', {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const json = (await res.json()) as ApiResult<SheetSyncSummary>;
+      if (!res.ok || !json.success) {
+        setSheetSyncError(json.success ? '동기화 실패' : json.error);
+        return;
+      }
+      setSheetSyncResult(json.data);
+      void loadIssuedAccounts();
+      void loadPendingAccounts();
+    } catch (e) {
+      setSheetSyncError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsSheetSyncing(false);
+    }
+  }
+
   async function loadIssuedAccounts() {
     setIsLoadingIssuedList(true);
     try {
@@ -504,6 +552,140 @@ export default function AccountIssueClient() {
         message={alertModal?.message ?? ''}
         onClose={() => setAlertModal(null)}
       />
+
+      {/* 구글 시트 동기화 결과 모달 */}
+      {sheetSyncOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-3xl rounded-xl bg-white p-5 shadow-2xl max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-base font-semibold text-gray-900">구글 시트 동기화 결과</div>
+              <button
+                type="button"
+                onClick={() => setSheetSyncOpen(false)}
+                disabled={isSheetSyncing}
+                className="text-gray-400 hover:text-gray-600 text-xl leading-none disabled:opacity-50"
+                aria-label="닫기"
+              >
+                ×
+              </button>
+            </div>
+
+            {isSheetSyncing ? (
+              <div className="py-10 text-center text-sm text-gray-600">
+                Google Sheets &lsquo;시트1&rsquo; 을 동기화하는 중입니다. 잠시만 기다려 주세요…
+              </div>
+            ) : sheetSyncError ? (
+              <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+                <div className="font-semibold mb-1">동기화 중 오류가 발생했습니다.</div>
+                <div className="text-xs break-all">{sheetSyncError}</div>
+              </div>
+            ) : sheetSyncResult ? (
+              <div className="space-y-4 overflow-auto">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
+                  <div className="rounded-lg bg-slate-50 border border-slate-200 p-2">
+                    <div className="text-[11px] text-slate-500">총 조회</div>
+                    <div className="text-lg font-bold tabular-nums">{sheetSyncResult.totalRows.toLocaleString('ko-KR')}</div>
+                  </div>
+                  <div className="rounded-lg bg-slate-50 border border-slate-200 p-2">
+                    <div className="text-[11px] text-slate-500">처리 대상</div>
+                    <div className="text-lg font-bold tabular-nums">{sheetSyncResult.targetRows.toLocaleString('ko-KR')}</div>
+                  </div>
+                  <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-2">
+                    <div className="text-[11px] text-emerald-700">발급 성공</div>
+                    <div className="text-lg font-bold tabular-nums text-emerald-700">
+                      {sheetSyncResult.successCount.toLocaleString('ko-KR')}
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-red-50 border border-red-200 p-2">
+                    <div className="text-[11px] text-red-700">실패</div>
+                    <div className="text-lg font-bold tabular-nums text-red-700">
+                      {sheetSyncResult.failedCount.toLocaleString('ko-KR')}
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-slate-50 border border-slate-200 p-2">
+                    <div className="text-[11px] text-slate-500">스킵</div>
+                    <div className="text-lg font-bold tabular-nums">{sheetSyncResult.skippedCount.toLocaleString('ko-KR')}</div>
+                  </div>
+                </div>
+
+                {sheetSyncResult.results.filter((r) => r.result === 'FAILED').length > 0 ? (
+                  <div>
+                    <div className="text-sm font-semibold text-gray-700 mb-2">실패 목록</div>
+                    <div className="overflow-x-auto rounded-lg border border-gray-200">
+                      <table className="w-full text-xs">
+                        <thead className="bg-gray-50">
+                          <tr className="text-left text-[11px] text-gray-600">
+                            {['행', '이름', '전화번호', '로그인 ID', '사유'].map((h) => (
+                              <th key={h} className="px-3 py-2 font-semibold whitespace-nowrap">
+                                {h}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sheetSyncResult.results
+                            .filter((r) => r.result === 'FAILED')
+                            .map((r) => (
+                              <tr key={r.rowNumber} className="border-t border-gray-100">
+                                <td className="px-3 py-2 tabular-nums">{r.rowNumber}</td>
+                                <td className="px-3 py-2 whitespace-nowrap">{r.name || '-'}</td>
+                                <td className="px-3 py-2 whitespace-nowrap">{r.phone ?? '-'}</td>
+                                <td className="px-3 py-2 whitespace-nowrap font-mono">{r.loginId || '-'}</td>
+                                <td className="px-3 py-2 text-red-700">{r.reason ?? '-'}</td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : null}
+
+                {sheetSyncResult.results.filter((r) => r.result === 'SUCCESS').length > 0 ? (
+                  <div>
+                    <div className="text-sm font-semibold text-gray-700 mb-2">성공 목록</div>
+                    <div className="overflow-x-auto rounded-lg border border-emerald-100">
+                      <table className="w-full text-xs">
+                        <thead className="bg-emerald-50">
+                          <tr className="text-left text-[11px] text-emerald-800">
+                            {['행', '이름', '전화번호', '로그인 ID'].map((h) => (
+                              <th key={h} className="px-3 py-2 font-semibold whitespace-nowrap">
+                                {h}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sheetSyncResult.results
+                            .filter((r) => r.result === 'SUCCESS')
+                            .map((r) => (
+                              <tr key={r.rowNumber} className="border-t border-emerald-50">
+                                <td className="px-3 py-2 tabular-nums">{r.rowNumber}</td>
+                                <td className="px-3 py-2 whitespace-nowrap">{r.name || '-'}</td>
+                                <td className="px-3 py-2 whitespace-nowrap">{r.phone ?? '-'}</td>
+                                <td className="px-3 py-2 whitespace-nowrap font-mono">{r.loginId || '-'}</td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setSheetSyncOpen(false)}
+                disabled={isSheetSyncing}
+                className="px-3 py-1.5 rounded-md border border-gray-300 text-sm text-gray-700 disabled:opacity-50"
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* 사전 계정 발급 모달 */}
       {preIssueOpen ? (
@@ -617,6 +799,19 @@ export default function AccountIssueClient() {
 
     <div className="space-y-6">
       <div className="bg-white border border-gray-200 rounded-xl p-4">
+        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+          <div className="text-sm font-semibold text-gray-700">계정 발급</div>
+          <LoadingButton
+            type="button"
+            isLoading={isSheetSyncing}
+            loadingText="동기화 중…"
+            onClick={() => void runGoogleSheetSync()}
+            className="px-3 py-1.5 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-50"
+            title="Google Sheets '시트1' 의 미처리 행을 읽어 자동으로 계정을 발급합니다."
+          >
+            구글 시트 동기화
+          </LoadingButton>
+        </div>
         <div className="flex gap-2 items-end flex-wrap">
           <div className="flex-1 min-w-[220px]">
             <label className="block text-sm font-medium text-gray-700">이름 또는 휴대폰번호</label>
