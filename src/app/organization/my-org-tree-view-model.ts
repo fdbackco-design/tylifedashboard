@@ -77,6 +77,44 @@ export type OrganizationMyTreeViewModel = {
   basisMonth: string;
 };
 
+/**
+ * 사전 발급(PENDING) 등으로 member_id 가 아직 매핑되지 않은 사용자를 위한 빈 뷰 모델.
+ * - 화면 골격(헤더/탭/주기 선택)은 동일하게 유지하면서 모든 수치를 0/null 로 표시한다.
+ * - 영업 데이터는 일체 노출되지 않으므로 권한 누수 없음.
+ */
+export function buildEmptyMyOrganizationTreeViewModel(params: {
+  yearMonth: string;
+  displayName: string | null;
+}): OrganizationMyTreeViewModel {
+  const { yearMonth, displayName } = params;
+  const { start_date, end_date, label_year_month } = getSettlementWindowForYearMonth(yearMonth);
+  const yearsForPicker = (() => {
+    const base = parseInt(label_year_month.slice(0, 4), 10);
+    const out: number[] = [];
+    for (let y = base; y >= base - 4; y--) out.push(y);
+    return out;
+  })();
+  const [basisYear, basisMonth] = label_year_month.split('-');
+  const cleanName = (displayName ?? '').replace(/^\[고객\]\s*/, '').trim() || '사용자';
+  return {
+    yearMonth,
+    label_year_month,
+    start_date,
+    end_date,
+    yearsForPicker,
+    greetingDisplayName: cleanName,
+    greetingDisplayRank: '',
+    treeForDisplay: [],
+    contractsByMember: {},
+    orgMetricsById: {},
+    periodPendingTreeContractCount: 0,
+    totalJoinUnits: 0,
+    periodJoinUnits: 0,
+    basisYear,
+    basisMonth,
+  };
+}
+
 export async function buildMyOrganizationTreeViewModel(
   adminDb: SupabaseClient,
   params: { memberId: string; yearMonth: string },

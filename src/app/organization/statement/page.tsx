@@ -3,7 +3,6 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import TyLifePartnersLogo from '@/components/TyLifePartnersLogo';
 import YearMonthSelector from '@/components/YearMonthSelector';
-import SignOutAndGoLoginButton from '@/components/organization/SignOutAndGoLoginButton';
 import { createAdminSupabaseClient, createServerSupabaseClient } from '@/lib/supabase/server';
 import { sumDownlineAttributedUnitsInSettlementWindow } from '@/lib/organization/statement-downline-units';
 import {
@@ -52,38 +51,38 @@ export default async function OrganizationStatementPage({
 
   const { data: profile } = await userDb
     .from('user_profiles')
-    .select('member_id,is_active')
+    .select('member_id,is_active,display_name,mapping_status')
     .eq('id', user.id)
     .maybeSingle();
 
   const memberId = (profile?.member_id as string | null) ?? null;
-  if (!memberId) {
-    return (
-      <div className="p-6 max-w-lg">
-        <TyLifePartnersLogo className="mb-5" mobileSrc="/logo.png" />
-        <p className="text-sm text-red-600">이 계정은 조직도에 연결된 권한(member_id)이 없습니다.</p>
-        <SignOutAndGoLoginButton />
-      </div>
-    );
-  }
+  const profileDisplayName = (profile?.display_name as string | null) ?? null;
+  const mappingStatus = (profile?.mapping_status as string | null) ?? null;
+  // 사전 발급(PENDING) 계정도 로그인 상태에서 빈 명세서를 볼 수 있게 한다.
+  const isUnmapped = !memberId;
 
   const db = createAdminSupabaseClient();
 
-  const [memberRes, settlementRes] = await Promise.all([
-    db
-      .from('organization_members')
-      .select('id,name,rank,leader_rank_effective_at')
-      .eq('id', memberId)
-      .maybeSingle(),
-    db
-      .from('monthly_settlements')
-      .select(
-        'year_month, member_id, rank, direct_unit_count, base_commission, rollup_commission, incentive_amount, total_amount',
-      )
-      .eq('year_month', label_year_month)
-      .eq('member_id', memberId)
-      .maybeSingle(),
-  ]);
+  const [memberRes, settlementRes] = isUnmapped
+    ? [
+        { data: null as { id: string; name: string; rank: string; leader_rank_effective_at?: string | null } | null },
+        { data: null as any },
+      ]
+    : await Promise.all([
+        db
+          .from('organization_members')
+          .select('id,name,rank,leader_rank_effective_at')
+          .eq('id', memberId as string)
+          .maybeSingle(),
+        db
+          .from('monthly_settlements')
+          .select(
+            'year_month, member_id, rank, direct_unit_count, base_commission, rollup_commission, incentive_amount, total_amount',
+          )
+          .eq('year_month', label_year_month)
+          .eq('member_id', memberId as string)
+          .maybeSingle(),
+      ]);
 
   const member = (memberRes.data ?? null) as {
     id: string;
@@ -104,10 +103,25 @@ export default async function OrganizationStatementPage({
       }
     | null;
 
-  const displayName = (member?.name ?? '').replace(/^\[고객\]\s*/, '') || '—';
-  const rank = s?.rank ?? member?.rank ?? '—';
+  const displayName = isUnmapped
+    ? ((profileDisplayName ?? '').replace(/^\[고객\]\s*/, '').trim() || '사용자')
+    : ((member?.name ?? '').replace(/^\[고객\]\s*/, '') || '—');
+  const rank = isUnmapped ? '—' : (s?.rank ?? member?.rank ?? '—');
 
-  if (!s) {
+  // 사전 발급(미매핑) 계정은 0 채움 명세서를 보여준다.
+  const emptySettlement = {
+    year_month: label_year_month,
+    member_id: '',
+    rank: '—',
+    direct_unit_count: 0,
+    base_commission: 0,
+    rollup_commission: 0,
+    incentive_amount: 0,
+    total_amount: 0,
+  };
+  const ss = isUnmapped ? emptySettlement : s;
+
+  if (!ss) {
     return (
       <div className="p-6">
         <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -154,19 +168,23 @@ export default async function OrganizationStatementPage({
     );
   }
 
-  const downlineRes = await sumDownlineAttributedUnitsInSettlementWindow(
-    db,
-    memberId,
-    { start_date, end_date },
-    s.direct_unit_count ?? 0,
-    member?.leader_rank_effective_at ?? null,
-    { debug },
-  );
-  const downlineAttributedUnits =
-    typeof downlineRes === 'number' ? downlineRes : downlineRes.downline_units;
+  let downlineRes: Awaited<ReturnType<typeof sumDownlineAttributedUnitsInSettlementWindow>> | number = 0;
+  let downlineAttributedUnits = 0;
+  if (!isUnmapped) {
+    downlineRes = await sumDownlineAttributedUnitsInSettlementWindow(
+      db,
+      memberId as string,
+      { start_date, end_date },
+      ss.direct_unit_count ?? 0,
+      member?.leader_rank_effective_at ?? null,
+      { debug },
+    );
+    downlineAttributedUnits =
+      typeof downlineRes === 'number' ? downlineRes : downlineRes.downline_units;
+  }
 
-  const no = `${label_year_month}-${String(memberId).slice(0, 4)}`;
-  const statementTotalUnits = (s.direct_unit_count ?? 0) + downlineAttributedUnits;
+  const no = `${label_year_month}-${isUnmapped ? 'GUEST' : String(memberId).slice(0, 4)}`;
+  const statementTotalUnits = (ss.direct_unit_count ?? 0) + downlineAttributedUnits;
   const [basisYear, basisMonth] = label_year_month.split('-');
 
   return (
@@ -191,6 +209,17 @@ export default async function OrganizationStatementPage({
           todayLabel="오늘 기준월"
         />
       </div>
+
+      {isUnmapped ? (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-sm font-semibold text-amber-900">조직 매핑이 완료되지 않은 계정입니다</p>
+          <p className="mt-1 text-xs leading-relaxed text-amber-800">
+            본인 명의의 계약/정산 데이터가 아직 연결되지 않아 모든 값은 0 으로 표시됩니다.
+            관리자가 동기화/매핑을 완료하면 정상 명세서가 표시됩니다.
+            {mappingStatus === 'MANUAL_REVIEW' ? ' (현재 상태: 관리자 검토 대기)' : ' (현재 상태: 매핑 대기)'}
+          </p>
+        </div>
+      ) : null}
 
       <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.035]">
         <div className="border-t-4 border-orange-400 p-4 sm:p-6">
@@ -218,7 +247,7 @@ export default async function OrganizationStatementPage({
           <div className="rounded-lg border border-gray-200 overflow-hidden mb-5">
             <div className="grid grid-cols-2 px-4 py-3 border-b border-gray-100">
               <div className="text-sm text-gray-600">개인 실적 구좌</div>
-              <div className="text-sm text-right font-semibold tabular-nums">{s.direct_unit_count.toLocaleString('ko-KR')} 구좌</div>
+              <div className="text-sm text-right font-semibold tabular-nums">{ss.direct_unit_count.toLocaleString('ko-KR')} 구좌</div>
             </div>
             <div className="grid grid-cols-2 px-4 py-3 border-b border-gray-100">
               <div className="text-sm text-gray-600">산하 실적 구좌</div>
@@ -313,22 +342,22 @@ export default async function OrganizationStatementPage({
           <div className="rounded-lg border border-gray-200 overflow-hidden mb-5">
             <div className="grid grid-cols-2 px-4 py-3 border-b border-gray-100">
               <div className="text-sm text-gray-600">개인 수당</div>
-              <div className="text-sm text-right tabular-nums">{formatWon(s.base_commission ?? 0)}</div>
+              <div className="text-sm text-right tabular-nums">{formatWon(ss.base_commission ?? 0)}</div>
             </div>
             <div className="grid grid-cols-2 px-4 py-3 border-b border-gray-100">
               <div className="text-sm text-gray-600">오버라이드</div>
-              <div className="text-sm text-right tabular-nums">{formatWon(s.rollup_commission ?? 0)}</div>
+              <div className="text-sm text-right tabular-nums">{formatWon(ss.rollup_commission ?? 0)}</div>
             </div>
             <div className="grid grid-cols-2 px-4 py-3">
               <div className="text-sm text-gray-600">보너스</div>
-              <div className="text-sm text-right tabular-nums">{formatWon(s.incentive_amount ?? 0)}</div>
+              <div className="text-sm text-right tabular-nums">{formatWon(ss.incentive_amount ?? 0)}</div>
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="bg-orange-400 rounded-lg p-4">
               <div className="text-xs text-orange-950/80 mb-1">총 지급액</div>
-              <div className="text-xl font-semibold text-orange-950 tabular-nums">{formatWon(s.total_amount ?? 0)}</div>
+              <div className="text-xl font-semibold text-orange-950 tabular-nums">{formatWon(ss.total_amount ?? 0)}</div>
             </div>
             <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
               <div className="text-xs text-orange-800 mb-1">총 합계 구좌</div>

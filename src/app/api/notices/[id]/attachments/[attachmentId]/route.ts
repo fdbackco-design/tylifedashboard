@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
-import { isOrganizationMemberAuthed } from '@/lib/notices/member-auth';
+import { isOrganizationViewerAuthed } from '@/lib/notices/member-auth';
 import { NOTICE_STORAGE_BUCKET } from '@/lib/notices/constants';
 import { fetchPublishedNoticesForMember } from '@/lib/notices/public-queries';
 
 type Ctx = { params: Promise<{ id: string; attachmentId: string }> };
 
 export async function GET(req: NextRequest, ctx: Ctx): Promise<NextResponse> {
-  if (!(await isOrganizationMemberAuthed(req))) {
+  // 공지 첨부 다운로드는 member_id 가 없는 사전 발급(PENDING) 계정도 허용한다.
+  if (!(await isOrganizationViewerAuthed(req))) {
     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
   }
 

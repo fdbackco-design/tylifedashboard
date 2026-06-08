@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import SignOutAndGoLoginButton from '@/components/organization/SignOutAndGoLoginButton';
 import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import OrgTree from '@/components/org-tree/OrgTree';
@@ -12,7 +11,10 @@ import {
 } from '@/lib/settlement/settlement-window';
 import TyLifePartnersLogo from '@/components/TyLifePartnersLogo';
 import AccountActionsClient from '../AccountActionsClient';
-import { buildMyOrganizationTreeViewModel } from '../my-org-tree-view-model';
+import {
+  buildEmptyMyOrganizationTreeViewModel,
+  buildMyOrganizationTreeViewModel,
+} from '../my-org-tree-view-model';
 
 export const metadata: Metadata = { title: '조직도 보기' };
 export const dynamic = 'force-dynamic';
@@ -44,7 +46,7 @@ export default async function OrganizationTreePage({
 
   const { data: profile, error: profileErr } = await userDb
     .from('user_profiles')
-    .select('member_id,is_active')
+    .select('member_id,is_active,display_name,mapping_status')
     .eq('id', user.id)
     .maybeSingle();
 
@@ -52,18 +54,14 @@ export default async function OrganizationTreePage({
     redirect(`/login?error=profile&redirect=${encodeURIComponent(`/organization/tree?year_month=${yearMonth}`)}`);
   }
 
-  const memberId = profile?.member_id as string | null;
-  if (!memberId) {
-    return (
-      <div className="p-6 max-w-lg">
-        <TyLifePartnersLogo className="mb-5" mobileSrc="/logo.png" />
-        <p className="text-sm text-red-600">이 계정은 조직도에 연결된 권한(member_id)이 없습니다.</p>
-        <SignOutAndGoLoginButton />
-      </div>
-    );
-  }
+  const memberId = (profile?.member_id as string | null) ?? null;
+  const displayName = (profile?.display_name as string | null) ?? null;
+  const mappingStatus = (profile?.mapping_status as string | null) ?? null;
+  const isUnmapped = !memberId;
 
-  const vm = await buildMyOrganizationTreeViewModel(adminDb, { memberId, yearMonth });
+  const vm = isUnmapped
+    ? buildEmptyMyOrganizationTreeViewModel({ yearMonth, displayName })
+    : await buildMyOrganizationTreeViewModel(adminDb, { memberId: memberId as string, yearMonth });
   const {
     start_date,
     end_date,
@@ -111,6 +109,16 @@ export default async function OrganizationTreePage({
           todayLabel="오늘 기준월"
         />
       </section>
+
+      {isUnmapped ? (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 sm:px-4 sm:py-3">
+          <p className="text-xs font-semibold text-amber-900 sm:text-sm">조직 매핑이 완료되지 않은 계정입니다</p>
+          <p className="mt-1 text-[11px] leading-relaxed text-amber-800 sm:text-xs">
+            관리자가 동기화/매핑을 완료하면 조직도가 표시됩니다.
+            {mappingStatus === 'MANUAL_REVIEW' ? ' (현재 상태: 관리자 검토 대기)' : ' (현재 상태: 매핑 대기)'}
+          </p>
+        </div>
+      ) : null}
 
       <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm sm:p-4">
         <OrgTree

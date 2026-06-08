@@ -1,10 +1,8 @@
 import type { Metadata } from 'next';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
-import { requireOrganizationMember } from '@/lib/organization/require-member';
+import { requireOrganizationViewer } from '@/lib/organization/require-member';
 import { fetchPublishedNoticesForMember, mapPublishedListItem } from '@/lib/notices/public-queries';
-import TyLifePartnersLogo from '@/components/TyLifePartnersLogo';
 import OrganizationNavMenu from '@/components/organization/OrganizationNavMenu';
-import SignOutAndGoLoginButton from '@/components/organization/SignOutAndGoLoginButton';
 import KakaoChatbotFab from '../KakaoChatbotFab';
 import NoticeListClient from './NoticeListClient';
 
@@ -13,17 +11,8 @@ export const dynamic = 'force-dynamic';
 
 export default async function OrganizationNoticeListPage() {
   const loginRedirect = '/login?redirect=' + encodeURIComponent('/organization/notice');
-  const memberCtx = await requireOrganizationMember(loginRedirect);
-
-  if (!memberCtx) {
-    return (
-      <div className="mx-auto max-w-lg p-6">
-        <TyLifePartnersLogo className="mb-5" mobileSrc="/logo.png" />
-        <p className="text-sm text-red-600">이 계정은 조직도에 연결된 권한(member_id)이 없습니다.</p>
-        <SignOutAndGoLoginButton />
-      </div>
-    );
-  }
+  // 사전 발급(PENDING) 계정도 공지사항은 볼 수 있어야 한다.
+  await requireOrganizationViewer(loginRedirect);
 
   const db = createAdminSupabaseClient();
   let items: ReturnType<typeof mapPublishedListItem>[] = [];

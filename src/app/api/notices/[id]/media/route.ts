@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { isAdminAuthed } from '@/lib/admin-auth';
-import { isOrganizationMemberAuthed } from '@/lib/notices/member-auth';
+import { isOrganizationViewerAuthed } from '@/lib/notices/member-auth';
 import { NOTICE_STORAGE_BUCKET } from '@/lib/notices/constants';
 import { isValidNoticeInlineStoragePath } from '@/lib/notices/storage';
 import { fetchPublishedNoticesForMember } from '@/lib/notices/public-queries';
@@ -10,7 +10,8 @@ type Ctx = { params: Promise<{ id: string }> };
 
 export async function GET(req: NextRequest, ctx: Ctx): Promise<NextResponse> {
   const isAdmin = await isAdminAuthed(req);
-  const isMember = isAdmin ? true : await isOrganizationMemberAuthed(req);
+  // 공지사항 인라인 이미지는 member_id 가 없는 사전 발급(PENDING) 계정도 볼 수 있어야 한다.
+  const isMember = isAdmin ? true : await isOrganizationViewerAuthed(req);
   if (!isAdmin && !isMember) {
     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
   }

@@ -13,10 +13,12 @@ import AccountActionsClient from './AccountActionsClient';
 import OrganizationDetailsFirstClient from './OrganizationDetailsFirstClient';
 import KakaoChatbotFab from './KakaoChatbotFab';
 import OrganizationNavMenu from '@/components/organization/OrganizationNavMenu';
-import SignOutAndGoLoginButton from '@/components/organization/SignOutAndGoLoginButton';
 import PushSubscribeButton from '@/components/push/PushSubscribeButton';
 import { getVapidPublicKey } from '@/lib/push/vapid';
-import { buildMyOrganizationTreeViewModel } from './my-org-tree-view-model';
+import {
+  buildEmptyMyOrganizationTreeViewModel,
+  buildMyOrganizationTreeViewModel,
+} from './my-org-tree-view-model';
 
 export const metadata: Metadata = { title: '내 조직도' };
 export const dynamic = 'force-dynamic';
@@ -50,7 +52,7 @@ export default async function OrganizationMyTreePage({
 
   const { data: profile, error: profileErr } = await userDb
     .from('user_profiles')
-    .select('member_id,is_active')
+    .select('member_id,is_active,display_name,mapping_status')
     .eq('id', user.id)
     .maybeSingle();
 
@@ -58,19 +60,15 @@ export default async function OrganizationMyTreePage({
     redirect(`/login?error=profile&redirect=${encodeURIComponent(`/organization?year_month=${yearMonth}`)}`);
   }
 
-  const memberId = profile?.member_id as string | null;
+  const memberId = (profile?.member_id as string | null) ?? null;
+  const displayName = (profile?.display_name as string | null) ?? null;
+  const mappingStatus = (profile?.mapping_status as string | null) ?? null;
+  // member_id 가 없는 사전 발급(PENDING) 계정도 로그인/접근은 가능. 영업 데이터는 모두 0/빈 값으로 표시.
+  const isUnmapped = !memberId;
 
-  if (!memberId) {
-    return (
-      <div className="p-6 max-w-lg">
-        <TyLifePartnersLogo className="mb-5" mobileSrc="/logo.png" />
-        <p className="text-sm text-red-600">이 계정은 조직도에 연결된 권한(member_id)이 없습니다.</p>
-        <SignOutAndGoLoginButton />
-      </div>
-    );
-  }
-
-  const vm = await buildMyOrganizationTreeViewModel(adminDb, { memberId, yearMonth });
+  const vm = isUnmapped
+    ? buildEmptyMyOrganizationTreeViewModel({ yearMonth, displayName })
+    : await buildMyOrganizationTreeViewModel(adminDb, { memberId: memberId as string, yearMonth });
   const {
     label_year_month,
     start_date,
@@ -179,6 +177,19 @@ export default async function OrganizationMyTreePage({
         </div>
       </header>
 
+      {isUnmapped ? (
+        <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 sm:mb-4 sm:px-4 sm:py-3">
+          <p className="text-xs font-semibold text-amber-900 sm:text-sm">조직 매핑이 완료되지 않은 계정입니다</p>
+          <p className="mt-1 text-[11px] leading-relaxed text-amber-800 sm:text-xs">
+            관리자가 TY 전산 동기화 또는 수동 매핑을 완료하면, 본인 계약/조직 데이터가 자동으로 표시됩니다.
+            그 전까지는 공지사항만 정상적으로 확인할 수 있습니다.
+            {mappingStatus === 'MANUAL_REVIEW'
+              ? ' (현재 상태: 관리자 검토 대기)'
+              : ' (현재 상태: 매핑 대기)'}
+          </p>
+        </div>
+      ) : null}
+
       <div className="mb-3 sm:mb-4">
         <h2 className="text-lg font-bold tracking-tight text-slate-900 sm:text-xl">내 조직도</h2>
         <p className="mt-0.5 text-xs text-slate-500 sm:text-sm">
@@ -210,7 +221,7 @@ export default async function OrganizationMyTreePage({
       <OrganizationDetailsFirstClient
         roots={treeForDisplay}
         contractsByMember={contractsByMember}
-        defaultMemberId={memberId}
+        defaultMemberId={memberId ?? ''}
       />
     </div>
     <KakaoChatbotFab />
