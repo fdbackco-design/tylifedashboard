@@ -29,6 +29,27 @@ type MemberCandidate = {
 
 type ApiResult<T> = { success: true; data: T } | { success: false; error: string };
 
+type PendingCandidate = {
+  member_id: string;
+  name: string | null;
+  rank: string | null;
+  phone: string | null;
+  category: 'CUSTOMER' | 'MANAGER';
+  already_mapped_user_profile_id: string | null;
+};
+
+type PendingAccount = {
+  user_profile_id: string;
+  login_code: string | null;
+  display_name: string | null;
+  pre_issued_name: string | null;
+  pre_issued_phone: string | null;
+  mapping_status: 'PENDING' | 'MANUAL_REVIEW';
+  mapping_reason: string | null;
+  created_at: string | null;
+  candidates: PendingCandidate[];
+};
+
 function normalizePhoneDigits(v: string): string {
   return v.replace(/\D/g, '');
 }
@@ -73,6 +94,23 @@ export default function AccountIssueClient() {
   const [issuedListError, setIssuedListError] = useState<string | null>(null);
 
   const [alertModal, setAlertModal] = useState<AlertModalState | null>(null);
+
+  // 사전 계정 발급 모달
+  const [preIssueOpen, setPreIssueOpen] = useState(false);
+  const [preName, setPreName] = useState('');
+  const [prePhone, setPrePhone] = useState('');
+  const [preLoginCode, setPreLoginCode] = useState('');
+  const [prePassword, setPrePassword] = useState('');
+  const [preIsActive, setPreIsActive] = useState(true);
+  const [isPreIssuing, setIsPreIssuing] = useState(false);
+
+  // 매핑 대기/검토 섹션
+  const [pendingAccounts, setPendingAccounts] = useState<PendingAccount[]>([]);
+  const [isLoadingPending, setIsLoadingPending] = useState(false);
+  const [pendingError, setPendingError] = useState<string | null>(null);
+  const [selectedCandidateByProfile, setSelectedCandidateByProfile] = useState<Record<string, string>>({});
+  const [busyProfileId, setBusyProfileId] = useState<string | null>(null);
+  const [isReevaluating, setIsReevaluating] = useState(false);
 
   const [issuedAccounts, setIssuedAccounts] = useState<
     Array<{
@@ -238,6 +276,185 @@ export default function AccountIssueClient() {
     }
   }
 
+  function openPreIssueModal() {
+    setPreName(normalizedQuery && !customers.length ? normalizedQuery : '');
+    setPrePhone('');
+    const code = randomDigits8();
+    setPreLoginCode(code);
+    setPrePassword(code);
+    setPreIsActive(true);
+    setPreIssueOpen(true);
+  }
+
+  async function submitPreIssue() {
+    const name = preName.trim();
+    if (!name) {
+      showAlert('warning', '입력 확인', '이름을 입력해 주세요.');
+      return;
+    }
+    const loginCodeOnly = preLoginCode.replace(/\D/g, '');
+    const passwordOnly = prePassword.replace(/\D/g, '');
+    if (loginCodeOnly.length !== 8) {
+      showAlert('warning', '입력 확인', '로그인 ID는 8자리 숫자여야 합니다.');
+      return;
+    }
+    if (passwordOnly !== loginCodeOnly) {
+      showAlert('warning', '입력 확인', '초기 비밀번호는 로그인 ID와 동일한 8자리 숫자여야 합니다.');
+      return;
+    }
+
+    setIsPreIssuing(true);
+    try {
+      // 동일 login_code 중복 시 재시도(최대 5회)
+      let codeToTry = loginCodeOnly;
+      for (let i = 0; i < 5; i++) {
+        const res = await fetch('/api/admin/account-issue/pre-issue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            phone: prePhone.trim() || null,
+            login_code: codeToTry,
+            password: codeToTry,
+            is_active: preIsActive,
+          }),
+          credentials: 'include',
+        });
+        const json = (await res.json()) as ApiResult<{ user_id: string; mapping_status: string }>;
+        if (res.ok && json.success) {
+          showAlert(
+            'success',
+            '사전 계정 발급 완료',
+            `계정이 생성되었습니다. (로그인 ID: ${codeToTry})\n매핑 상태: ${json.data.mapping_status}\n\nTY 동기화 후 자동 매핑되거나, 매핑 검토 섹션에서 수동 매핑할 수 있습니다.`,
+          );
+          setPreIssueOpen(false);
+          void loadIssuedAccounts();
+          void loadPendingAccounts();
+          return;
+        }
+        if (res.status === 409) {
+          codeToTry = randomDigits8();
+          continue;
+        }
+        showAlert('warning', '발급 실패', json.success ? '발급 실패' : json.error);
+        return;
+      }
+      showAlert('warning', '발급 실패', '동일한 로그인 ID 가 반복 발생합니다. 잠시 후 다시 시도해 주세요.');
+    } catch (e) {
+      showAlert('warning', '발급 실패', e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsPreIssuing(false);
+    }
+  }
+
+  async function loadPendingAccounts() {
+    setIsLoadingPending(true);
+    setPendingError(null);
+    try {
+      const res = await fetch('/api/admin/account-issue/pending', { credentials: 'include' });
+      const json = (await res.json()) as ApiResult<PendingAccount[]>;
+      if (res.status === 401) {
+        setPendingError('관리자 세션이 없습니다.');
+        setPendingAccounts([]);
+        return;
+      }
+      if (!res.ok || !json.success) throw new Error(json.success ? 'error' : json.error);
+      setPendingAccounts(json.data);
+      // 디폴트 후보 선택: 첫 번째(이미 매핑된 후보는 제외) 가능하면 그 값
+      setSelectedCandidateByProfile((prev) => {
+        const next = { ...prev };
+        for (const row of json.data) {
+          if (next[row.user_profile_id]) continue;
+          const first = row.candidates.find((c) => !c.already_mapped_user_profile_id);
+          if (first) next[row.user_profile_id] = first.member_id;
+        }
+        return next;
+      });
+    } catch (e) {
+      setPendingError(e instanceof Error ? e.message : '목록을 불러오지 못했습니다.');
+      setPendingAccounts([]);
+    } finally {
+      setIsLoadingPending(false);
+    }
+  }
+
+  async function reevaluateAutoMapping() {
+    setIsReevaluating(true);
+    try {
+      const res = await fetch('/api/admin/account-issue/reevaluate', {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const json = (await res.json()) as ApiResult<{
+        matched_count: number;
+        manual_review_count: number;
+        pending_count: number;
+        scanned_count: number;
+      }>;
+      if (!res.ok || !json.success) throw new Error(json.success ? 'error' : json.error);
+      showAlert(
+        'success',
+        '재평가 완료',
+        `평가 ${json.data.scanned_count}건 → 자동 매핑 ${json.data.matched_count}건 / 검토 필요 ${json.data.manual_review_count}건 / 대기 유지 ${json.data.pending_count}건`,
+      );
+      await loadPendingAccounts();
+      await loadIssuedAccounts();
+    } catch (e) {
+      showAlert('warning', '재평가 실패', e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsReevaluating(false);
+    }
+  }
+
+  async function manualMap(profileId: string) {
+    const memberId = selectedCandidateByProfile[profileId];
+    if (!memberId) {
+      showAlert('warning', '입력 확인', '매핑할 후보 사람을 먼저 선택해 주세요.');
+      return;
+    }
+    setBusyProfileId(profileId);
+    try {
+      const res = await fetch('/api/admin/account-issue/manual-map', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'map', user_profile_id: profileId, member_id: memberId }),
+        credentials: 'include',
+      });
+      const json = (await res.json()) as ApiResult<{ mapping_status: string }>;
+      if (!res.ok || !json.success) {
+        showAlert('warning', '매핑 실패', json.success ? '매핑 실패' : json.error);
+        return;
+      }
+      showAlert('success', '매핑 완료', '계정이 사람 데이터와 매핑되었습니다.');
+      await loadPendingAccounts();
+      await loadIssuedAccounts();
+    } finally {
+      setBusyProfileId(null);
+    }
+  }
+
+  async function unmapProfile(profileId: string) {
+    setBusyProfileId(profileId);
+    try {
+      const res = await fetch('/api/admin/account-issue/manual-map', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'unmap', user_profile_id: profileId }),
+        credentials: 'include',
+      });
+      const json = (await res.json()) as ApiResult<{ mapping_status: string }>;
+      if (!res.ok || !json.success) {
+        showAlert('warning', '해제 실패', json.success ? '해제 실패' : json.error);
+        return;
+      }
+      showAlert('success', '매핑 해제 완료', '계정이 사람 데이터와의 매핑에서 해제되었습니다.');
+      await loadPendingAccounts();
+      await loadIssuedAccounts();
+    } finally {
+      setBusyProfileId(null);
+    }
+  }
+
   async function loadIssuedAccounts() {
     setIsLoadingIssuedList(true);
     try {
@@ -274,6 +491,7 @@ export default function AccountIssueClient() {
 
   useEffect(() => {
     loadIssuedAccounts();
+    loadPendingAccounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -286,6 +504,117 @@ export default function AccountIssueClient() {
         message={alertModal?.message ?? ''}
         onClose={() => setAlertModal(null)}
       />
+
+      {/* 사전 계정 발급 모달 */}
+      {preIssueOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-base font-semibold text-gray-900">사전 계정 발급</div>
+              <button
+                type="button"
+                onClick={() => setPreIssueOpen(false)}
+                className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+                aria-label="닫기"
+              >
+                ×
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mb-3">
+              아직 계약/TY 동기화 데이터가 없는 사람에게 미리 계정을 발급합니다. 이후 TY 동기화로 동일 이름의 사람이
+              들어오면 자동 매핑되며, 불확실한 경우엔 검토 대상으로 분류됩니다.
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">이름 *</label>
+                <input
+                  value={preName}
+                  onChange={(e) => setPreName(e.target.value)}
+                  placeholder="예: 홍길동"
+                  className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">전화번호</label>
+                <input
+                  value={prePhone}
+                  onChange={(e) => setPrePhone(e.target.value)}
+                  placeholder="010-1234-5678"
+                  className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  고객명 기준 자동 매핑은 전화번호가 동일해야 적용됩니다(미입력 시 후보가 있어도 수동 검토 대상).
+                </p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">로그인 ID(8자리 숫자) *</label>
+                  <input
+                    value={preLoginCode}
+                    onChange={(e) => setPreLoginCode(e.target.value)}
+                    placeholder="12345678"
+                    className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                  />
+                  <button
+                    type="button"
+                    className="mt-1 text-xs text-blue-600 hover:underline"
+                    onClick={() => {
+                      const code = randomDigits8();
+                      setPreLoginCode(code);
+                      setPrePassword(code);
+                    }}
+                  >
+                    자동 생성
+                  </button>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">초기 비밀번호 *</label>
+                  <input
+                    value={prePassword}
+                    onChange={(e) => setPrePassword(e.target.value)}
+                    placeholder="12345678"
+                    className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  id="pre_is_active"
+                  type="checkbox"
+                  checked={preIsActive}
+                  onChange={(e) => setPreIsActive(e.target.checked)}
+                />
+                <label htmlFor="pre_is_active" className="text-sm text-gray-700">
+                  계정 활성
+                </label>
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPreIssueOpen(false)}
+                disabled={isPreIssuing}
+                className="px-3 py-1.5 rounded-md border border-gray-300 text-sm text-gray-700 disabled:opacity-50"
+              >
+                취소
+              </button>
+              <LoadingButton
+                type="button"
+                isLoading={isPreIssuing}
+                loadingText="발급 중…"
+                onClick={() => void submitPreIssue()}
+                className="px-3 py-1.5 rounded-md bg-amber-600 text-white text-sm font-semibold disabled:opacity-50"
+              >
+                사전 발급
+              </LoadingButton>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
     <div className="space-y-6">
       <div className="bg-white border border-gray-200 rounded-xl p-4">
         <div className="flex gap-2 items-end flex-wrap">
@@ -318,9 +647,24 @@ export default function AccountIssueClient() {
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl p-4">
-        <div className="text-sm font-semibold text-gray-700 mb-3">검색 결과</div>
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="text-sm font-semibold text-gray-700">검색 결과</div>
+          <button
+            type="button"
+            onClick={openPreIssueModal}
+            className="px-3 py-1.5 rounded-md bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700"
+            title="계약/TY 동기화 데이터가 아직 없는 사람에게도 미리 계정을 발급합니다. 이후 동기화 시 자동 매핑됩니다."
+          >
+            사전 계정 발급
+          </button>
+        </div>
         {customers.length === 0 ? (
-          <p className="text-sm text-gray-500">결과가 없습니다.</p>
+          <div className="space-y-2">
+            <p className="text-sm text-gray-500">결과가 없습니다.</p>
+            <p className="text-xs text-gray-500">
+              해당하는 사람을 찾지 못하셨다면 우측 상단의 <span className="font-semibold text-amber-700">사전 계정 발급</span> 버튼으로 미리 계정을 만들 수 있습니다.
+            </p>
+          </div>
         ) : (
           <div className="space-y-2">
             {customers.slice(0, 20).map((c) => (
@@ -451,6 +795,139 @@ export default function AccountIssueClient() {
           </div>
         </div>
       ) : null}
+
+      {/* 매핑 대기/검토 */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4">
+        <div className="flex items-center justify-between mb-3 gap-3">
+          <div>
+            <div className="text-sm font-semibold text-gray-700">매핑 대기 / 검토 필요</div>
+            <div className="text-xs text-gray-500 mt-0.5">
+              사전 발급 계정 중 사람 데이터와 아직 연결되지 않았거나 자동 매핑이 불확실한 항목입니다.
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <LoadingButton
+              type="button"
+              isLoading={isReevaluating}
+              loadingText="재평가 중…"
+              onClick={() => void reevaluateAutoMapping()}
+              className="px-3 py-1.5 rounded-md bg-slate-800 text-white text-xs font-semibold hover:bg-slate-900 disabled:opacity-50"
+            >
+              자동 매핑 재평가
+            </LoadingButton>
+            <LoadingButton
+              type="button"
+              isLoading={isLoadingPending}
+              loadingText="불러오는 중…"
+              onClick={() => void loadPendingAccounts()}
+              className="px-3 py-1.5 rounded-md border border-gray-300 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              새로고침
+            </LoadingButton>
+          </div>
+        </div>
+        {pendingError ? (
+          <p className="text-sm text-red-600">{pendingError}</p>
+        ) : pendingAccounts.length === 0 ? (
+          <p className="text-sm text-gray-500">매핑 대기 중인 사전 발급 계정이 없습니다.</p>
+        ) : (
+          <div className="space-y-3">
+            {pendingAccounts.map((row) => {
+              const selectedMember = selectedCandidateByProfile[row.user_profile_id] ?? '';
+              const selectedCand = row.candidates.find((c) => c.member_id === selectedMember) ?? null;
+              const disabledBecauseMapped = !!selectedCand?.already_mapped_user_profile_id;
+              return (
+                <div
+                  key={row.user_profile_id}
+                  className={`rounded-lg border p-3 ${
+                    row.mapping_status === 'MANUAL_REVIEW'
+                      ? 'border-amber-300 bg-amber-50/40'
+                      : 'border-slate-200 bg-white'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-sm">
+                      <span className="font-semibold text-gray-900">
+                        {(row.pre_issued_name ?? row.display_name ?? '-').toString().replace(/^\[고객\]\s*/, '')}
+                      </span>
+                      <span className="ml-2 text-gray-600">{row.pre_issued_phone ?? '-'}</span>
+                      <span className="ml-2 font-mono text-xs text-gray-500">
+                        login_code: {row.login_code ?? '-'}
+                      </span>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded text-xs font-semibold ${
+                        row.mapping_status === 'MANUAL_REVIEW'
+                          ? 'bg-amber-200 text-amber-900'
+                          : 'bg-slate-200 text-slate-800'
+                      }`}
+                    >
+                      {row.mapping_status}
+                    </span>
+                  </div>
+                  {row.mapping_reason ? (
+                    <div className="mt-1 text-xs text-gray-500">사유: {row.mapping_reason}</div>
+                  ) : null}
+
+                  <div className="mt-3">
+                    {row.candidates.length === 0 ? (
+                      <p className="text-xs text-gray-500">
+                        일치하는 후보 사람이 아직 없습니다. TY 동기화 후 자동으로 재평가됩니다.
+                      </p>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          value={selectedMember}
+                          disabled={busyProfileId === row.user_profile_id}
+                          onChange={(e) =>
+                            setSelectedCandidateByProfile((prev) => ({
+                              ...prev,
+                              [row.user_profile_id]: e.target.value,
+                            }))
+                          }
+                          className="border border-gray-300 rounded-md px-2 py-1.5 text-sm min-w-[260px]"
+                        >
+                          <option value="">후보 선택…</option>
+                          {row.candidates.map((c) => (
+                            <option key={c.member_id} value={c.member_id}>
+                              [{c.category === 'CUSTOMER' ? '고객' : '담당자'}] {c.name ?? '-'} ({c.rank ?? '-'}) · {c.phone ?? '-'}
+                              {c.already_mapped_user_profile_id ? ' · 이미 매핑됨' : ''}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={
+                            !selectedMember ||
+                            disabledBecauseMapped ||
+                            busyProfileId === row.user_profile_id
+                          }
+                          onClick={() => void manualMap(row.user_profile_id)}
+                          className="px-3 py-1.5 rounded-md bg-emerald-700 text-white text-xs font-semibold disabled:opacity-50"
+                        >
+                          {busyProfileId === row.user_profile_id ? '처리중…' : '수동 매핑'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busyProfileId === row.user_profile_id}
+                          onClick={() => void unmapProfile(row.user_profile_id)}
+                          className="px-3 py-1.5 rounded-md border border-gray-300 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                          title="매핑 해제 후 PENDING 상태로 되돌립니다."
+                        >
+                          매핑 해제
+                        </button>
+                        {disabledBecauseMapped ? (
+                          <span className="text-xs text-red-600">선택한 후보는 이미 다른 계정에 매핑되어 있습니다.</span>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* 생성된 계정 목록 */}
       <div className="bg-white border border-gray-200 rounded-xl p-4">

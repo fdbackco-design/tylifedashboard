@@ -17,6 +17,7 @@
  */
 
 import { createAdminSupabaseClient } from '../supabase/server';
+import { runPreIssuedAccountAutoMapping } from '@/lib/account-issue/auto-mapping';
 import { fetchContractList, fetchContractDetailHtml } from './client';
 import { normalizeDate, parseContractListHtml, parseContractDetailHtml } from './html-parser';
 import {
@@ -1235,6 +1236,24 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         await log(db, runId, 'warn', `승격 반영 단계 실패(동기화는 완료 처리): ${message}`);
+      }
+    }
+
+    // 사전 발급 계정(PENDING) ↔ 동기화된 사람 데이터 자동 매핑
+    // - 동기화 단계가 모두 성공한 경우에만 시도한다.
+    // - 실패해도 동기화 전체는 완료 처리.
+    if (!dryRun) {
+      try {
+        const r = await runPreIssuedAccountAutoMapping(db);
+        await log(db, runId, 'info', '사전 발급 계정 자동 매핑 완료', {
+          scanned: r.scanned_count,
+          matched: r.matched_count,
+          manual_review: r.manual_review_count,
+          pending: r.pending_count,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        await log(db, runId, 'warn', `사전 발급 계정 자동 매핑 실패(동기화는 완료 처리): ${message}`);
       }
     }
 
