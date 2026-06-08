@@ -212,11 +212,10 @@ export default async function OrganizationStatementPage({
 
       {isUnmapped ? (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <p className="text-sm font-semibold text-amber-900">조직 매핑이 완료되지 않은 계정입니다</p>
+          <p className="text-sm font-semibold text-amber-900">계약이 완료되지 않은 계정입니다</p>
           <p className="mt-1 text-xs leading-relaxed text-amber-800">
             본인 명의의 계약/정산 데이터가 아직 연결되지 않아 모든 값은 0 으로 표시됩니다.
-            관리자가 동기화/매핑을 완료하면 정상 명세서가 표시됩니다.
-            {mappingStatus === 'MANUAL_REVIEW' ? ' (현재 상태: 관리자 검토 대기)' : ' (현재 상태: 매핑 대기)'}
+            {mappingStatus === 'MANUAL_REVIEW' ? ' (현재 상태: 관리자 검토 대기)' : ' (현재 상태: 대기)'}
           </p>
         </div>
       ) : null}

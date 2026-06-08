@@ -112,10 +112,9 @@ export default async function OrganizationTreePage({
 
       {isUnmapped ? (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 sm:px-4 sm:py-3">
-          <p className="text-xs font-semibold text-amber-900 sm:text-sm">조직 매핑이 완료되지 않은 계정입니다</p>
+          <p className="text-xs font-semibold text-amber-900 sm:text-sm">계약이 완료되지 않은 계정입니다</p>
           <p className="mt-1 text-[11px] leading-relaxed text-amber-800 sm:text-xs">
-            관리자가 동기화/매핑을 완료하면 조직도가 표시됩니다.
-            {mappingStatus === 'MANUAL_REVIEW' ? ' (현재 상태: 관리자 검토 대기)' : ' (현재 상태: 매핑 대기)'}
+            {mappingStatus === 'MANUAL_REVIEW' ? ' (현재 상태: 관리자 검토 대기)' : ' (현재 상태: 대기)'}
           </p>
         </div>
       ) : null}
