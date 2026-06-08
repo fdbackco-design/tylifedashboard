@@ -2,16 +2,16 @@
  * /admin/account-issue 의 "구글 시트 동기화" 기능 핵심 로직.
  *
  * 흐름:
- *   1. Google Sheets 의 '시트1'!A5:N 범위 조회
+ *   1. Google Sheets 의 '시트1'!A5:O 범위 조회
  *   2. 실제 행 번호 = index + 5
  *   3. M열(row[12]) 가 비어있는 행만 처리
  *   4. B열(이름) 으로 organization_members 후보 검색
  *      - 후보 1명: 그 대상에게 발급
  *      - 후보 2명 이상: E열(전화번호) 로 추가 매칭 → 정확히 1명일 때만 발급
- *      - 그 외: 자동 발급 안 함, N열에 실패 사유 기록
+ *      - 그 외: 자동 발급 안 함, O열에 실패 사유 기록
  *   5. G열 값을 login_code + 비밀번호로 사용 (8자리 숫자만 허용)
- *   6. 성공: M열='ㅇ', N열=''
- *   7. 실패: M열='', N열=실패사유
+ *   6. 성공: M열='ㅇ', O열=''
+ *   7. 실패: M열='', O열=실패사유
  *
  * 보안:
  *   - 비밀번호 원문은 로그/응답에 새지 않도록 마스킹된 표현만 노출
@@ -27,6 +27,7 @@ import {
   findUserProfileByLoginCode,
   issueMappedAccount,
   isValid8Digits,
+  preIssueUnmappedAccount,
 } from '@/lib/account-issue/issue';
 import { normalizePhone } from '@/lib/account-issue/normalize';
 
@@ -123,7 +124,7 @@ export async function syncAccountIssueFromGoogleSheet(
     throw new Error('ACCOUNT_ISSUE_SHEET_ID 환경변수가 설정되지 않았습니다.');
   }
 
-  const readRange = buildRange(sheetName, 'A5:N');
+  const readRange = buildRange(sheetName, 'A5:O');
 
   let rows: string[][];
   try {
@@ -263,12 +264,80 @@ export async function syncAccountIssueFromGoogleSheet(
       continue;
     }
 
+    // 이름 검색 결과가 0명이면 — 사전 계정 발급(PENDING) 으로 대체 진행한다.
+    // 이후 TY 동기화/관리자 검토로 자동/수동 매핑된다.
+    if (candidates.length === 0) {
+      const pre = await preIssueUnmappedAccount(adminDb, {
+        name,
+        phone: phoneRaw || null,
+        loginCode: accountValue,
+        password: accountValue,
+        isActive: true,
+        auditReason: 'SHEET_SYNC_PRE_ISSUED',
+      });
+
+      if (!pre.ok) {
+        const preReason = pre.code === 'DUPLICATE_LOGIN_CODE'
+          ? '실패: 로그인 ID 중복'
+          : pre.code === 'AUTH_CREATE_FAILED'
+            ? `실패: 계정 발급 API 오류 (auth: ${pre.message})`
+            : pre.code === 'PROFILE_INSERT_FAILED'
+              ? `실패: 계정 발급 API 오류 (profile: ${pre.message})`
+              : `실패: 계정 발급 API 오류 (${pre.message})`;
+        await writeFailure(spreadsheetId, sheetName, rowNumber, preReason);
+        out.failedCount++;
+        out.results.push({
+          rowNumber,
+          name,
+          phone: maskPhone(phoneRaw),
+          loginId: maskLoginId(accountValue),
+          result: 'FAILED',
+          reason: preReason,
+        });
+        await logMapping(adminDb, {
+          action: 'SHEET_SYNC_PRE_ISSUE_FAILED',
+          rowNumber,
+          name,
+          phone: phoneRaw,
+          loginId: accountValue,
+          reason: preReason,
+          candidatesCount: 0,
+        });
+        continue;
+      }
+
+      // 사전 발급 성공 → 시트는 성공으로 기록 (M='ㅇ', O='')
+      try {
+        await sheetsSetCell(spreadsheetId, buildRange(sheetName, `M${rowNumber}`), 'ㅇ');
+        await sheetsSetCell(spreadsheetId, buildRange(sheetName, `O${rowNumber}`), '');
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn(`[sheet-sync] 시트 갱신 실패(row ${rowNumber}):`, e);
+      }
+      out.successCount++;
+      out.results.push({
+        rowNumber,
+        name,
+        phone: maskPhone(phoneRaw),
+        loginId: maskLoginId(accountValue),
+        result: 'SUCCESS',
+        reason: '사전 발급(매핑 대기)',
+      });
+      await logMapping(adminDb, {
+        action: 'SHEET_SYNC_PRE_ISSUED',
+        rowNumber,
+        name,
+        phone: phoneRaw,
+        loginId: accountValue,
+        userId: pre.user_id,
+      });
+      continue;
+    }
+
     let chosen: typeof candidates[number] | null = null;
     let reason: string | null = null;
 
-    if (candidates.length === 0) {
-      reason = '실패: 이름 검색 결과 없음';
-    } else if (candidates.length === 1) {
+    if (candidates.length === 1) {
       chosen = candidates[0];
     } else {
       const phoneDigits = normalizePhone(phoneRaw);
@@ -350,10 +419,10 @@ export async function syncAccountIssueFromGoogleSheet(
       continue;
     }
 
-    // 성공 → 시트 갱신 (M='ㅇ', N='')
+    // 성공 → 시트 갱신 (M='ㅇ', O='')
     try {
       await sheetsSetCell(spreadsheetId, buildRange(sheetName, `M${rowNumber}`), 'ㅇ');
-      await sheetsSetCell(spreadsheetId, buildRange(sheetName, `N${rowNumber}`), '');
+      await sheetsSetCell(spreadsheetId, buildRange(sheetName, `O${rowNumber}`), '');
     } catch (e) {
       // 시트 갱신 실패는 결과 통계에 반영하되 발급 자체는 성공 처리 (멱등 재시도 어려우니 별도 로그)
       // eslint-disable-next-line no-console
@@ -390,7 +459,7 @@ async function writeFailure(
 ): Promise<void> {
   try {
     await sheetsSetCell(spreadsheetId, buildRange(sheetName, `M${rowNumber}`), '');
-    await sheetsSetCell(spreadsheetId, buildRange(sheetName, `N${rowNumber}`), reason);
+    await sheetsSetCell(spreadsheetId, buildRange(sheetName, `O${rowNumber}`), reason);
   } catch (e) {
     // eslint-disable-next-line no-console
     console.warn(`[sheet-sync] 실패 사유 기록 실패(row ${rowNumber}):`, e);

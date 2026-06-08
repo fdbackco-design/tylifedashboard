@@ -7,11 +7,16 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { normalizePhone } from './normalize';
 
 const EMAIL_DOMAIN = 'tylifedashboard.local';
 
 export type IssueMappedAccountResult =
   | { ok: true; user_id: string; existed: boolean }
+  | { ok: false; code: 'AUTH_CREATE_FAILED' | 'PROFILE_INSERT_FAILED' | 'LOOKUP_FAILED' | 'INVALID_INPUT' | 'DUPLICATE_LOGIN_CODE'; message: string };
+
+export type PreIssueAccountResult =
+  | { ok: true; user_id: string }
   | { ok: false; code: 'AUTH_CREATE_FAILED' | 'PROFILE_INSERT_FAILED' | 'LOOKUP_FAILED' | 'INVALID_INPUT' | 'DUPLICATE_LOGIN_CODE'; message: string };
 
 export function isValid8Digits(v: unknown): v is string {
@@ -160,6 +165,133 @@ export async function issueMappedAccount(
     }
 
     return { ok: true, user_id: userId, existed: false };
+  } catch (e) {
+    return {
+      ok: false,
+      code: 'LOOKUP_FAILED',
+      message: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
+/**
+ * 사전 계정 발급 — 아직 organization_members/customers 와 연결되지 않은 사람을 위해
+ * 미리 user_profiles 행을 만든다. mapping_status='PENDING'.
+ *
+ * - HTTP API(/api/admin/account-issue/pre-issue) 와 Google Sheet 동기화 양쪽에서 재사용한다.
+ * - reason 인자로 감사 로그(account_mapping_logs.reason) 를 구분할 수 있다.
+ *   (UI 직접 발급 → 'CREATED', 시트 동기화 → 'SHEET_SYNC_PRE_ISSUED')
+ */
+export async function preIssueUnmappedAccount(
+  adminDb: SupabaseClient,
+  params: {
+    name: string;
+    phone?: string | null;
+    loginCode: string;
+    password: string;
+    isActive?: boolean;
+    /** account_mapping_logs.reason 에 기록할 사유 키 */
+    auditReason?: string;
+  },
+): Promise<PreIssueAccountResult> {
+  const name = (params.name ?? '').trim();
+  if (!name) {
+    return { ok: false, code: 'INVALID_INPUT', message: '이름은 필수입니다.' };
+  }
+
+  const digits = extractLoginDigits(params.loginCode ?? '');
+  if (!digits) {
+    return { ok: false, code: 'INVALID_INPUT', message: '로그인 ID 는 8자리 숫자여야 합니다.' };
+  }
+  const passwordDigits = extractLoginDigits(params.password ?? '');
+  if (!passwordDigits || passwordDigits !== digits) {
+    return {
+      ok: false,
+      code: 'INVALID_INPUT',
+      message: '초기 비밀번호는 로그인 ID 와 동일한 8자리 숫자여야 합니다.',
+    };
+  }
+
+  const phoneRaw = typeof params.phone === 'string' ? params.phone.trim() : '';
+  const phoneDigits = normalizePhone(phoneRaw);
+  const isActive = params.isActive ?? true;
+  const auditReason = params.auditReason ?? 'CREATED';
+
+  try {
+    // 1) login_code 중복 검사
+    const dup = await findUserProfileByLoginCode(adminDb, digits);
+    if (dup?.id) {
+      return {
+        ok: false,
+        code: 'DUPLICATE_LOGIN_CODE',
+        message: '이미 동일한 로그인 ID 가 존재합니다.',
+      };
+    }
+
+    // 2) Supabase Auth 사용자 생성
+    const created = await adminDb.auth.admin.createUser({
+      email: `${digits}@${EMAIL_DOMAIN}`,
+      password: digits,
+      email_confirm: true,
+      user_metadata: { pre_issued: true, pre_issued_name: name },
+    });
+    if (created.error) {
+      return {
+        ok: false,
+        code: 'AUTH_CREATE_FAILED',
+        message: created.error.message ?? 'createUser failed',
+      };
+    }
+    const userId = created.data.user?.id;
+    if (!userId) {
+      return { ok: false, code: 'AUTH_CREATE_FAILED', message: 'auth user id missing' };
+    }
+
+    // 3) user_profiles 사전 발급 행 INSERT (PENDING)
+    //    phone 은 하이픈 등을 제거한 숫자만 저장한다. (자동 매핑 키와 동일 포맷 유지)
+    const profile = {
+      id: userId,
+      customer_id: null,
+      member_id: null,
+      login_code: digits,
+      display_name: name,
+      phone: phoneDigits || null,
+      role: 'member',
+      is_active: isActive,
+      must_change_password: true,
+      mapping_status: 'PENDING',
+      pre_issued_name: name,
+      pre_issued_phone: phoneDigits || null,
+      matched_at: null,
+      matched_by: null,
+      mapping_reason: null,
+    };
+
+    const ins = await adminDb.from('user_profiles').insert(profile);
+    if (ins.error) {
+      try {
+        await adminDb.auth.admin.deleteUser(userId);
+      } catch {
+        // ignore
+      }
+      return { ok: false, code: 'PROFILE_INSERT_FAILED', message: ins.error.message };
+    }
+
+    // 4) 감사 로그
+    await adminDb.from('account_mapping_logs').insert({
+      action: 'PRE_ISSUED_ACCOUNT_CREATED',
+      user_profile_id: userId,
+      member_id: null,
+      pre_issued_name: name,
+      pre_issued_phone: phoneDigits || null,
+      mapping_status: 'PENDING',
+      matched_by: null,
+      candidate_type: null,
+      reason: auditReason,
+      admin_id: null,
+    });
+
+    return { ok: true, user_id: userId };
   } catch (e) {
     return {
       ok: false,
