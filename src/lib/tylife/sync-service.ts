@@ -90,7 +90,7 @@ function getSeoulTodayYmd(): string {
 }
 
 /** 동기화 시 join_date 컷오프: 서울 오늘로부터 이 일 수보다 오래된 목록 항목은 스킵 */
-const SYNC_JOIN_DATE_LOOKBACK_DAYS = 35;
+const SYNC_JOIN_DATE_LOOKBACK_DAYS = 28;
 
 function minusDaysYmd(ymd: string, days: number): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
