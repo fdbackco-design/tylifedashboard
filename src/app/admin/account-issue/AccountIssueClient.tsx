@@ -67,6 +67,22 @@ function randomDigits8(): string {
   return String(n).padStart(8, '0');
 }
 
+/**
+ * 전화번호에서 자동 로그인 ID(8자리 숫자)를 도출한다.
+ * - 핸드폰 번호의 앞 010(또는 011 등 식별번호) 을 제외한 마지막 8자리 사용
+ * - 숫자만 추출 후 길이가 8 미만이면 null
+ */
+function loginCodeFromPhone(phone: string | null | undefined): string | null {
+  const digits = (phone ?? '').replace(/\D/g, '');
+  if (digits.length < 8) return null;
+  return digits.slice(-8);
+}
+
+/** 선택된 대상의 전화번호 기반 8자리 코드. 전화번호가 없거나 짧으면 랜덤 8자리. */
+function defaultLoginCodeFor(phone: string | null | undefined): string {
+  return loginCodeFromPhone(phone) ?? randomDigits8();
+}
+
 function digitsFromLoginCode(loginCodeEmail: string | null | undefined): string | null {
   const v = String(loginCodeEmail ?? '').trim();
   if (!v) return null;
@@ -157,8 +173,12 @@ export default function AccountIssueClient() {
     setAlertModal({ variant, title, message });
   }
 
-  async function loadExistingProfile(memberId: string) {
+  async function loadExistingProfile(memberId: string, phoneOverride?: string | null) {
     if (!memberId) return;
+    // setSelectedCustomer 가 호출된 직후엔 state 가 아직 반영 전이므로,
+    // 호출자가 phone 을 직접 넘겨주면 그것을 우선 사용한다.
+    const phoneForCode =
+      phoneOverride !== undefined ? phoneOverride : (selectedCustomer?.phone ?? null);
     try {
       const res = await fetch(`/api/admin/account-issue/existing?member_id=${encodeURIComponent(memberId)}`, {
         credentials: 'include',
@@ -176,7 +196,7 @@ export default function AccountIssueClient() {
 
       const profile = json.data;
       if (!profile) {
-        const code = randomDigits8();
+        const code = defaultLoginCodeFor(phoneForCode);
         setLoginCode(code);
         setPassword(code);
         setIsActive(true);
@@ -190,7 +210,7 @@ export default function AccountIssueClient() {
       setIsActive(profile.is_active);
     } catch {
       // 기존이든 신규든, 오류가 나면 최소한 신규 발급 동작이 가능하도록 자동 생성값 세팅
-      const code = randomDigits8();
+      const code = defaultLoginCodeFor(phoneForCode);
       setLoginCode(code);
       setPassword(code);
     }
@@ -226,7 +246,7 @@ export default function AccountIssueClient() {
     // 검색 결과가 organization_members 기반이므로, 선택 즉시 해당 멤버를 발급 대상으로 설정
     setMemberCandidates([{ id: c.id, name: c.name, rank: c.rank ?? '-', phone: c.phone ?? null }]);
     setSelectedMemberId(c.id);
-    await loadExistingProfile(c.id);
+    await loadExistingProfile(c.id, c.phone ?? null);
   }
 
   async function issueAccount() {
@@ -935,7 +955,8 @@ export default function AccountIssueClient() {
                 className="mt-2 text-xs text-blue-600 hover:underline"
                 onClick={() => {
                   if (!selectedMemberId) return;
-                  const code = randomDigits8();
+                  // 선택된 대상의 전화번호 마지막 8자리(010 제외) → 없으면 랜덤
+                  const code = defaultLoginCodeFor(selectedCustomer?.phone);
                   setLoginCode(code);
                   setPassword(code);
                 }}
@@ -956,7 +977,7 @@ export default function AccountIssueClient() {
                 type="button"
                 className="mt-2 text-xs text-blue-600 hover:underline"
                 onClick={() => {
-                  const code = randomDigits8();
+                  const code = defaultLoginCodeFor(selectedCustomer?.phone);
                   setLoginCode(code);
                   setPassword(code);
                 }}
