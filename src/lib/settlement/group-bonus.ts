@@ -4,7 +4,7 @@
  * 조건:
  *  - 계약일이 2026-05-26 ~ 2026-06-10 사이(둘 다 포함)
  *  - 해피콜 일시(happy_call_at) 가 2026-06-12 이전(포함) 이고
- *    해피콜 결과(happycall_result) 가 '성공' 또는 '완료' 인 계약만 대상
+ *    해피콜 결과(happycall_result) 가 '성공' / '완료' / '계약변경' 인 계약만 대상
  *  - (가입일 + 고객명 + 담당사원)로 그룹화한 합산 구좌 수가 2 이상
  *  - 보너스 금액 = floor(합산 구좌 / 2) * 50,000
  *  - 담당자의 직급과 무관하게 동일 금액 적용
@@ -21,7 +21,11 @@ export const GROUP_BONUS_APPLICABLE_YEAR_MONTH = '2026-06';
 /** 해피콜 완료 데드라인(YYYY-MM-DD, 포함). 이 날짜 이전까지 해피콜이 끝나야 한다. */
 export const GROUP_BONUS_HAPPYCALL_DEADLINE_YMD = '2026-06-12';
 /** 해피콜 결과가 이 집합에 속해야 보너스 대상. */
-export const GROUP_BONUS_VALID_HAPPYCALL_RESULTS: ReadonlySet<string> = new Set(['성공', '완료']);
+export const GROUP_BONUS_VALID_HAPPYCALL_RESULTS: ReadonlySet<string> = new Set([
+  '성공',
+  '완료',
+  '계약변경',
+]);
 
 export type GroupBonusContractInput = {
   /** 계약 가입일 (YYYY-MM-DD) */
