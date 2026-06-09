@@ -56,19 +56,24 @@ export async function calculateMonthlySettlement(params: {
   const contractIds = normalizedContractsBase.map((c) => c.id).filter(Boolean);
   const { data: contractCustomerRows, error: ccErr } = await db
     .from('contracts')
-    .select('id, item_name, created_at, customer_id')
+    .select('id, item_name, created_at, customer_id, happy_call_at, happycall_result')
     .in('id', contractIds);
   if (ccErr) throw new Error(`contracts(item_name) 조회 실패: ${ccErr.message}`);
 
   const itemNameByContractId = new Map<string, string | null>();
   const createdAtByContractId = new Map<string, string | null>();
   const customerIdByContractId = new Map<string, string | null>();
+  // 그룹 보너스 해피콜 조건(happy_call_at <= 2026-06-12, result in {성공,완료}) 판정용
+  const happyCallAtByContractId = new Map<string, string | null>();
+  const happycallResultByContractId = new Map<string, string | null>();
   for (const r of (contractCustomerRows ?? []) as any[]) {
     if (!r?.id) continue;
     const id = String(r.id);
     itemNameByContractId.set(id, (r.item_name ?? null) as string | null);
     createdAtByContractId.set(id, (r.created_at ?? null) as string | null);
     customerIdByContractId.set(id, (r.customer_id ?? null) as string | null);
+    happyCallAtByContractId.set(id, (r.happy_call_at ?? null) as string | null);
+    happycallResultByContractId.set(id, (r.happycall_result ?? null) as string | null);
   }
 
   // 그룹 보너스 산정용 고객명 맵 (2구좌당 5만원, 가입일+고객명+담당사원 그룹화)
@@ -224,6 +229,8 @@ export async function calculateMonthlySettlement(params: {
       customer_name: customerName,
       sales_member_id: c.sales_member_id,
       unit_count: c.unit_count,
+      happy_call_at: happyCallAtByContractId.get(c.id) ?? null,
+      happycall_result: happycallResultByContractId.get(c.id) ?? null,
     });
   }
 

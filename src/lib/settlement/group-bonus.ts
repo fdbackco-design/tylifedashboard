@@ -3,6 +3,8 @@
  *
  * 조건:
  *  - 계약일이 2026-05-26 ~ 2026-06-10 사이(둘 다 포함)
+ *  - 해피콜 일시(happy_call_at) 가 2026-06-12 이전(포함) 이고
+ *    해피콜 결과(happycall_result) 가 '성공' 또는 '완료' 인 계약만 대상
  *  - (가입일 + 고객명 + 담당사원)로 그룹화한 합산 구좌 수가 2 이상
  *  - 보너스 금액 = floor(합산 구좌 / 2) * 50,000
  *  - 담당자의 직급과 무관하게 동일 금액 적용
@@ -16,6 +18,10 @@ export const GROUP_BONUS_PER_PAIR_WON = 50_000;
 export const GROUP_BONUS_WINDOW_START_YMD = '2026-05-26';
 export const GROUP_BONUS_WINDOW_END_YMD = '2026-06-10';
 export const GROUP_BONUS_APPLICABLE_YEAR_MONTH = '2026-06';
+/** 해피콜 완료 데드라인(YYYY-MM-DD, 포함). 이 날짜 이전까지 해피콜이 끝나야 한다. */
+export const GROUP_BONUS_HAPPYCALL_DEADLINE_YMD = '2026-06-12';
+/** 해피콜 결과가 이 집합에 속해야 보너스 대상. */
+export const GROUP_BONUS_VALID_HAPPYCALL_RESULTS: ReadonlySet<string> = new Set(['성공', '완료']);
 
 export type GroupBonusContractInput = {
   /** 계약 가입일 (YYYY-MM-DD) */
@@ -26,6 +32,15 @@ export type GroupBonusContractInput = {
   sales_member_id: string;
   /** 계약 구좌 수 */
   unit_count: number;
+  /**
+   * 해피콜 일시(ISO 또는 YYYY-MM-DD). 비교는 앞 10자리(ymd) 기준.
+   * 없거나 GROUP_BONUS_HAPPYCALL_DEADLINE_YMD 이후이면 보너스 대상에서 제외.
+   */
+  happy_call_at?: string | null;
+  /**
+   * 해피콜 결과. GROUP_BONUS_VALID_HAPPYCALL_RESULTS 에 속할 때만 보너스 대상.
+   */
+  happycall_result?: string | null;
 };
 
 function normalizeYmd(value: unknown): string {
@@ -64,6 +79,13 @@ export function calculateGroupBonusForMember(
 
     const joinYmd = normalizeYmd(c.join_date);
     if (joinYmd < GROUP_BONUS_WINDOW_START_YMD || joinYmd > GROUP_BONUS_WINDOW_END_YMD) continue;
+
+    // 해피콜 추가 조건: 결과는 '성공'/'완료' 이고, 데드라인 이전(포함)에 완료된 계약만.
+    const hcResult = String(c.happycall_result ?? '').trim();
+    if (!GROUP_BONUS_VALID_HAPPYCALL_RESULTS.has(hcResult)) continue;
+    const hcYmd = normalizeYmd(c.happy_call_at);
+    if (!hcYmd) continue;
+    if (hcYmd > GROUP_BONUS_HAPPYCALL_DEADLINE_YMD) continue;
 
     const customerName = normalizeCustomerName(c.customer_name);
     if (!customerName) continue; // 고객명 미상은 그룹화 키 불완전 → 제외
