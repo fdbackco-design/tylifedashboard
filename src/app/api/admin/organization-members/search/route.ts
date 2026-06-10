@@ -30,7 +30,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const { data, error } = await db
     .from('organization_members')
-    .select('id, name, rank, is_active, ty_member_code')
+    .select('id, name, rank, is_active, external_id, phone')
     .eq('is_active', true)
     .ilike('name', like)
     .order('name', { ascending: true })
@@ -40,13 +40,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const results = ((data ?? []) as any[]).map((m) => ({
-    id: m.id as string,
-    name: m.name as string,
-    rank: (m.rank ?? null) as string | null,
-    ty_member_code: (m.ty_member_code ?? null) as string | null,
-    label: `${m.name}${m.rank ? ` (${m.rank})` : ''}${m.ty_member_code ? ` · ${m.ty_member_code}` : ''}`,
-  }));
+  const results = ((data ?? []) as any[]).map((m) => {
+    const ext = (m.external_id ?? '') as string;
+    // customer:* external_id 는 노이즈가 많으므로 라벨에는 노출하지 않는다.
+    const extLabel = ext && !ext.startsWith('customer:') ? ext : '';
+    return {
+      id: m.id as string,
+      name: m.name as string,
+      rank: (m.rank ?? null) as string | null,
+      external_id: (m.external_id ?? null) as string | null,
+      phone: (m.phone ?? null) as string | null,
+      label: `${m.name}${m.rank ? ` (${m.rank})` : ''}${extLabel ? ` · ${extLabel}` : ''}`,
+    };
+  });
 
   return NextResponse.json({ results });
 }

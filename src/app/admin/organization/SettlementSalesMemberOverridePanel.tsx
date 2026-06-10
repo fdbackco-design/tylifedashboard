@@ -34,7 +34,8 @@ type MemberOption = {
   id: string;
   name: string;
   rank: string | null;
-  ty_member_code: string | null;
+  external_id?: string | null;
+  phone?: string | null;
   label: string;
 };
 
