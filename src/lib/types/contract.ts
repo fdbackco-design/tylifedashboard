@@ -39,6 +39,8 @@ export interface Contract {
   rental_request_no: string | null;
   /** 송장/운송장 번호 */
   invoice_no: string | null;
+  /** 송장번호가 처음 들어온 시점(sync-service가 자동 기록). 정산 v2에서 yearMonth 30일까지 존재 여부 판정에 사용. */
+  invoice_registered_at?: string | null;
   /** 메모 (숫자 아닌 경우) */
   memo: string | null;
   customer_id: string;
@@ -82,6 +84,8 @@ export interface ContractInsert {
   sequence_no?: number | null;
   rental_request_no?: string | null;
   invoice_no?: string | null;
+  /** sync 시점에 신규 송장이 처음 들어오면 자동 기록한다. */
+  invoice_registered_at?: string | null;
   memo?: string | null;
   customer_id: string;
   sales_member_id?: string | null;

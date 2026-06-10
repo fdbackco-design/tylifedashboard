@@ -13,6 +13,14 @@ export type AttributedJoinContractRow = {
   sales_member_id: string;
   /** 동일 가입일 tie-break(정산·승격 계약 순서). DB에 없으면 생략 */
   created_at?: string | null;
+  /**
+   * 정산 v2 가입 순서 기준: 해피콜 완료 일시(서울 'YYYY-MM-DD' 또는 ISO).
+   *
+   * 존재하는 경우 join_date 보다 우선 정렬되어 리더 승격(20구좌 누적) 시점을
+   * "해피콜 완료 순서"로 본다. 양쪽 모두에 존재할 때만 의미가 있고,
+   * 한쪽이라도 없으면 기존 join_date → created_at → id 순서로 fallback 된다.
+   */
+  happy_call_at?: string | null;
 };
 
 /**
@@ -84,6 +92,14 @@ export function isContractStrictlyAfterPromotionThreshold(
 }
 
 function compareAttributedJoinRows(a: AttributedJoinContractRow, b: AttributedJoinContractRow): number {
+  // 정산 v2: 양쪽 모두 happy_call_at 이 있으면 그 값을 1순위로 사용한다.
+  //          (리더 승격 / 오버라이드 가입 순서 기준이 "해피콜 완료 시점"으로 변경됨)
+  const ha = normalizeCreatedAt(a.happy_call_at);
+  const hb = normalizeCreatedAt(b.happy_call_at);
+  if (ha !== '' && hb !== '') {
+    const t = ha.localeCompare(hb);
+    if (t !== 0) return t;
+  }
   const jd = a.join_date.slice(0, 10).localeCompare(b.join_date.slice(0, 10));
   if (jd !== 0) return jd;
   const ca = normalizeCreatedAt(a.created_at);

@@ -784,6 +784,19 @@ async function processItem(
       }
     }
 
+    // 정산 v2: 송장번호 최초 등록 시점 자동 기록.
+    // - 기존 ec 가 없거나(ec.invoice_no 가 빈 값) 새 contractFinal.invoice_no 가 들어오면 now() 로 기록.
+    // - 이미 기록되어 있으면 덮어쓰지 않는다(기존 시점 보존).
+    // - upsert 가 PATCH 가 아니라 INSERT 충돌→UPDATE 흐름이므로, 이미 기록된 행은 같은 시점으로 다시 set
+    //   되지 않도록 별도 SELECT 결과(ec.invoice_no 가 비어있는 경우)에서만 set 한다.
+    {
+      const newInvoiceNo = String(contractFinal.invoice_no ?? '').trim();
+      const oldInvoiceNo = String(ec?.invoice_no ?? '').trim();
+      if (newInvoiceNo !== '' && oldInvoiceNo === '') {
+        contractFinal = { ...contractFinal, invoice_registered_at: new Date().toISOString() };
+      }
+    }
+
     const { id: contractId, isNew } = await upsertContract(db, contractFinal);
 
     // ── 4.5. 본사(안성준) 아래 영업사원 노드 자동 편입 ──
@@ -1108,7 +1121,7 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
           db
             .from('contracts')
             .select(
-              'id, join_date, unit_count, sales_member_id, customer_id, sales_link_status, status, is_cancelled, rental_request_no, invoice_no, memo, created_at',
+              'id, join_date, unit_count, sales_member_id, customer_id, sales_link_status, status, is_cancelled, rental_request_no, invoice_no, memo, created_at, happy_call_at',
             )
             .eq('is_cancelled', false),
         ]);
@@ -1170,6 +1183,8 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
             unit_count: row.unit_count ?? 0,
             sales_member_id: sid,
             created_at: (row.created_at ?? null) as string | null,
+            // 리더 승격(20구좌) 가입 순서 v2 기준: happy_call_at 우선
+            happy_call_at: (row.happy_call_at ?? null) as string | null,
           });
         }
 

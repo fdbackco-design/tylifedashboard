@@ -14,6 +14,13 @@ import {
 import type { Contract, OrganizationMember, SettlementRule } from '@/lib/types';
 import type { RankType } from '@/lib/types/organization';
 import type { GroupBonusContractInput } from '@/lib/settlement/group-bonus';
+import {
+  evaluateContractEligibility,
+  computeNextYearMonth,
+  happycallYmdSeoul,
+  SETTLEMENT_VALID_HAPPYCALL_RESULTS,
+  SETTLEMENT_CANCELLED_HAPPYCALL_RESULTS,
+} from '@/lib/settlement/settlement-eligibility-v2';
 
 function isSettlementDebugEnabled(): boolean {
   const v = process.env.SETTLEMENT_DEBUG;
@@ -28,23 +35,130 @@ export async function calculateMonthlySettlement(params: {
   const debug = isSettlementDebugEnabled();
   const { end_date } = getSettlementWindowForYearMonth(yearMonth);
 
-  const { data: contracts, error: cErr } = await db
-    .from('v_contract_settlement_base')
-    .select('*')
-    .eq('year_month', yearMonth);
+  // === 정산 v2 (2026-06 기준) ===
+  // 기존 v_contract_settlement_base 뷰(join_date 기반) 대신 contracts 직접 조회 후
+  // 새 판정(해피콜 결과/일시 + 송장번호 + 수동/자동 이월)을 적용한다.
+  // 뷰 자체는 조직도/대시보드 등 다른 화면 호환을 위해 보존한다.
+  const { data: allContractRows, error: cErr } = await db
+    .from('contracts')
+    .select(
+      [
+        'id',
+        'contract_code',
+        'join_date',
+        'unit_count',
+        'status',
+        'is_cancelled',
+        'sales_member_id',
+        'sales_link_status',
+        'happy_call_at',
+        'happycall_result',
+        'invoice_no',
+        'invoice_registered_at',
+        'rental_request_no',
+        'item_name',
+        'created_at',
+        'customer_id',
+        'settlement_deferred',
+        'deferred_from_month',
+        'deferred_to_month',
+        'settlement_status',
+      ].join(', '),
+    );
   if (cErr) throw new Error(`계약 조회 실패: ${cErr.message}`);
+
+  // 정산 후보 / 이월 / 제외 판정
+  const eligibleContractRows: any[] = [];
+  const deferredContractIds: string[] = [];
+  let excludedCountForDebug = 0;
+  for (const r of (allContractRows ?? []) as any[]) {
+    const decision = evaluateContractEligibility(
+      {
+        id: String(r.id ?? ''),
+        status: String(r.status ?? ''),
+        is_cancelled: Boolean(r.is_cancelled ?? false),
+        sales_member_id: (r.sales_member_id ?? null) as string | null,
+        sales_link_status: (r.sales_link_status ?? null) as string | null,
+        happy_call_at: r.happy_call_at ?? null,
+        happycall_result: (r.happycall_result ?? null) as string | null,
+        invoice_no: (r.invoice_no ?? null) as string | null,
+        invoice_registered_at: r.invoice_registered_at ?? null,
+        settlement_deferred: (r.settlement_deferred ?? false) as boolean | null,
+        deferred_to_month: (r.deferred_to_month ?? null) as string | null,
+      },
+      yearMonth,
+    );
+    if (decision.result === 'ELIGIBLE') {
+      eligibleContractRows.push(r);
+    } else if (decision.result === 'DEFERRED') {
+      deferredContractIds.push(String(r.id));
+    } else {
+      excludedCountForDebug++;
+    }
+  }
+
+  // 이월 / 확정 DB 기록.
+  // - DEFERRED: 다음 정산월로 자동 이월 표시
+  // - ELIGIBLE: settlement_status='ELIGIBLE_CONFIRMED' 만 갱신 (deferred_* 컬럼은 보존)
+  // - EXCLUDED: 자동 손대지 않음 (취소/해약 흐름은 status 기반으로 충분)
+  // 실패해도 정산 자체는 진행되도록 try/catch.
+  const nextYm = computeNextYearMonth(yearMonth);
+  if (deferredContractIds.length > 0) {
+    try {
+      const { error: defErr } = await db
+        .from('contracts')
+        .update({
+          settlement_deferred: true,
+          deferred_from_month: yearMonth,
+          deferred_to_month: nextYm,
+          deferred_reason: 'invoice_missing',
+          settlement_status: 'DEFERRED_TO_NEXT_MONTH',
+        })
+        .in('id', deferredContractIds);
+      if (defErr && debug) {
+        // eslint-disable-next-line no-console
+        console.warn('[settlement-debug] deferred update error', defErr);
+      }
+    } catch (e) {
+      if (debug) {
+        // eslint-disable-next-line no-console
+        console.warn('[settlement-debug] deferred update threw', e);
+      }
+    }
+  }
+  const eligibleIds = eligibleContractRows.map((r) => String(r.id));
+  if (eligibleIds.length > 0) {
+    try {
+      const { error: eliErr } = await db
+        .from('contracts')
+        .update({ settlement_status: 'ELIGIBLE_CONFIRMED' })
+        .in('id', eligibleIds);
+      if (eliErr && debug) {
+        // eslint-disable-next-line no-console
+        console.warn('[settlement-debug] eligible update error', eliErr);
+      }
+    } catch (e) {
+      if (debug) {
+        // eslint-disable-next-line no-console
+        console.warn('[settlement-debug] eligible update threw', e);
+      }
+    }
+  }
 
   if (debug) {
     // eslint-disable-next-line no-console
     console.log('[settlement-debug] monthly-calculate start', {
       yearMonth,
       settlementWindowEnd: end_date,
-      contractsInMonth: (contracts ?? []).length,
+      totalContracts: (allContractRows ?? []).length,
+      eligible: eligibleContractRows.length,
+      deferred: deferredContractIds.length,
+      excluded: excludedCountForDebug,
     });
   }
 
-  const normalizedContractsBase = ((contracts ?? []) as any[]).map((r) => ({
-    id: String(r.contract_id ?? ''),
+  const normalizedContractsBase = eligibleContractRows.map((r) => ({
+    id: String(r.id ?? ''),
     contract_code: String(r.contract_code ?? ''),
     join_date: String(r.join_date ?? '').slice(0, 10),
     unit_count: Number(r.unit_count ?? 0),
@@ -53,20 +167,13 @@ export async function calculateMonthlySettlement(params: {
     sales_member_id: (r.sales_member_id ?? null) as string | null,
   }));
 
-  const contractIds = normalizedContractsBase.map((c) => c.id).filter(Boolean);
-  const { data: contractCustomerRows, error: ccErr } = await db
-    .from('contracts')
-    .select('id, item_name, created_at, customer_id, happy_call_at, happycall_result')
-    .in('id', contractIds);
-  if (ccErr) throw new Error(`contracts(item_name) 조회 실패: ${ccErr.message}`);
-
   const itemNameByContractId = new Map<string, string | null>();
   const createdAtByContractId = new Map<string, string | null>();
   const customerIdByContractId = new Map<string, string | null>();
-  // 그룹 보너스 해피콜 조건(happy_call_at <= 2026-06-12, result in {성공,완료}) 판정용
+  // 그룹 보너스 해피콜 조건(happy_call_at <= 2026-06-12, result in {성공,완료,계약변경}) 판정용
   const happyCallAtByContractId = new Map<string, string | null>();
   const happycallResultByContractId = new Map<string, string | null>();
-  for (const r of (contractCustomerRows ?? []) as any[]) {
+  for (const r of eligibleContractRows) {
     if (!r?.id) continue;
     const id = String(r.id);
     itemNameByContractId.set(id, (r.item_name ?? null) as string | null);
@@ -94,22 +201,14 @@ export async function calculateMonthlySettlement(params: {
   const { data: rules, error: rErr } = await db.from('settlement_rules').select('*');
   if (rErr) throw new Error(`정산 규칙 조회 실패: ${rErr.message}`);
 
-  const [membersRes, edgesRes, joinContractsRes] = await Promise.all([
+  const [membersRes, edgesRes] = await Promise.all([
     db
       .from('organization_members')
       .select('id, name, rank, external_id, phone, source_customer_id, leader_rank_effective_at')
       .eq('is_active', true),
     db.from('organization_edges').select('parent_id, child_id'),
-    db
-      .from('contracts')
-      .select(
-        'id, join_date, unit_count, sales_member_id, sales_link_status, status, is_cancelled, created_at',
-      )
-      .eq('status', '가입')
-      .eq('is_cancelled', false),
   ]);
   if (membersRes.error) throw new Error(`조직원 조회 실패: ${membersRes.error.message}`);
-  if (joinContractsRes.error) throw new Error(`가입 계약 조회 실패: ${joinContractsRes.error.message}`);
 
   const membersRaw = ((membersRes.data ?? []) as unknown as OrganizationMember[]).map((m) =>
     m.name === '안성준' ? { ...m, rank: '본사' as const } : m,
@@ -134,17 +233,29 @@ export async function calculateMonthlySettlement(params: {
     return { ...c, item_name, created_at };
   });
 
+  // 리더 승격(20구좌) / 오버라이드 가입 순서 계산용 가입 인정 계약 집합.
+  // - 정산 v2: status='가입' 이 아니어도 해피콜 결과(성공/완료/계약변경)면 가입 인정.
+  // - 송장 미충족(=이월) 건도 가입 인정에는 포함 — 수당만 다음 월로 미뤄지는 것이지 가입 자체는 인정.
+  // - 정렬 키는 leader-promotion.ts 의 compareAttributedJoinRows 에서 happy_call_at 우선 적용.
   const joinAttributed: AttributedJoinContractRow[] = [];
-  for (const row of (joinContractsRes.data ?? []) as any[]) {
-    if ((row.sales_link_status ?? 'linked') !== 'linked') continue;
+  for (const row of (allContractRows ?? []) as any[]) {
+    if (row.is_cancelled) continue;
+    const st = String(row.status ?? '');
+    if (st === '취소' || st === '해약' || st === '계약취소') continue;
     if (!row.sales_member_id) continue;
+    if ((row.sales_link_status ?? 'linked') !== 'linked') continue;
+    const hcResult = String(row.happycall_result ?? '').trim();
+    if (SETTLEMENT_CANCELLED_HAPPYCALL_RESULTS.has(hcResult)) continue;
+    if (!SETTLEMENT_VALID_HAPPYCALL_RESULTS.has(hcResult)) continue;
     const sid = row.sales_member_id as string;
+    const hcYmd = happycallYmdSeoul(row.happy_call_at);
     joinAttributed.push({
       id: row.id,
       join_date: String(row.join_date ?? '').slice(0, 10),
       unit_count: row.unit_count ?? 0,
       sales_member_id: sid,
       created_at: (row.created_at ?? null) as string | null,
+      happy_call_at: hcYmd || (row.happy_call_at ?? null),
     });
   }
 
