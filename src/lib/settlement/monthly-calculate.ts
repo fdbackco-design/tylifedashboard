@@ -39,7 +39,7 @@ export async function calculateMonthlySettlement(params: {
   // 기존 v_contract_settlement_base 뷰(join_date 기반) 대신 contracts 직접 조회 후
   // 새 판정(해피콜 결과/일시 + 송장번호 + 수동/자동 이월)을 적용한다.
   // 뷰 자체는 조직도/대시보드 등 다른 화면 호환을 위해 보존한다.
-  const { data: allContractRows, error: cErr } = await db
+  const { data: allContractRowsRaw, error: cErr } = await db
     .from('contracts')
     .select(
       [
@@ -50,6 +50,8 @@ export async function calculateMonthlySettlement(params: {
         'status',
         'is_cancelled',
         'sales_member_id',
+        // 정산용 담당자 override: 있으면 우선 사용. TY 동기화는 절대 덮어쓰지 않는다.
+        'settlement_sales_member_id',
         'sales_link_status',
         'happy_call_at',
         'happycall_result',
@@ -66,6 +68,21 @@ export async function calculateMonthlySettlement(params: {
       ].join(', '),
     );
   if (cErr) throw new Error(`계약 조회 실패: ${cErr.message}`);
+
+  // 정산 v2: contract row 의 sales_member_id 자리에 항상 effective 값을 넣어둔다.
+  // - settlement_sales_member_id 가 있으면 그 값
+  // - 없으면 원래 sales_member_id
+  // 원본 sales_member_id 는 `original_sales_member_id` 로 따로 보존(필요한 곳에서 참조 가능).
+  const allContractRows: any[] = ((allContractRowsRaw ?? []) as any[]).map((r) => {
+    const override = (r.settlement_sales_member_id ?? null) as string | null;
+    const original = (r.sales_member_id ?? null) as string | null;
+    const effective = override ?? original;
+    return {
+      ...r,
+      original_sales_member_id: original,
+      sales_member_id: effective,
+    };
+  });
 
   // 정산 후보 / 이월 / 제외 판정
   const eligibleContractRows: any[] = [];

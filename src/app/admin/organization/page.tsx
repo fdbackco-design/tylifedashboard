@@ -27,6 +27,7 @@ import {
   type AttributedJoinContractRow,
 } from '@/lib/settlement/leader-promotion';
 import SyncButton from './SyncButton';
+import SettlementSalesMemberOverridePanel from './SettlementSalesMemberOverridePanel';
 
 export const metadata: Metadata = { title: '조직도' };
 export const dynamic = 'force-dynamic';
@@ -876,6 +877,8 @@ export default async function OrganizationPage({
           showCommissionMetrics={false}
         />
       </div>
+
+      <SettlementSalesMemberOverridePanel />
     </div>
   );
 }

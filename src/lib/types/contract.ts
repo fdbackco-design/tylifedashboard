@@ -45,6 +45,14 @@ export interface Contract {
   memo: string | null;
   customer_id: string;
   sales_member_id: string | null;
+  /**
+   * 정산용 담당자 override. NULL이면 sales_member_id 그대로 사용.
+   * 관리자가 조직도에서 수동 보정한 경우에만 set 된다. TY 동기화는 절대 이 값을 덮어쓰지 않는다.
+   */
+  settlement_sales_member_id?: string | null;
+  sales_member_override_reason?: string | null;
+  sales_member_override_by?: string | null;
+  sales_member_overridden_at?: string | null;
   join_date: string; // 'YYYY-MM-DD'
   product_type: ProductType;
   item_name: string;
