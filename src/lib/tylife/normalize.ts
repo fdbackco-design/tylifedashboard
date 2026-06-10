@@ -122,12 +122,42 @@ export function normalizeCustomerFromDetail(detail: TyLifeContractDetail): Parti
  * unit_count 는 이 단계에서 확정 불가 → 1 (placeholder).
  * 상세 fetch 후 mergeDetailIntoContract() 로 보강 필요.
  */
+/**
+ * 해피콜 일시 raw 문자열에서 (날짜, 꼬리 결과 텍스트) 분리.
+ *
+ * TY 외부 데이터에서 한 셀에 "2026-05-11 성공" 처럼 날짜와 결과가 같이 들어오는 케이스가 있다.
+ * 이 값을 contracts.happy_call_at (timestamptz) 으로 그대로 저장하면 invalid input syntax 오류가
+ * 발생하므로, 날짜와 꼬리를 분리해 happy_call_at / happycall_result 두 컬럼에 각각 정규화한다.
+ *
+ * - 입력에 꼬리가 없으면 tail은 빈 문자열.
+ * - 날짜만으로 인식 불가하면 ymd도 빈 문자열.
+ */
+function splitHappycallAtAndResult(raw: string | null | undefined): { ymd: string; tail: string } {
+  const s = (raw ?? '').trim();
+  if (!s) return { ymd: '', tail: '' };
+  // "YYYY-MM-DD <tail>" / "YYYY.MM.DD <tail>" / "YYYY/MM/DD <tail>" / "YYYYMMDD <tail>"
+  const m = s.match(/^(\d{4}(?:[-./]\d{2}[-./]\d{2}|\d{4}))(?:\s+(.+))?$/);
+  if (m) {
+    return { ymd: normalizeDate(m[1]), tail: (m[2] ?? '').trim() };
+  }
+  // 위 매치 실패 시에도 normalizeDate가 안전하게 앞부분 날짜만 추출하도록 위임
+  return { ymd: normalizeDate(s), tail: '' };
+}
+
 export function normalizeContractFromList(
   item: ParsedListItem,
   customerId: string,
   salesMemberId: string | null,
 ): ContractInsert {
   const { rental_request_no, memo } = parseRentalOrMemo(item.rental_or_memo);
+
+  // 해피콜 일시·결과는 한 셀에 같이 들어오는 케이스("2026-05-11 성공")가 있어 분리한다.
+  // happycall_result 셀에 값이 따로 있으면 그 값이 우선이고, 없으면 raw 꼬리에서 추출한다.
+  const happycallSplit = splitHappycallAtAndResult(item.happycall_at_raw);
+  const happycallResultFromSheet = (item.happycall_result ?? '').trim();
+  const happycallResultFinal = happycallResultFromSheet !== ''
+    ? happycallResultFromSheet
+    : (happycallSplit.tail || null);
 
   return {
     contract_code: item.contract_code,
@@ -146,11 +176,11 @@ export function normalizeContractFromList(
     unit_count: 1,
     join_method: normalizeJoinMethod(item.join_method_raw ?? ''),
     status: normalizeStatus(item.status_raw ?? ''),
-    happy_call_at: item.happycall_at_raw ?? null,
+    happy_call_at: happycallSplit.ymd || null,
     is_cancelled: item.is_cancelled,
     external_id: item.external_id,
     affiliation_name: item.affiliation_name,
-    happycall_result: item.happycall_result,
+    happycall_result: happycallResultFinal,
     contractor_name: null,
     beneficiary_name: null,
     relationship_to_contractor: null,
