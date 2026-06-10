@@ -7,7 +7,8 @@
  *     `isSettlementEligibleContract` 등은 다른 화면(조직도/대시보드/계약 상세 등) 호환을 위해 보존한다.
  *
  * 새 정산 가입 인정 기준
- *   1) 해피콜 결과(happycall_result) ∈ { '성공', '완료', '계약변경' }
+ *   1) 해피콜 결과(happycall_result) ∈ { '성공', '완료', '심사완료', '계약변경' }
+ *      ※ '심사완료' 는 '완료' 와 동일하게 처리한다.
  *   2) 해피콜 완료일(happy_call_at) 가 정산월 윈도우(전월26일~당월25일, 주말/공휴일 익영업일 보정) 안에 있음
  *   3) 송장번호(invoice_no) 가 yearMonth 30일 23:59:59 (KST) 까지 존재
  *      - 송장 마감일은 공휴일/주말 보정을 적용하지 않는다. 매월 30일 23:59:59 KST 가 절대 마감선.
@@ -36,6 +37,7 @@ import { isKoreanHoliday } from './korean-holidays';
 export const SETTLEMENT_VALID_HAPPYCALL_RESULTS: ReadonlySet<string> = new Set([
   '성공',
   '완료',
+  '심사완료',
   '계약변경',
 ]);
 
