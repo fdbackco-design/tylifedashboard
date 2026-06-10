@@ -544,7 +544,8 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
       let sum = 0;
       for (const sid of subtree) sum += joinUnitsBySalesMember.get(sid) ?? 0;
       if (sum < 20) continue;
-      bonusById.set(m.id, Math.floor(sum / 20) * LEADER_MAINTENANCE_BONUS_WON);
+      // 누적 가입 구좌가 20 이상이면 고정 100만원 1회 지급 (20구좌마다 누적 아님)
+      bonusById.set(m.id, LEADER_MAINTENANCE_BONUS_WON);
     }
   }
 

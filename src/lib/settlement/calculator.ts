@@ -602,14 +602,15 @@ export function calculateMemberSettlement(
       endInclusive: end_date,
     });
 
-    // 신규 20구좌마다 지급 (20→1회, 40→2회, ...)
+    // 누적 가입 구좌가 20 이상이면 고정 100만원 1회 지급.
+    // (이전 정책의 "20구좌마다 100만원" 누적 산식은 잘못된 구현이었음 — 40구좌라도 100만원 1회)
     // 정책 승격으로 DB rank가 리더로 올라간 경우에도 유지장려금 판정은 영업사원 기준으로 동작해야 한다.
     const eligible = isLeaderMaintenanceBonusEligible({
       memberDbRank: member.rank === '리더' ? '영업사원' : member.rank,
       promotionThreshold: th,
       subtreeJoinUnitsAsOf25: periodUnits,
     });
-    leaderMaintenanceBonus = eligible ? Math.floor(periodUnits / 20) * LEADER_MAINTENANCE_BONUS_WON : 0;
+    leaderMaintenanceBonus = eligible ? LEADER_MAINTENANCE_BONUS_WON : 0;
   }
 
   // 2026-06 한정 그룹 보너스 (2구좌당 5만원, 가입일+고객명+담당사원 그룹화)
