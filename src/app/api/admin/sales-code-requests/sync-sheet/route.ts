@@ -30,6 +30,18 @@ import { isAdminAuthed } from '@/lib/admin-auth';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { sheetsValuesGet, sheetsValuesUpdate } from '@/lib/google/sheets-client';
 
+// 외부 Google Sheets 호출(조회+업데이트) + Supabase 업데이트가 직렬로 일어나므로
+// 기본 timeout(10s) 안에 끝나지 않을 수 있다. nodejs runtime + 60s 까지 허용한다.
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+export const dynamic = 'force-dynamic';
+
+function jsonNoStore(body: unknown, init?: ResponseInit): NextResponse {
+  const res = NextResponse.json(body as any, init);
+  res.headers.set('Cache-Control', 'no-store');
+  return res;
+}
+
 const SPREADSHEET_ID = '1zqNSyKn6fnCE2ABiPOTUPfPPZiYLxtr4TCndlJ70v6o';
 const SHEET_NAME = '시트1';
 const FIXED_I_VALUE = '영업 사원';
@@ -57,13 +69,13 @@ const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!(await isAdminAuthed(req))) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    return jsonNoStore({ error: 'unauthorized' }, { status: 401 });
   }
   let body: { ids?: unknown; changed_by?: unknown } = {};
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: 'JSON body 필요' }, { status: 400 });
+    return jsonNoStore({ error: 'JSON body 필요' }, { status: 400 });
   }
   const idsRaw = Array.isArray(body.ids) ? body.ids : [];
   const ids = [
@@ -74,10 +86,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     ),
   ];
   if (ids.length === 0) {
-    return NextResponse.json({ error: '동기화할 항목을 선택하세요' }, { status: 400 });
+    return jsonNoStore({ error: '동기화할 항목을 선택하세요' }, { status: 400 });
   }
   if (ids.length > 500) {
-    return NextResponse.json({ error: '한 번에 최대 500건' }, { status: 400 });
+    return jsonNoStore({ error: '한 번에 최대 500건' }, { status: 400 });
   }
   const changedBy = (typeof body.changed_by === 'string' ? body.changed_by.trim() : '') || 'admin';
 
@@ -90,7 +102,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       'id, name, birth_date, gender, phone, synced_to_sheet, status',
     )
     .in('id', ids);
-  if (rErr) return NextResponse.json({ error: rErr.message }, { status: 500 });
+  if (rErr) return jsonNoStore({ error: rErr.message }, { status: 500 });
 
   type Row = {
     id: string;
@@ -105,7 +117,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const skipped = ((rows ?? []) as Row[]).length - targets.length;
 
   if (targets.length === 0) {
-    return NextResponse.json({
+    return jsonNoStore({
       total_requested: ids.length,
       success_count: 0,
       skipped_count: skipped,
@@ -133,7 +145,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     firstEmptyRow = found > 0 ? found : bc.length + 1;
     if (firstEmptyRow < 1) firstEmptyRow = 1;
   } catch (e) {
-    return NextResponse.json(
+    return jsonNoStore(
       { error: `구글 시트 조회 실패: ${(e as Error).message}` },
       { status: 502 },
     );
@@ -165,7 +177,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     updateMeta = await sheetsValuesUpdate(SPREADSHEET_ID, range, sheetRows);
   } catch (e) {
-    return NextResponse.json(
+    return jsonNoStore(
       { error: `구글 시트 업데이트 실패: ${(e as Error).message}` },
       { status: 502 },
     );
@@ -173,7 +185,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // 구글이 실제로 갱신한 셀이 0이면 시트에 안 써진 상태이므로 DB 마킹도 하지 않는다.
   if (updateMeta.updatedCells <= 0) {
-    return NextResponse.json(
+    return jsonNoStore(
       {
         error:
           '구글 시트가 응답은 했지만 갱신된 셀이 0건입니다. 시트 이름/권한/탭(시트1) 존재 여부를 확인하세요.',
@@ -202,7 +214,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   if (uErr) {
     // 시트는 이미 갱신됨. DB 마킹만 실패한 경우 분리하여 알린다.
-    return NextResponse.json(
+    return jsonNoStore(
       {
         error: `시트 입력은 성공했으나 DB 마킹 실패: ${uErr.message}`,
         success_count: targets.length,
@@ -213,7 +225,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  return NextResponse.json({
+  return jsonNoStore({
     total_requested: ids.length,
     success_count: targets.length,
     skipped_count: skipped,

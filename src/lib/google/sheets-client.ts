@@ -15,6 +15,29 @@ const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets';
 const SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
 
+/**
+ * 단일 fetch 호출에 timeout 을 적용한다.
+ * 외부 API 가 무한정 매달려서 serverless function 이 응답 없이 종료되는 케이스를 방지.
+ */
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit & { timeoutMs?: number } = {},
+): Promise<Response> {
+  const { timeoutMs = 20_000, ...rest } = init;
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...rest, signal: ac.signal });
+  } catch (e) {
+    if ((e as Error).name === 'AbortError') {
+      throw new Error(`외부 호출 timeout(${timeoutMs}ms)`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 function base64Url(input: Buffer | string): string {
   const buf = Buffer.isBuffer(input) ? input : Buffer.from(input);
   return buf.toString('base64').replace(/=+$/g, '').replace(/\+/g, '-').replace(/\//g, '_');
@@ -68,10 +91,11 @@ export async function getServiceAccountAccessToken(): Promise<string> {
   params.set('grant_type', 'urn:ietf:params:oauth:grant-type:jwt-bearer');
   params.set('assertion', jwt);
 
-  const resp = await fetch(TOKEN_URL, {
+  const resp = await fetchWithTimeout(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: params.toString(),
+    timeoutMs: 15_000,
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => '');
@@ -97,8 +121,9 @@ export async function sheetsValuesGet(
 ): Promise<string[][]> {
   const token = await getServiceAccountAccessToken();
   const url = `${SHEETS_API}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?majorDimension=ROWS`;
-  const resp = await fetch(url, {
+  const resp = await fetchWithTimeout(url, {
     headers: { Authorization: `Bearer ${token}` },
+    timeoutMs: 20_000,
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => '');
@@ -128,13 +153,14 @@ export async function sheetsValuesUpdate(
   const url =
     `${SHEETS_API}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}` +
     `?valueInputOption=RAW&includeValuesInResponse=false`;
-  const resp = await fetch(url, {
+  const resp = await fetchWithTimeout(url, {
     method: 'PUT',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ range, majorDimension: 'ROWS', values }),
+    timeoutMs: 25_000,
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => '');

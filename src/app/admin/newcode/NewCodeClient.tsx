@@ -154,6 +154,7 @@ export default function NewCodeClient() {
       const res = await fetch('/api/admin/sales-code-requests/sync-sheet', {
         method: 'POST',
         credentials: 'include',
+        cache: 'no-store',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ ids }),
       });
