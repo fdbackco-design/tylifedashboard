@@ -73,6 +73,21 @@ export default async function OrganizationTreePage({
     basisMonth,
   } = vm;
 
+  // 노드 카드의 "목표까지 남은 구좌" / 게이지 계산용 — 각 멤버 본인이 설정한 monthly_target_units.
+  // NULL 이면 OrgTreeNode 내부에서 20 으로 폴백한다. 정산·누적 로직과는 무관.
+  const goalUnitsByMemberId: Record<string, number> = {};
+  if (!isUnmapped) {
+    const { data: targetRows } = await adminDb
+      .from('organization_members')
+      .select('id, monthly_target_units')
+      .not('monthly_target_units', 'is', null);
+    for (const r of ((targetRows ?? []) as Array<{ id: string; monthly_target_units: number | null }>)) {
+      if (typeof r.monthly_target_units === 'number' && r.monthly_target_units > 0) {
+        goalUnitsByMemberId[r.id] = r.monthly_target_units;
+      }
+    }
+  }
+
   return (
     <div className="p-3 sm:p-6">
       <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-slate-200/90 bg-white p-3 shadow-sm ring-1 ring-slate-900/[0.035] sm:flex-row sm:items-center sm:justify-between sm:p-4">
@@ -124,6 +139,7 @@ export default async function OrganizationTreePage({
           roots={treeForDisplay}
           contractsByMember={contractsByMember}
           metricsById={orgMetricsById as any}
+          goalUnitsByMemberId={goalUnitsByMemberId}
           editable={false}
           showMetrics={false}
           showForecast={true}

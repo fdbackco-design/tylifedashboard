@@ -268,6 +268,11 @@ interface Props {
       paidCommissionWon: number;
     }
   >;
+  /**
+   * showForecast 시 노드 카드의 게이지/남은 구좌 계산에 쓸 멤버별 목표 구좌.
+   * 미지정 멤버는 OrgTreeNode 내부에서 20 으로 폴백한다. 정산/집계에는 무관.
+   */
+  goalUnitsByMemberId?: Record<string, number>;
   /** inline: 기존처럼 트리 아래 패널. bottom-sheet: 모바일형 하단 시트 */
   contractDetailPresentation?: 'inline' | 'bottom-sheet';
   /** 멤버용 조직 페이지: 상세 테이블에서 상품·계약코드 열 숨김 */
@@ -284,6 +289,7 @@ export default function OrgTree({
   roots,
   contractsByMember,
   metricsById,
+  goalUnitsByMemberId,
   editable = true,
   showMetrics = true,
   showCommissionMetrics = true,
@@ -578,6 +584,7 @@ export default function OrgTree({
               showMetrics={showMetrics}
               showCommissionMetrics={showCommissionMetrics}
               showForecast={showForecast}
+              goalUnits={goalUnitsByMemberId?.[node.id]}
               nodeMetrics={metricsById?.[node.id] ?? null}
               selectedId={selectedId}
               onSelect={handleSelect}

@@ -28,6 +28,11 @@ interface Props {
   /** showMetrics일 때 인정수당·실지급액 표시. false면 누적/월 구좌만 */
   showCommissionMetrics?: boolean;
   showForecast?: boolean;
+  /**
+   * showForecast 시 게이지/남은 구좌 계산에 사용할 "이번 달 목표 구좌".
+   * 미지정 시 기존 동작 그대로(20)로 폴백한다. 정산/집계 로직에는 영향 없음.
+   */
+  goalUnits?: number;
   nodeMetrics: null | {
     cumulativeUnitCount: number;
     monthlyUnitCount: number;
@@ -58,6 +63,7 @@ export default function OrgTreeNode({
   showMetrics = true,
   showCommissionMetrics = true,
   showForecast = false,
+  goalUnits,
   nodeMetrics,
   selectedId,
   onSelect,
@@ -70,9 +76,11 @@ export default function OrgTreeNode({
   const subtreeIds = [...new Set([...collectSubtreeIds(node), ...(extraSubtreeIds ?? [])])];
   const counts = countByStatus(subtreeIds, contractsByMember);
   const joinUnits = showForecast ? sumJoinUnits(subtreeIds, contractsByMember) : 0;
-  const goalUnits = 20;
-  const progressPct = showForecast ? Math.max(0, Math.min(100, Math.round((joinUnits / goalUnits) * 100))) : 0;
-  const remainingUnits = showForecast ? Math.max(0, goalUnits - joinUnits) : 0;
+  // 본인이 설정한 목표 구좌(monthly_target_units)를 prop 으로 받아 사용. 미지정 시 기본 20.
+  const effectiveGoalUnits =
+    typeof goalUnits === 'number' && Number.isFinite(goalUnits) && goalUnits > 0 ? goalUnits : 20;
+  const progressPct = showForecast ? Math.max(0, Math.min(100, Math.round((joinUnits / effectiveGoalUnits) * 100))) : 0;
+  const remainingUnits = showForecast ? Math.max(0, effectiveGoalUnits - joinUnits) : 0;
 
   return (
     <div
