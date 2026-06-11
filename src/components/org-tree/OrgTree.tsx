@@ -273,6 +273,11 @@ interface Props {
    * 미지정 멤버는 OrgTreeNode 내부에서 20 으로 폴백한다. 정산/집계에는 무관.
    */
   goalUnitsByMemberId?: Record<string, number>;
+  /**
+   * showMetrics 영역(누적/월 구좌)에 "목표 구좌" 줄을 추가로 표시할지.
+   * 기본 false. /admin/organization 처럼 관리자 화면에서만 켠다.
+   */
+  showGoalUnitsLine?: boolean;
   /** inline: 기존처럼 트리 아래 패널. bottom-sheet: 모바일형 하단 시트 */
   contractDetailPresentation?: 'inline' | 'bottom-sheet';
   /** 멤버용 조직 페이지: 상세 테이블에서 상품·계약코드 열 숨김 */
@@ -290,6 +295,7 @@ export default function OrgTree({
   contractsByMember,
   metricsById,
   goalUnitsByMemberId,
+  showGoalUnitsLine = false,
   editable = true,
   showMetrics = true,
   showCommissionMetrics = true,
@@ -585,6 +591,7 @@ export default function OrgTree({
               showCommissionMetrics={showCommissionMetrics}
               showForecast={showForecast}
               goalUnits={goalUnitsByMemberId?.[node.id]}
+              showGoalUnitsLine={showGoalUnitsLine}
               nodeMetrics={metricsById?.[node.id] ?? null}
               selectedId={selectedId}
               onSelect={handleSelect}

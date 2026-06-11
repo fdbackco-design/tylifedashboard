@@ -33,6 +33,11 @@ interface Props {
    * 미지정 시 기존 동작 그대로(20)로 폴백한다. 정산/집계 로직에는 영향 없음.
    */
   goalUnits?: number;
+  /**
+   * showMetrics 영역(누적/월 구좌)에 "목표 구좌" 줄을 추가로 표시할지.
+   * 기본 false. /admin/organization 처럼 관리자 화면에서만 켠다.
+   */
+  showGoalUnitsLine?: boolean;
   nodeMetrics: null | {
     cumulativeUnitCount: number;
     monthlyUnitCount: number;
@@ -64,6 +69,7 @@ export default function OrgTreeNode({
   showCommissionMetrics = true,
   showForecast = false,
   goalUnits,
+  showGoalUnitsLine = false,
   nodeMetrics,
   selectedId,
   onSelect,
@@ -169,6 +175,14 @@ export default function OrgTreeNode({
                 {nodeMetrics.monthlyUnitCount.toLocaleString('ko-KR')}
               </span>
             </div>
+            {showGoalUnitsLine ? (
+              <div className="flex justify-between">
+                <span className="text-gray-500">목표 구좌</span>
+                <span className="font-semibold text-gray-800 tabular-nums">
+                  {effectiveGoalUnits.toLocaleString('ko-KR')}
+                </span>
+              </div>
+            ) : null}
             {showCommissionMetrics ? (
               <>
                 <div className="flex justify-between">
