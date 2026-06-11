@@ -493,6 +493,33 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     };
   }
 
+  // monthly_settlements row 가 없는 조직원도 화면 라인에 잡힐 수 있다
+  // (예: 본인 직접 계약은 없지만 산하 영업자가 있어 line 합산에는 등장하는 케이스).
+  // 이 경우 SettlementLineTableClient 의 expandedRowsBase 에서 `meta?.displayName ?? nodeId` 가
+  // nodeId(UUID) 로 떨어지지 않도록, organization_members 전체에 대해 displayName stub 을 채워둔다.
+  for (const m of membersRaw as Array<{
+    id: string;
+    name?: unknown;
+    rank?: string | null;
+  }>) {
+    const id = String(m.id ?? '');
+    if (!id || memberAggById[id]) continue;
+    const direct = directByMember.get(id) ?? { contractIds: new Set<string>(), unitSum: 0 };
+    const nameRaw = extractMemberName(m.name);
+    const displayName = nameRaw.replace(/^\[고객\]\s*/, '');
+    memberAggById[id] = {
+      memberId: id,
+      displayName,
+      rank: String(m.rank ?? ''),
+      base: 0,
+      rollup: 0,
+      leaderMaint: 0,
+      total: 0,
+      directContractCount: direct.contractIds.size,
+      directUnitSum: direct.unitSum,
+    };
+  }
+
   const displayLineRows = [...displayRows.values()]
     .filter((r) => {
       // 숨김/zero-out 멤버는 이미 월정산 row 단계에서 0이 되었지만,
