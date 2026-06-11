@@ -1,18 +1,24 @@
 -- =========================================================
 -- TY Life Dashboard
 -- 2026-06-11
--- v_contract_settlement_base : 렌탈신청번호 요구 제거
+-- v_contract_settlement_base : 정산 v2 정적 가입 인정 기준으로 통합
 --
 -- 이전 정의(20260416000002):
 --   (status = '가입')
 --   OR (status <> '해약' AND rental_request_no 존재 AND invoice_no 존재)
 --
--- 신규 정의 (해피콜 + 송장번호 기준으로 통합):
---   (status = '가입')
---   OR (status <> '해약' AND invoice_no 존재)
+-- 신규 정의 (정산 v2 "정적" 기준 — yearMonth 비의존):
+--   1) is_cancelled = FALSE
+--   2) status NOT IN ('취소', '해약', '계약취소')
+--   3) sales_member_id IS NOT NULL
+--   4) sales_link_status = 'linked'
+--   5) happycall_result ∈ ('성공', '완료', '심사완료', '계약변경')
+--   6) invoice_no 가 존재(TRIM 후 비어있지 않음)
 --
--- 해피콜 결과/일시 검증은 정산 계산 본체(monthly-calculate / settlement-eligibility-v2)에서
--- 정산월 단위로 수행한다. 본 뷰는 표시/대시보드/조직도 KPI 등의 "가입 인정 SSOT" 로 쓰인다.
+-- 정산월 단위의 시간 의존 조건(해피콜 윈도우/송장 마감일/이월 등)은 정산 본체
+-- (`monthly-calculate.ts` / `settlement-eligibility-v2.ts`) 가 수행한다.
+-- 본 뷰는 화면/조직도/대시보드 KPI 의 "가입 인정 SSOT" 로 사용된다.
+--
 -- 다른 컬럼 구조/이름은 동일하게 유지한다.
 -- =========================================================
 
@@ -36,13 +42,8 @@ FROM contracts c
 LEFT JOIN organization_members om ON om.id = c.sales_member_id
 WHERE
   c.is_cancelled = FALSE
-  AND c.status <> '취소'
+  AND c.status NOT IN ('취소', '해약', '계약취소')
   AND c.sales_member_id IS NOT NULL
   AND COALESCE(c.sales_link_status, 'linked') = 'linked'
-  AND (
-    c.status = '가입'
-    OR (
-      c.status <> '해약'
-      AND COALESCE(TRIM(c.invoice_no), '') <> ''
-    )
-  );
+  AND c.happycall_result IN ('성공', '완료', '심사완료', '계약변경')
+  AND COALESCE(TRIM(c.invoice_no), '') <> '';

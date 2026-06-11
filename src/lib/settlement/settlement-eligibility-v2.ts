@@ -281,3 +281,39 @@ export function evaluateContractEligibility(
 
   return { result: 'ELIGIBLE', happycall_ymd: hcYmd };
 }
+
+/**
+ * yearMonth 와 무관한 v2 "정적" 가입 인정 조건.
+ *
+ * - 정산월 윈도우/송장 마감일/이월 같은 시간 의존 조건은 `evaluateContractEligibility` 가 담당.
+ * - 본 helper 는 조직도/누적 구좌/전체 기간 카운트 등 "월에 종속되지 않는" 화면 카운트에서
+ *   v2 와 동일한 기준으로 가입 인정 여부를 판정하기 위해 사용한다.
+ *
+ * 통과 조건:
+ *   1) is_cancelled / status('취소'·'해약'·'계약취소') 아님
+ *   2) sales_member_id 존재 & sales_link_status == 'linked' (null 은 linked 로 간주)
+ *   3) happycall_result ∈ SETTLEMENT_VALID_HAPPYCALL_RESULTS (and NOT in CANCELLED set)
+ *   4) invoice_no 가 존재(공백 제외)
+ */
+export type ContractEligibilityStaticInput = {
+  status?: string | null;
+  is_cancelled?: boolean | null;
+  sales_member_id?: string | null;
+  sales_link_status?: string | null;
+  happycall_result?: string | null;
+  invoice_no?: string | null;
+};
+
+export function isV2EligibleStatic(c: ContractEligibilityStaticInput): boolean {
+  if (c.is_cancelled) return false;
+  const status = String(c.status ?? '');
+  if (status === '취소' || status === '해약' || status === '계약취소') return false;
+  if (!c.sales_member_id) return false;
+  if ((c.sales_link_status ?? 'linked') !== 'linked') return false;
+  const hc = String(c.happycall_result ?? '').trim();
+  if (SETTLEMENT_CANCELLED_HAPPYCALL_RESULTS.has(hc)) return false;
+  if (!SETTLEMENT_VALID_HAPPYCALL_RESULTS.has(hc)) return false;
+  if (!String(c.invoice_no ?? '').trim()) return false;
+  return true;
+}
+

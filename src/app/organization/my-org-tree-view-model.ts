@@ -246,7 +246,7 @@ export async function buildMyOrganizationTreeViewModel(
     }
 
     const contractSelect =
-      'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, customer_id, is_cancelled, sales_link_status, customers(name, phone), created_at';
+      'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, customer_id, is_cancelled, sales_link_status, happy_call_at, happycall_result, customers(name, phone), created_at';
 
     const contractChunks = chunk(subtreeMemberIds, 500);
     const contractResList = await Promise.all(
@@ -393,7 +393,7 @@ export async function buildMyOrganizationTreeViewModel(
 
     // 누적 가입 구좌: 월 제한 없이(서브트리 전체) 가입 완료(표시 상태) 합산
     const cumulativeContractsSelect =
-      'id, join_date, unit_count, status, rental_request_no, invoice_no, memo, is_cancelled, sales_member_id, customer_id, item_name, created_at, sales_link_status, customers(name, phone)';
+      'id, join_date, unit_count, status, rental_request_no, invoice_no, memo, is_cancelled, sales_member_id, customer_id, item_name, created_at, sales_link_status, happy_call_at, happycall_result, customers(name, phone)';
     const cumulativeResList = await Promise.all(
       contractChunks.map((ids) =>
         ids.length === 0

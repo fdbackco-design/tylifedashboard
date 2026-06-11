@@ -1,21 +1,25 @@
 /**
  * 정산/조직 KPI 대상 계약(SSOT).
  *
- * 핵심 “가입 인정 기준” (2026-06 개정):
- * - status === '가입'
- *   OR (status !== '해약' AND invoice_no 존재)
- *   → 렌탈신청번호(rental_request_no) 보유 여부는 더 이상 따지지 않는다.
- *     해피콜 결과/일시 검증은 정산 계산 본체(v2)에서 정산월 단위로 수행한다.
+ * 본 함수는 화면 카운트(조직도/누적 구좌/명세서 표시 등)에서 사용되는 "정적" 가입 인정 helper.
+ * - 정산월(yearMonth) 단위의 시간 의존 판정(해피콜 윈도우/송장 마감일/이월 등)은
+ *   `evaluateContractEligibility` (settlement-eligibility-v2) 가 담당한다.
+ * - 화면 카운트는 yearMonth 가 명확하지 않거나 누적/전체 기간을 보는 케이스가 많아서
+ *   v2 의 yearMonth 독립 핵심 조건(=`isV2EligibleStatic`) 만으로 가입 인정 여부를 판정한다.
  *
- * 공통 제외:
- * - is_cancelled = true 제외
- * - status = '취소' 제외
- * - sales_member_id 없음 제외
- * - sales_link_status = 'pending_mapping' 제외 (담당 미확인)
+ * 통과 조건 (v2 정적 기준):
+ *   1) is_cancelled / status('취소'·'해약'·'계약취소') 아님
+ *   2) sales_member_id 존재 & sales_link_status == 'linked'
+ *   3) happycall_result ∈ { '성공', '완료', '심사완료', '계약변경' }
+ *   4) invoice_no 존재
  *
  * NOTE:
  * - `rental_request_no` 필드는 호환을 위해 인터페이스에 남겨두지만 판단에는 사용하지 않는다.
+ * - 정산 본체(`monthly-calculate`)는 본 helper 를 거치지 않고 `evaluateContractEligibility`
+ *   로 yearMonth 별 ELIGIBLE/DEFERRED/EXCLUDED 를 직접 판정한다.
  */
+import { isV2EligibleStatic } from './settlement-eligibility-v2';
+
 export function isSettlementEligibleContract(c: {
   status: string;
   is_cancelled?: boolean | null;
@@ -23,13 +27,7 @@ export function isSettlementEligibleContract(c: {
   sales_link_status?: string | null;
   rental_request_no?: string | null;
   invoice_no?: string | null;
+  happycall_result?: string | null;
 }): boolean {
-  if (c.is_cancelled) return false;
-  if (c.status === '취소') return false;
-  if (!c.sales_member_id) return false;
-  if ((c.sales_link_status ?? 'linked') !== 'linked') return false;
-
-  const inv = (c.invoice_no ?? '').trim();
-  return c.status === '가입' || (c.status !== '해약' && inv !== '');
+  return isV2EligibleStatic(c);
 }
-

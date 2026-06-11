@@ -131,7 +131,7 @@ export async function loadStatementDownlineSharedData(db: SupabaseClient): Promi
 }
 
 const CONTRACT_SELECT_FOR_STATEMENT =
-  'id, contract_code, join_date, status, unit_count, sales_member_id, customer_id, is_cancelled, sales_link_status, rental_request_no, invoice_no, memo, created_at, customers(name, phone)';
+  'id, contract_code, join_date, status, unit_count, sales_member_id, customer_id, is_cancelled, sales_link_status, rental_request_no, invoice_no, memo, happy_call_at, happycall_result, created_at, customers(name, phone)';
 
 function hqWindowRemapInputFromRow(row: {
   sales_member_id?: string | null;
