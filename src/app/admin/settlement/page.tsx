@@ -10,6 +10,7 @@ import type { RankType } from '@/lib/types';
 import type { SettlementCalculationDetail } from '@/lib/types/settlement';
 import RecalcButton from './RecalcButton';
 import { isOrgDisplayHiddenMemberName } from '@/lib/organization/org-display-hidden';
+import { extractMemberName } from '@/lib/utils/normalize-member-name';
 import SettlementLineTableClient, { type SettlementLineRow } from './SettlementLineTableClient';
 import {
   computeSalesMemberPromotionThreshold,
@@ -118,7 +119,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
 
   const treeRows = membersRaw.map((m) => ({
     id: m.id as string,
-    name: m.name as string,
+    name: extractMemberName(m.name),
     rank: m.rank as RankType,
     parent_id:
       m.rank === '본사'
@@ -374,7 +375,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const displayRows = (settlements ?? [])
     .map((s) => {
       const member = s.organization_members as unknown as { name: string } | null;
-      const rawName = member?.name ?? '';
+      const rawName = extractMemberName(member?.name);
       const displayName = rawName.replace(/^\[고객\]\s*/, '');
       const zeroOut = rawName === ZERO_OUT_MEMBER_NAME;
       const direct = directByMember.get(s.member_id as string) ?? { contractIds: new Set<string>(), unitSum: 0 };
@@ -468,7 +469,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   for (const r of (settlements ?? []) as any[]) {
     const memberId = String(r.member_id ?? '');
     if (!memberId) continue;
-    const nameRaw = String((r.organization_members as any)?.name ?? '');
+    const nameRaw = extractMemberName((r.organization_members as any)?.name);
     const displayName = nameRaw.replace(/^\[고객\]\s*/, '');
     const topLineId = getTopLineId(memberId);
     topLineIdByMemberId[memberId] = topLineId;
