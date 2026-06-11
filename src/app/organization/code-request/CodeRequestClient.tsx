@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 
 type Item = {
   id: string;
@@ -14,6 +14,8 @@ type Item = {
   requested_at: string;
   synced_to_sheet: boolean;
   sheet_synced_at: string | null;
+  rejection_reason?: string | null;
+  rejected_at?: string | null;
 };
 
 function fmtDateTime(iso: string | null): string {
@@ -220,7 +222,7 @@ export default function CodeRequestClient({
             ? '수정 후 [수정 저장] 버튼을 누르세요. 시트 동기화 이후에는 수정할 수 없습니다.'
             : (
               <>
-                작성 후 [신청] 버튼을 누르면 관리자에게 전달됩니다. 기본 상태는 <b>신청중</b> 입니다.
+                작성 후 [신청] 버튼을 누르면 관리자에게 전달됩니다.
               </>
             )}
         </p>
@@ -397,51 +399,70 @@ export default function CodeRequestClient({
                   const editable = it.status === '신청중' && !it.synced_to_sheet;
                   const isThisDeleting = deletingId === it.id;
                   const isThisEditing = editingId === it.id;
+                  const isRejected = it.status === '반려';
                   return (
-                    <tr
-                      key={it.id}
-                      className={`border-t border-slate-100 ${isThisEditing ? 'bg-orange-50/60' : ''}`}
-                    >
-                      <td className="whitespace-nowrap px-3 py-2 text-slate-700 tabular-nums">{fmtDateTime(it.requested_at)}</td>
-                      <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900">{it.name}</td>
-                      <td className="whitespace-nowrap px-3 py-2 tabular-nums text-slate-700">{fmtBirth(it.birth_date)}</td>
-                      <td className="whitespace-nowrap px-3 py-2 text-slate-700">{it.gender}</td>
-                      <td className="whitespace-nowrap px-3 py-2 tabular-nums text-slate-700">{it.phone}</td>
-                      <td className="whitespace-nowrap px-3 py-2 text-slate-700">{it.has_own_contract ? '예' : '아니오'}</td>
-                      <td className="whitespace-nowrap px-3 py-2">
-                        <span
-                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusBadgeClass(
-                            it.status,
-                          )}`}
-                        >
-                          {it.status}
-                        </span>
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-right">
-                        {editable ? (
-                          <div className="inline-flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => startEdit(it)}
-                              disabled={submitting || isThisDeleting}
-                              className="rounded border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                            >
-                              {isThisEditing ? '수정중…' : '수정'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => remove(it.id)}
-                              disabled={submitting || isThisDeleting}
-                              className="rounded border border-red-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
-                            >
-                              {isThisDeleting ? '삭제중…' : '삭제'}
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-[11px] text-slate-300">-</span>
-                        )}
-                      </td>
-                    </tr>
+                    <Fragment key={it.id}>
+                      <tr
+                        className={`border-t border-slate-100 ${isThisEditing ? 'bg-orange-50/60' : ''}`}
+                      >
+                        <td className="whitespace-nowrap px-3 py-2 text-slate-700 tabular-nums">{fmtDateTime(it.requested_at)}</td>
+                        <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900">{it.name}</td>
+                        <td className="whitespace-nowrap px-3 py-2 tabular-nums text-slate-700">{fmtBirth(it.birth_date)}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-slate-700">{it.gender}</td>
+                        <td className="whitespace-nowrap px-3 py-2 tabular-nums text-slate-700">{it.phone}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-slate-700">{it.has_own_contract ? '예' : '아니오'}</td>
+                        <td className="whitespace-nowrap px-3 py-2">
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusBadgeClass(
+                              it.status,
+                            )}`}
+                          >
+                            {it.status}
+                          </span>
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right">
+                          {editable ? (
+                            <div className="inline-flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => startEdit(it)}
+                                disabled={submitting || isThisDeleting}
+                                className="rounded border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                              >
+                                {isThisEditing ? '수정중…' : '수정'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => remove(it.id)}
+                                disabled={submitting || isThisDeleting}
+                                className="rounded border border-red-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                              >
+                                {isThisDeleting ? '삭제중…' : '삭제'}
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-slate-300">-</span>
+                          )}
+                        </td>
+                      </tr>
+                      {isRejected && (it.rejection_reason ?? '').trim() !== '' && (
+                        <tr className="border-t border-red-100 bg-red-50/60">
+                          <td colSpan={8} className="px-3 py-2 align-top">
+                            <div className="flex flex-col gap-1 text-[12px] text-red-700 sm:flex-row sm:items-start sm:gap-2">
+                              <span className="inline-flex shrink-0 items-center rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700">
+                                반려 사유
+                              </span>
+                              <span className="whitespace-pre-wrap break-words">{it.rejection_reason}</span>
+                              {it.rejected_at && (
+                                <span className="ml-auto shrink-0 text-[11px] text-red-500 tabular-nums">
+                                  {fmtDateTime(it.rejected_at)}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })
               )}

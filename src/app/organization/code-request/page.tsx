@@ -29,7 +29,7 @@ export default async function CodeRequestPage() {
   const { data: initialItems } = await adminDb
     .from('sales_code_requests')
     .select(
-      'id, name, birth_date, gender, phone, has_own_contract, memo, status, requested_at, synced_to_sheet, sheet_synced_at',
+      'id, name, birth_date, gender, phone, has_own_contract, memo, status, requested_at, synced_to_sheet, sheet_synced_at, rejection_reason, rejected_at',
     )
     .eq('applicant_user_id', user.id)
     .order('requested_at', { ascending: false });

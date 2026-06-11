@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 
 type AdminItem = {
   id: string;
@@ -19,6 +19,9 @@ type AdminItem = {
   synced_to_sheet: boolean;
   sheet_synced_at: string | null;
   sheet_synced_by: string | null;
+  rejection_reason?: string | null;
+  rejected_at?: string | null;
+  rejected_by?: string | null;
 };
 
 const STATUS_OPTIONS = ['신청중', '시트등록완료', '처리완료', '반려'] as const;
@@ -79,6 +82,12 @@ export default function NewCodeClient() {
 
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [syncing, setSyncing] = useState<boolean>(false);
+
+  // 반려 모달
+  const [rejectTarget, setRejectTarget] = useState<AdminItem | null>(null);
+  const [rejectReason, setRejectReason] = useState<string>('');
+  const [rejecting, setRejecting] = useState<boolean>(false);
+  const [rejectError, setRejectError] = useState<string>('');
 
   const load = useCallback(async () => {
     setError('');
@@ -164,6 +173,54 @@ export default function NewCodeClient() {
       setSyncing(false);
     }
   }, [eligibleIds, checked, load]);
+
+  const openReject = (it: AdminItem) => {
+    setRejectError('');
+    setRejectReason('');
+    setRejectTarget(it);
+  };
+  const closeReject = () => {
+    if (rejecting) return;
+    setRejectTarget(null);
+    setRejectReason('');
+    setRejectError('');
+  };
+  const submitReject = useCallback(async () => {
+    if (!rejectTarget) return;
+    const reason = rejectReason.trim();
+    if (!reason) {
+      setRejectError('반려 사유를 입력하세요.');
+      return;
+    }
+    setRejecting(true);
+    setRejectError('');
+    try {
+      const res = await fetch(
+        `/api/admin/sales-code-requests/${rejectTarget.id}/reject`,
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ reason }),
+        },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRejectError(json?.error ?? '반려 실패');
+        return;
+      }
+      const updated = json?.item as AdminItem | undefined;
+      if (updated) {
+        setItems((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+      }
+      setRejectTarget(null);
+      setRejectReason('');
+    } catch (e) {
+      setRejectError((e as Error).message);
+    } finally {
+      setRejecting(false);
+    }
+  }, [rejectTarget, rejectReason]);
 
   return (
     <>
@@ -267,7 +324,6 @@ export default function NewCodeClient() {
               <th className="px-2 py-2"> </th>
               <th className="px-2 py-2 text-left font-medium">요청일자</th>
               <th className="px-2 py-2 text-left font-medium">신청자</th>
-              <th className="px-2 py-2 text-left font-medium">신청자 ID</th>
               <th className="px-2 py-2 text-left font-medium">이름</th>
               <th className="px-2 py-2 text-left font-medium">생년월일</th>
               <th className="px-2 py-2 text-left font-medium">성별</th>
@@ -277,6 +333,7 @@ export default function NewCodeClient() {
               <th className="px-2 py-2 text-left font-medium">상태</th>
               <th className="px-2 py-2 text-left font-medium">시트 동기화</th>
               <th className="px-2 py-2 text-left font-medium">동기화 일시</th>
+              <th className="px-2 py-2 text-right font-medium">동작</th>
             </tr>
           </thead>
           <tbody>
@@ -287,63 +344,175 @@ export default function NewCodeClient() {
                 </td>
               </tr>
             ) : (
-              items.map((it) => (
-                <tr
-                  key={it.id}
-                  className={`border-t border-slate-100 ${
-                    it.synced_to_sheet ? 'bg-slate-50/60 text-slate-500' : ''
-                  }`}
-                >
-                  <td className="px-2 py-2 align-top">
-                    <input
-                      type="checkbox"
-                      disabled={it.synced_to_sheet}
-                      checked={!!checked[it.id]}
-                      onChange={(e) => toggle(it.id, e.target.checked)}
-                    />
-                  </td>
-                  <td className="px-2 py-2 align-top tabular-nums">{fmtDateTime(it.requested_at)}</td>
-                  <td className="px-2 py-2 align-top">{it.applicant_name}</td>
-                  <td className="px-2 py-2 align-top font-mono text-[10px] text-slate-400">
-                    {it.applicant_user_id.slice(0, 8)}…
-                  </td>
-                  <td className="px-2 py-2 align-top font-medium text-slate-900">{it.name}</td>
-                  <td className="px-2 py-2 align-top tabular-nums">{fmtBirth(it.birth_date)}</td>
-                  <td className="px-2 py-2 align-top">{it.gender}</td>
-                  <td className="px-2 py-2 align-top tabular-nums">{it.phone}</td>
-                  <td className="px-2 py-2 align-top">{it.has_own_contract ? '예' : '아니오'}</td>
-                  <td className="px-2 py-2 align-top">
-                    {it.memo ? (
-                      <span className="block max-w-[14rem] truncate" title={it.memo}>
-                        {it.memo}
-                      </span>
-                    ) : (
-                      <span className="text-slate-300">-</span>
-                    )}
-                  </td>
-                  <td className="px-2 py-2 align-top">
-                    <span
-                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusBadgeClass(
-                        it.status,
-                      )}`}
+              items.map((it) => {
+                const isRejected = it.status === '반려';
+                const canReject = !isRejected;
+                return (
+                  <Fragment key={it.id}>
+                    <tr
+                      className={`border-t border-slate-100 ${
+                        isRejected
+                          ? 'bg-red-50/60'
+                          : it.synced_to_sheet
+                          ? 'bg-slate-50/60 text-slate-500'
+                          : ''
+                      }`}
                     >
-                      {it.status}
-                    </span>
-                  </td>
-                  <td className="px-2 py-2 align-top">
-                    {it.synced_to_sheet ? (
-                      <span className="text-emerald-700">완료</span>
-                    ) : (
-                      <span className="text-slate-400">미완료</span>
+                      <td className="px-2 py-2 align-top">
+                        <input
+                          type="checkbox"
+                          disabled={it.synced_to_sheet}
+                          checked={!!checked[it.id]}
+                          onChange={(e) => toggle(it.id, e.target.checked)}
+                        />
+                      </td>
+                      <td className="px-2 py-2 align-top tabular-nums">{fmtDateTime(it.requested_at)}</td>
+                      <td className="px-2 py-2 align-top">{it.applicant_name}</td>
+                      <td className="px-2 py-2 align-top font-medium text-slate-900">{it.name}</td>
+                      <td className="px-2 py-2 align-top tabular-nums">{fmtBirth(it.birth_date)}</td>
+                      <td className="px-2 py-2 align-top">{it.gender}</td>
+                      <td className="px-2 py-2 align-top tabular-nums">{it.phone}</td>
+                      <td className="px-2 py-2 align-top">{it.has_own_contract ? '예' : '아니오'}</td>
+                      <td className="px-2 py-2 align-top">
+                        {it.memo ? (
+                          <span className="block max-w-[14rem] truncate" title={it.memo}>
+                            {it.memo}
+                          </span>
+                        ) : (
+                          <span className="text-slate-300">-</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-2 align-top">
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusBadgeClass(
+                            it.status,
+                          )}`}
+                        >
+                          {it.status}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2 align-top">
+                        {it.synced_to_sheet ? (
+                          <span className="text-emerald-700">완료</span>
+                        ) : (
+                          <span className="text-slate-400">미완료</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-2 align-top tabular-nums">{fmtDateTime(it.sheet_synced_at)}</td>
+                      <td className="px-2 py-2 align-top text-right">
+                        {canReject ? (
+                          <button
+                            type="button"
+                            onClick={() => openReject(it)}
+                            className="rounded border border-red-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-red-600 hover:bg-red-50"
+                          >
+                            반려
+                          </button>
+                        ) : (
+                          <span className="text-[11px] text-slate-300">-</span>
+                        )}
+                      </td>
+                    </tr>
+                    {isRejected && (it.rejection_reason ?? '').trim() !== '' && (
+                      <tr className="border-t border-red-100 bg-red-50/60">
+                        <td colSpan={13} className="px-3 py-2 align-top">
+                          <div className="flex flex-col gap-1 text-[12px] text-red-700 sm:flex-row sm:items-start sm:gap-2">
+                            <span className="inline-flex shrink-0 items-center rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700">
+                              반려 사유
+                            </span>
+                            <span className="whitespace-pre-wrap break-words">{it.rejection_reason}</span>
+                            {it.rejected_at && (
+                              <span className="ml-auto shrink-0 text-[11px] text-red-500 tabular-nums">
+                                {fmtDateTime(it.rejected_at)}
+                                {it.rejected_by ? ` · ${it.rejected_by}` : ''}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
                     )}
-                  </td>
-                  <td className="px-2 py-2 align-top tabular-nums">{fmtDateTime(it.sheet_synced_at)}</td>
-                </tr>
-              ))
+                  </Fragment>
+                );
+              })
             )}
           </tbody>
         </table>
       </section>
+
+      {/* 반려 모달 */}
+      {rejectTarget && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-4"
+          onClick={closeReject}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-bold text-slate-900">신청 반려</h3>
+            <p className="mt-0.5 text-xs text-slate-500">
+              아래 신청을 반려합니다. 입력한 사유는 신청자(영업자) 화면에 그대로 표시됩니다.
+            </p>
+            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+              <div className="grid grid-cols-1 gap-y-0.5 sm:grid-cols-2 sm:gap-x-3">
+                <div>
+                  <span className="text-slate-500">신청자</span>{' '}
+                  <span className="font-medium text-slate-900">{rejectTarget.applicant_name}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500">신청 대상</span>{' '}
+                  <span className="font-medium text-slate-900">{rejectTarget.name}</span>
+                </div>
+                <div className="tabular-nums">
+                  <span className="text-slate-500">생년월일</span> {fmtBirth(rejectTarget.birth_date)}
+                </div>
+                <div className="tabular-nums">
+                  <span className="text-slate-500">전화</span> {rejectTarget.phone}
+                </div>
+              </div>
+            </div>
+            <label className="mt-3 block text-xs font-medium text-slate-700">반려 사유 *</label>
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              rows={4}
+              maxLength={1000}
+              placeholder="예) 동명이인 / 정보 불일치 / 추가 자료 필요 등"
+              className="mt-1 w-full rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+              disabled={rejecting}
+              lang="ko"
+              inputMode="text"
+              autoComplete="off"
+              autoFocus
+            />
+            <div className="mt-1 flex items-center justify-between text-[11px] text-slate-400">
+              <span>최대 1000자</span>
+              <span className="tabular-nums">{rejectReason.length} / 1000</span>
+            </div>
+            {rejectError && <p className="mt-2 text-xs text-red-600">{rejectError}</p>}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeReject}
+                disabled={rejecting}
+                className="rounded border px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={submitReject}
+                disabled={rejecting || !rejectReason.trim()}
+                className="rounded bg-red-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-60"
+              >
+                {rejecting ? '반려 중…' : '반려 처리'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

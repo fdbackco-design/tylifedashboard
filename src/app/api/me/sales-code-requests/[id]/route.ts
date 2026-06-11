@@ -118,7 +118,7 @@ export async function PATCH(
     .eq('status', '신청중')
     .eq('synced_to_sheet', false)
     .select(
-      'id, name, birth_date, gender, phone, has_own_contract, memo, status, requested_at, synced_to_sheet, sheet_synced_at',
+      'id, name, birth_date, gender, phone, has_own_contract, memo, status, requested_at, synced_to_sheet, sheet_synced_at, rejection_reason, rejected_at',
     )
     .maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

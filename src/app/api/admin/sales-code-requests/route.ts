@@ -49,6 +49,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         'synced_to_sheet',
         'sheet_synced_at',
         'sheet_synced_by',
+        'rejection_reason',
+        'rejected_at',
+        'rejected_by',
       ].join(', '),
     )
     .order('requested_at', { ascending: false })

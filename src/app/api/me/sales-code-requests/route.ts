@@ -48,7 +48,7 @@ export async function GET(): Promise<NextResponse> {
   const { data, error } = await adminDb
     .from('sales_code_requests')
     .select(
-      'id, name, birth_date, gender, phone, has_own_contract, memo, status, requested_at, synced_to_sheet, sheet_synced_at',
+      'id, name, birth_date, gender, phone, has_own_contract, memo, status, requested_at, synced_to_sheet, sheet_synced_at, rejection_reason, rejected_at',
     )
     .eq('applicant_user_id', me.userId)
     .order('requested_at', { ascending: false });
@@ -137,7 +137,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     .from('sales_code_requests')
     .insert(insertRow)
     .select(
-      'id, name, birth_date, gender, phone, has_own_contract, memo, status, requested_at, synced_to_sheet, sheet_synced_at',
+      'id, name, birth_date, gender, phone, has_own_contract, memo, status, requested_at, synced_to_sheet, sheet_synced_at, rejection_reason, rejected_at',
     )
     .maybeSingle();
   if (error) {
