@@ -162,8 +162,14 @@ export default function NewCodeClient() {
         setError(json?.error ?? '동기화 실패');
         return;
       }
+      const updatedCells = json?.updated?.updatedCells ?? 0;
+      const updatedRows = json?.updated?.updatedRows ?? 0;
+      const updatedRange = json?.updated?.updatedRange ?? '';
       const msg =
-        `완료: 성공 ${json?.success_count ?? 0}건, 스킵(이미 동기화) ${json?.skipped_count ?? 0}건`;
+        `완료: 성공 ${json?.success_count ?? 0}건, 스킵(이미 동기화) ${json?.skipped_count ?? 0}건` +
+        (updatedRows
+          ? ` · 시트 갱신 ${updatedRows}행/${updatedCells}셀${updatedRange ? ` (${updatedRange})` : ''}`
+          : '');
       setSyncMessage(json?.error ? `${msg} · ${json.error}` : msg);
       await load();
       setChecked({});

@@ -35,6 +35,12 @@ const SHEET_NAME = '시트1';
 const FIXED_I_VALUE = '영업 사원';
 const FIXED_J_VALUE = '인천광역시 연수구 송도과학로 32 IT센터 S동 3003-3호';
 
+/** A1 표기 안전화: 한글/공백/특수문자가 있는 시트명은 항상 single-quote 로 감싼다. */
+function sheetRef(name: string): string {
+  return `'${name.replace(/'/g, "''")}'`;
+}
+const SHEET_REF = sheetRef(SHEET_NAME);
+
 function fmtTodayMMDD(): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Seoul',
@@ -110,8 +116,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // 시트에서 B열/C열 전체를 읽어 "둘 다 빈" 첫 행 번호 결정
   // 충분한 범위 확보를 위해 B1:C2000 까지 조회
   let firstEmptyRow = 1;
+  let scannedRows = 0;
   try {
-    const bc = await sheetsValuesGet(SPREADSHEET_ID, `${SHEET_NAME}!B1:C2000`);
+    const bc = await sheetsValuesGet(SPREADSHEET_ID, `${SHEET_REF}!B1:C2000`);
+    scannedRows = bc.length;
     let found = -1;
     for (let i = 0; i < bc.length; i++) {
       const r = bc[i] ?? [];
@@ -147,12 +155,33 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const startRow = firstEmptyRow;
   const endRow = firstEmptyRow + sheetRows.length - 1;
-  const range = `${SHEET_NAME}!B${startRow}:J${endRow}`;
+  const range = `${SHEET_REF}!B${startRow}:J${endRow}`;
+  let updateMeta: {
+    updatedRange: string;
+    updatedRows: number;
+    updatedColumns: number;
+    updatedCells: number;
+  } = { updatedRange: '', updatedRows: 0, updatedColumns: 0, updatedCells: 0 };
   try {
-    await sheetsValuesUpdate(SPREADSHEET_ID, range, sheetRows);
+    updateMeta = await sheetsValuesUpdate(SPREADSHEET_ID, range, sheetRows);
   } catch (e) {
     return NextResponse.json(
       { error: `구글 시트 업데이트 실패: ${(e as Error).message}` },
+      { status: 502 },
+    );
+  }
+
+  // 구글이 실제로 갱신한 셀이 0이면 시트에 안 써진 상태이므로 DB 마킹도 하지 않는다.
+  if (updateMeta.updatedCells <= 0) {
+    return NextResponse.json(
+      {
+        error:
+          '구글 시트가 응답은 했지만 갱신된 셀이 0건입니다. 시트 이름/권한/탭(시트1) 존재 여부를 확인하세요.',
+        scanned_rows: scannedRows,
+        first_empty_row: firstEmptyRow,
+        attempted_range: range,
+        updated: updateMeta,
+      },
       { status: 502 },
     );
   }
@@ -188,7 +217,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     total_requested: ids.length,
     success_count: targets.length,
     skipped_count: skipped,
-    range,
+    scanned_rows: scannedRows,
+    first_empty_row: firstEmptyRow,
+    attempted_range: range,
+    updated: updateMeta,
     sheet_synced_at: nowIso,
   });
 }

@@ -108,18 +108,26 @@ export async function sheetsValuesGet(
   return (json.values ?? []) as string[][];
 }
 
+export type SheetsUpdateResult = {
+  updatedRange: string;
+  updatedRows: number;
+  updatedColumns: number;
+  updatedCells: number;
+};
+
 /**
  * spreadsheets.values.update — 단일 셀/범위 갱신
+ * 응답 메타(updatedRange/updatedRows/updatedCells)를 반환한다.
  */
 export async function sheetsValuesUpdate(
   spreadsheetId: string,
   range: string,
   values: string[][],
-): Promise<void> {
+): Promise<SheetsUpdateResult> {
   const token = await getServiceAccountAccessToken();
   const url =
     `${SHEETS_API}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}` +
-    `?valueInputOption=RAW`;
+    `?valueInputOption=RAW&includeValuesInResponse=false`;
   const resp = await fetch(url, {
     method: 'PUT',
     headers: {
@@ -132,6 +140,18 @@ export async function sheetsValuesUpdate(
     const text = await resp.text().catch(() => '');
     throw new Error(`Sheets values.update 실패(${resp.status}): ${text.slice(0, 300)}`);
   }
+  const json = (await resp.json().catch(() => ({}))) as {
+    updatedRange?: string;
+    updatedRows?: number;
+    updatedColumns?: number;
+    updatedCells?: number;
+  };
+  return {
+    updatedRange: json.updatedRange ?? '',
+    updatedRows: json.updatedRows ?? 0,
+    updatedColumns: json.updatedColumns ?? 0,
+    updatedCells: json.updatedCells ?? 0,
+  };
 }
 
 /** 편의: 단일 셀 갱신 */
