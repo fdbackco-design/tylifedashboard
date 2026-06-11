@@ -4,6 +4,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { getSettlementWindowForYearMonth } from '@/lib/settlement/settlement-window';
 import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
 import { isOrgDisplayHiddenMemberName } from '@/lib/organization/org-display-hidden';
+import { isV2EligibleStatic } from '@/lib/settlement/settlement-eligibility-v2';
 import type { RankType } from '@/lib/types';
 
 export const metadata: Metadata = { title: '정산 현황 · 산하 내역' };
@@ -74,7 +75,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     db
       .from('contracts')
       .select(
-        'id, contract_code, join_date, status, unit_count, item_name, sales_member_id, customer_id, sales_link_status, is_cancelled, rental_request_no, invoice_no, memo, customers(name)',
+        'id, contract_code, join_date, status, unit_count, item_name, sales_member_id, customer_id, sales_link_status, is_cancelled, rental_request_no, invoice_no, memo, happy_call_at, happycall_result, customers(name)',
       )
       .gte('join_date', start_date)
       .lt('join_date', endExclusive),
@@ -177,28 +178,16 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     return sales_member_id;
   };
 
-  const isJoinEligible = (c: {
-    status: string;
-    rental_request_no: string | null;
-    invoice_no: string | null;
-  }): boolean => {
-    if (String(c.status ?? '').trim() === '가입') return true;
-    if (String(c.status ?? '').trim() === '해약') return false;
-    const rr = String(c.rental_request_no ?? '').trim();
-    const inv = String(c.invoice_no ?? '').trim();
-    return rr !== '' && inv !== '';
-  };
-
   const rows = ((contractRowsRes.data ?? []) as any[])
-    // v_contract_settlement_base와 동일한 "가입 인정 기준"으로 필터
-    .filter((c) => (c.is_cancelled ?? false) === false)
-    .filter((c) => String(c.status ?? '').trim() !== '취소')
-    .filter((c) => (c.sales_member_id ?? null) != null)
-    .filter((c) => String(c.sales_link_status ?? 'linked') === 'linked')
+    // v_contract_settlement_base 와 동일한 "v2 정적 가입 인정 기준" 으로 필터
+    // (취소/해약/계약취소 제외, sales_link_status='linked', happycall_result valid, invoice_no 존재)
     .filter((c) =>
-      isJoinEligible({
+      isV2EligibleStatic({
         status: String(c.status ?? ''),
-        rental_request_no: (c.rental_request_no ?? null) as string | null,
+        is_cancelled: Boolean(c.is_cancelled ?? false),
+        sales_member_id: (c.sales_member_id ?? null) as string | null,
+        sales_link_status: (c.sales_link_status ?? null) as string | null,
+        happycall_result: (c.happycall_result ?? null) as string | null,
         invoice_no: (c.invoice_no ?? null) as string | null,
       }),
     )
