@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 type Item = {
   id: string;
@@ -62,6 +62,8 @@ export default function CodeRequestClient({
   canSubmit: boolean;
 }) {
   const [items, setItems] = useState<Item[]>(initialItems);
+
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [birth, setBirth] = useState('');
   const [gender, setGender] = useState<'남' | '여' | ''>('');
@@ -71,8 +73,12 @@ export default function CodeRequestClient({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [ok, setOk] = useState('');
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const formRef = useRef<HTMLDivElement>(null);
 
   const reset = () => {
+    setEditingId(null);
     setName('');
     setBirth('');
     setGender('');
@@ -80,6 +86,53 @@ export default function CodeRequestClient({
     setHasOwn('');
     setMemo('');
   };
+
+  const startEdit = (it: Item) => {
+    setError('');
+    setOk('');
+    setEditingId(it.id);
+    setName(it.name);
+    setBirth((it.birth_date ?? '').replace(/\D/g, ''));
+    setGender(it.gender === '남' || it.gender === '여' ? (it.gender as '남' | '여') : '');
+    setPhone(it.phone ?? '');
+    setHasOwn(it.has_own_contract ? 'yes' : 'no');
+    setMemo(it.memo ?? '');
+    // 폼으로 스크롤
+    requestAnimationFrame(() => {
+      formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
+  const cancelEdit = () => {
+    reset();
+    setError('');
+    setOk('');
+  };
+
+  const remove = useCallback(async (id: string) => {
+    if (!confirm('이 신청 내역을 삭제하시겠습니까?')) return;
+    setError('');
+    setOk('');
+    setDeletingId(id);
+    try {
+      const res = await fetch(`/api/me/sales-code-requests/${id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(json?.error ?? '삭제 실패');
+        return;
+      }
+      setItems((prev) => prev.filter((x) => x.id !== id));
+      if (editingId === id) reset();
+      setOk('삭제되었습니다.');
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setDeletingId(null);
+    }
+  }, [editingId]);
 
   const submit = useCallback(async () => {
     setError('');
@@ -99,8 +152,12 @@ export default function CodeRequestClient({
 
     setSubmitting(true);
     try {
-      const res = await fetch('/api/me/sales-code-requests', {
-        method: 'POST',
+      const url = editingId
+        ? `/api/me/sales-code-requests/${editingId}`
+        : '/api/me/sales-code-requests';
+      const method = editingId ? 'PATCH' : 'POST';
+      const res = await fetch(url, {
+        method,
         credentials: 'include',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -114,34 +171,68 @@ export default function CodeRequestClient({
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(json?.error ?? '신청 실패');
+        setError(json?.error ?? (editingId ? '수정 실패' : '신청 실패'));
         return;
       }
-      if (json?.item) {
-        setItems((prev) => [json.item as Item, ...prev]);
+      const updated = json?.item as Item | undefined;
+      if (editingId && updated) {
+        setItems((prev) => prev.map((x) => (x.id === editingId ? updated : x)));
+        setOk('수정되었습니다.');
+      } else if (updated) {
+        setItems((prev) => [updated, ...prev]);
+        setOk('신청이 접수되었습니다.');
       }
-      setOk('신청이 접수되었습니다.');
       reset();
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setSubmitting(false);
     }
-  }, [canSubmit, name, birth, gender, phone, hasOwn, memo]);
+  }, [canSubmit, name, birth, gender, phone, hasOwn, memo, editingId]);
+
+  useEffect(() => {
+    if (!ok) return;
+    const t = setTimeout(() => setOk(''), 2500);
+    return () => clearTimeout(t);
+  }, [ok]);
+
+  const isEdit = !!editingId;
 
   return (
     <>
-      {/* 신청 폼 */}
-      <section className="mb-4 overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm ring-1 ring-slate-900/[0.035] sm:p-5">
-        <h2 className="text-sm font-semibold text-slate-900 sm:text-base">새 신청서 작성</h2>
+      {/* 신청 폼 (생성/수정 공용) */}
+      <section
+        ref={formRef}
+        className="mb-4 overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm ring-1 ring-slate-900/[0.035] sm:p-5"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-slate-900 sm:text-base">
+            {isEdit ? '신청서 수정' : '새 신청서 작성'}
+          </h2>
+          {isEdit && (
+            <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+              신청중 항목 수정
+            </span>
+          )}
+        </div>
         <p className="mt-0.5 text-[11px] text-slate-500">
-          작성 후 [신청] 버튼을 누르면 관리자에게 전달됩니다. 기본 상태는 <b>신청중</b> 입니다.
+          {isEdit
+            ? '수정 후 [수정 저장] 버튼을 누르세요. 시트 동기화 이후에는 수정할 수 없습니다.'
+            : (
+              <>
+                작성 후 [신청] 버튼을 누르면 관리자에게 전달됩니다. 기본 상태는 <b>신청중</b> 입니다.
+              </>
+            )}
         </p>
 
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-700">이름 *</label>
             <input
+              type="text"
+              inputMode="text"
+              autoComplete="name"
+              lang="ko"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="홍길동"
@@ -221,6 +312,9 @@ export default function CodeRequestClient({
             <div className="sm:col-span-2">
               <label className="mb-1 block text-xs font-medium text-slate-700">사유 메모 *</label>
               <textarea
+                lang="ko"
+                inputMode="text"
+                autoComplete="off"
                 value={memo}
                 onChange={(e) => setMemo(e.target.value)}
                 rows={2}
@@ -236,21 +330,32 @@ export default function CodeRequestClient({
         {ok && <p className="mt-2 text-xs text-emerald-700">{ok}</p>}
 
         <div className="mt-3 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={reset}
-            disabled={submitting}
-            className="rounded border px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
-          >
-            초기화
-          </button>
+          {isEdit ? (
+            <button
+              type="button"
+              onClick={cancelEdit}
+              disabled={submitting}
+              className="rounded border px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+            >
+              취소
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={reset}
+              disabled={submitting}
+              className="rounded border px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+            >
+              초기화
+            </button>
+          )}
           <button
             type="button"
             onClick={submit}
             disabled={submitting || !canSubmit}
             className="rounded bg-orange-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-orange-700 disabled:opacity-60"
           >
-            {submitting ? '신청 중…' : '신청'}
+            {submitting ? (isEdit ? '저장 중…' : '신청 중…') : isEdit ? '수정 저장' : '신청'}
           </button>
         </div>
         {!canSubmit && (
@@ -264,7 +369,7 @@ export default function CodeRequestClient({
       <section className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.035]">
         <header className="border-b border-slate-100 px-4 py-3">
           <h2 className="text-sm font-semibold text-slate-900 sm:text-base">내 신청 내역</h2>
-          <p className="mt-0.5 text-[11px] text-slate-500">총 {items.length}건</p>
+          <p className="mt-0.5 text-[11px] text-slate-500">총 {items.length}건 (신청중 항목만 수정/삭제 가능)</p>
         </header>
         <div className="overflow-x-auto">
           <table className="min-w-full whitespace-nowrap text-xs sm:text-sm">
@@ -277,35 +382,68 @@ export default function CodeRequestClient({
                 <th className="whitespace-nowrap px-3 py-2 text-left font-medium">전화번호</th>
                 <th className="whitespace-nowrap px-3 py-2 text-left font-medium">본인 가입구좌</th>
                 <th className="whitespace-nowrap px-3 py-2 text-left font-medium">상태</th>
+                <th className="whitespace-nowrap px-3 py-2 text-right font-medium">동작</th>
               </tr>
             </thead>
             <tbody>
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-slate-400">
+                  <td colSpan={8} className="px-3 py-6 text-center text-slate-400">
                     아직 신청 내역이 없습니다.
                   </td>
                 </tr>
               ) : (
-                items.map((it) => (
-                  <tr key={it.id} className="border-t border-slate-100">
-                    <td className="whitespace-nowrap px-3 py-2 text-slate-700 tabular-nums">{fmtDateTime(it.requested_at)}</td>
-                    <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900">{it.name}</td>
-                    <td className="whitespace-nowrap px-3 py-2 tabular-nums text-slate-700">{fmtBirth(it.birth_date)}</td>
-                    <td className="whitespace-nowrap px-3 py-2 text-slate-700">{it.gender}</td>
-                    <td className="whitespace-nowrap px-3 py-2 tabular-nums text-slate-700">{it.phone}</td>
-                    <td className="whitespace-nowrap px-3 py-2 text-slate-700">{it.has_own_contract ? '예' : '아니오'}</td>
-                    <td className="whitespace-nowrap px-3 py-2">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusBadgeClass(
-                          it.status,
-                        )}`}
-                      >
-                        {it.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))
+                items.map((it) => {
+                  const editable = it.status === '신청중' && !it.synced_to_sheet;
+                  const isThisDeleting = deletingId === it.id;
+                  const isThisEditing = editingId === it.id;
+                  return (
+                    <tr
+                      key={it.id}
+                      className={`border-t border-slate-100 ${isThisEditing ? 'bg-orange-50/60' : ''}`}
+                    >
+                      <td className="whitespace-nowrap px-3 py-2 text-slate-700 tabular-nums">{fmtDateTime(it.requested_at)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900">{it.name}</td>
+                      <td className="whitespace-nowrap px-3 py-2 tabular-nums text-slate-700">{fmtBirth(it.birth_date)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-slate-700">{it.gender}</td>
+                      <td className="whitespace-nowrap px-3 py-2 tabular-nums text-slate-700">{it.phone}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-slate-700">{it.has_own_contract ? '예' : '아니오'}</td>
+                      <td className="whitespace-nowrap px-3 py-2">
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusBadgeClass(
+                            it.status,
+                          )}`}
+                        >
+                          {it.status}
+                        </span>
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right">
+                        {editable ? (
+                          <div className="inline-flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => startEdit(it)}
+                              disabled={submitting || isThisDeleting}
+                              className="rounded border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                            >
+                              {isThisEditing ? '수정중…' : '수정'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => remove(it.id)}
+                              disabled={submitting || isThisDeleting}
+                              className="rounded border border-red-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                            >
+                              {isThisDeleting ? '삭제중…' : '삭제'}
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-slate-300">-</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
