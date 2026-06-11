@@ -267,16 +267,16 @@ export default function CodeRequestClient({
           <p className="mt-0.5 text-[11px] text-slate-500">총 {items.length}건</p>
         </header>
         <div className="overflow-x-auto">
-          <table className="min-w-full text-xs sm:text-sm">
+          <table className="min-w-full whitespace-nowrap text-xs sm:text-sm">
             <thead className="bg-slate-50 text-slate-600">
               <tr>
-                <th className="px-3 py-2 text-left font-medium">신청일</th>
-                <th className="px-3 py-2 text-left font-medium">이름</th>
-                <th className="px-3 py-2 text-left font-medium">생년월일</th>
-                <th className="px-3 py-2 text-left font-medium">성별</th>
-                <th className="px-3 py-2 text-left font-medium">전화번호</th>
-                <th className="px-3 py-2 text-left font-medium">본인 가입구좌</th>
-                <th className="px-3 py-2 text-left font-medium">상태</th>
+                <th className="whitespace-nowrap px-3 py-2 text-left font-medium">신청일</th>
+                <th className="whitespace-nowrap px-3 py-2 text-left font-medium">이름</th>
+                <th className="whitespace-nowrap px-3 py-2 text-left font-medium">생년월일</th>
+                <th className="whitespace-nowrap px-3 py-2 text-left font-medium">성별</th>
+                <th className="whitespace-nowrap px-3 py-2 text-left font-medium">전화번호</th>
+                <th className="whitespace-nowrap px-3 py-2 text-left font-medium">본인 가입구좌</th>
+                <th className="whitespace-nowrap px-3 py-2 text-left font-medium">상태</th>
               </tr>
             </thead>
             <tbody>
@@ -289,13 +289,13 @@ export default function CodeRequestClient({
               ) : (
                 items.map((it) => (
                   <tr key={it.id} className="border-t border-slate-100">
-                    <td className="px-3 py-2 text-slate-700 tabular-nums">{fmtDateTime(it.requested_at)}</td>
-                    <td className="px-3 py-2 font-medium text-slate-900">{it.name}</td>
-                    <td className="px-3 py-2 tabular-nums text-slate-700">{fmtBirth(it.birth_date)}</td>
-                    <td className="px-3 py-2 text-slate-700">{it.gender}</td>
-                    <td className="px-3 py-2 tabular-nums text-slate-700">{it.phone}</td>
-                    <td className="px-3 py-2 text-slate-700">{it.has_own_contract ? '예' : '아니오'}</td>
-                    <td className="px-3 py-2">
+                    <td className="whitespace-nowrap px-3 py-2 text-slate-700 tabular-nums">{fmtDateTime(it.requested_at)}</td>
+                    <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900">{it.name}</td>
+                    <td className="whitespace-nowrap px-3 py-2 tabular-nums text-slate-700">{fmtBirth(it.birth_date)}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-slate-700">{it.gender}</td>
+                    <td className="whitespace-nowrap px-3 py-2 tabular-nums text-slate-700">{it.phone}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-slate-700">{it.has_own_contract ? '예' : '아니오'}</td>
+                    <td className="whitespace-nowrap px-3 py-2">
                       <span
                         className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusBadgeClass(
                           it.status,
