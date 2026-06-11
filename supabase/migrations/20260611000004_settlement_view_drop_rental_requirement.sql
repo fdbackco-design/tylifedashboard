@@ -42,7 +42,9 @@ FROM contracts c
 LEFT JOIN organization_members om ON om.id = c.sales_member_id
 WHERE
   c.is_cancelled = FALSE
-  AND c.status NOT IN ('취소', '해약', '계약취소')
+  -- contract_status enum 에는 '계약취소' 값이 없지만, 향후 enum 변경/외부 데이터 유입 시에도
+  -- v2 정적 기준과 동일하게 동작하도록 ::text 캐스팅으로 비교한다.
+  AND c.status::text NOT IN ('취소', '해약', '계약취소')
   AND c.sales_member_id IS NOT NULL
   AND COALESCE(c.sales_link_status, 'linked') = 'linked'
   AND c.happycall_result IN ('성공', '완료', '심사완료', '계약변경')
