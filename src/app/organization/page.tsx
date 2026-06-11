@@ -19,6 +19,9 @@ import {
   buildEmptyMyOrganizationTreeViewModel,
   buildMyOrganizationTreeViewModel,
 } from './my-org-tree-view-model';
+import MyMonthlyTargetCard from './MyMonthlyTargetCard';
+
+const DEFAULT_MONTHLY_TARGET_UNITS = 20;
 
 export const metadata: Metadata = { title: '내 조직도' };
 export const dynamic = 'force-dynamic';
@@ -69,6 +72,18 @@ export default async function OrganizationMyTreePage({
   const vm = isUnmapped
     ? buildEmptyMyOrganizationTreeViewModel({ yearMonth, displayName })
     : await buildMyOrganizationTreeViewModel(adminDb, { memberId: memberId as string, yearMonth });
+
+  // 본인 목표 구좌 조회 (NULL 이면 DEFAULT 로 폴백). 정산/누적 로직에는 영향 없음.
+  let myMonthlyTargetUnits = DEFAULT_MONTHLY_TARGET_UNITS;
+  if (memberId) {
+    const { data: targetRow } = await adminDb
+      .from('organization_members')
+      .select('monthly_target_units')
+      .eq('id', memberId)
+      .maybeSingle();
+    const raw = (targetRow?.monthly_target_units as number | null) ?? null;
+    if (raw != null && Number.isInteger(raw) && raw > 0) myMonthlyTargetUnits = raw;
+  }
   const {
     label_year_month,
     start_date,
@@ -188,6 +203,12 @@ export default async function OrganizationMyTreePage({
           </p>
         </div>
       ) : null}
+
+      <MyMonthlyTargetCard
+        initialTarget={myMonthlyTargetUnits}
+        periodJoinUnits={periodJoinUnits}
+        canEdit={!isUnmapped}
+      />
 
       <div className="mb-3 sm:mb-4">
         <h2 className="text-lg font-bold tracking-tight text-slate-900 sm:text-xl">내 조직도</h2>

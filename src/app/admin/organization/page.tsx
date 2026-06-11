@@ -28,6 +28,7 @@ import {
 } from '@/lib/settlement/leader-promotion';
 import SyncButton from './SyncButton';
 import SettlementSalesMemberOverridePanel from './SettlementSalesMemberOverridePanel';
+import MonthlyTargetsTreeSection from './MonthlyTargetsTreeSection';
 
 export const metadata: Metadata = { title: '조직도' };
 export const dynamic = 'force-dynamic';
@@ -877,6 +878,25 @@ export default async function OrganizationPage({
           showCommissionMetrics={false}
         />
       </div>
+
+      <MonthlyTargetsTreeSection
+        treeRows={treeRows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          rank: String(r.rank),
+          parent_id: r.parent_id ?? null,
+        }))}
+        metricsById={Object.fromEntries(
+          Object.entries(orgMetricsById).map(([k, v]) => [
+            k,
+            {
+              cumulativeUnitCount: (v as any).cumulativeUnitCount ?? 0,
+              monthlyUnitCount: (v as any).monthlyUnitCount ?? 0,
+            },
+          ]),
+        )}
+        hideHqRoot={true}
+      />
 
       <SettlementSalesMemberOverridePanel />
     </div>
