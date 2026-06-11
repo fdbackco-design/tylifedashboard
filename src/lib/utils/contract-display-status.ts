@@ -1,7 +1,8 @@
 /**
  * 계약 목록/조직도/상세 등에서 동일한 기준으로 “표시 상태”를 맞춘다.
  * - 렌탈기준 미충족(준비·대기)은 최우선
- * - 해약이 아니고 송장번호·렌탈신청번호가 모두 있으면 가입으로 표시
+ * - 2026-06 개정: 해약이 아니고 송장번호가 있으면 가입으로 표시한다.
+ *   (렌탈신청번호 유무는 더 이상 따지지 않는다.)
  * - 그 외에는 DB status 그대로
  */
 export type ContractDisplayStatusInput = {
@@ -16,9 +17,8 @@ export function getContractDisplayStatus(c: ContractDisplayStatusInput): string 
   if ((c.status === '준비' || c.status === '대기') && v === '렌탈기준 미충족') {
     return '렌탈 미충족';
   }
-  const hasRental = (c.rental_request_no ?? '').trim().length > 0;
   const hasInvoice = (c.invoice_no ?? '').trim().length > 0;
-  if (c.status === '가입' || (c.status !== '해약' && hasRental && hasInvoice)) {
+  if (c.status === '가입' || (c.status !== '해약' && hasInvoice)) {
     return '가입';
   }
   return c.status;
