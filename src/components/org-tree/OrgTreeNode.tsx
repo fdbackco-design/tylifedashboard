@@ -38,6 +38,12 @@ interface Props {
    * 기본 false. /admin/organization 처럼 관리자 화면에서만 켠다.
    */
   showGoalUnitsLine?: boolean;
+  /**
+   * showMetrics 영역에 달성률(%) + 색별 게이지바를 추가로 표시할지.
+   * 기본 false. /admin/organization 처럼 관리자 화면에서만 켠다.
+   * 분자: nodeMetrics.monthlyUnitCount, 분모: effectiveGoalUnits.
+   */
+  showGoalProgressBar?: boolean;
   nodeMetrics: null | {
     cumulativeUnitCount: number;
     monthlyUnitCount: number;
@@ -70,6 +76,7 @@ export default function OrgTreeNode({
   showForecast = false,
   goalUnits,
   showGoalUnitsLine = false,
+  showGoalProgressBar = false,
   nodeMetrics,
   selectedId,
   onSelect,
@@ -183,6 +190,41 @@ export default function OrgTreeNode({
                 </span>
               </div>
             ) : null}
+            {showGoalProgressBar ? (() => {
+              const monthly = nodeMetrics.monthlyUnitCount ?? 0;
+              const rawPct = effectiveGoalUnits > 0 ? Math.round((monthly / effectiveGoalUnits) * 100) : 0;
+              const clampedPct = Math.max(0, Math.min(100, rawPct));
+              const barColorClass =
+                rawPct >= 100
+                  ? 'bg-emerald-500'
+                  : rawPct >= 70
+                  ? 'bg-orange-500'
+                  : rawPct >= 30
+                  ? 'bg-amber-500'
+                  : 'bg-slate-400';
+              const textColorClass =
+                rawPct >= 100
+                  ? 'text-emerald-600'
+                  : rawPct >= 70
+                  ? 'text-orange-600'
+                  : rawPct >= 30
+                  ? 'text-amber-600'
+                  : 'text-slate-500';
+              return (
+                <div className="pt-0.5">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">달성률</span>
+                    <span className={`font-semibold tabular-nums ${textColorClass}`}>{rawPct}%</span>
+                  </div>
+                  <div className="mt-0.5 h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                    <div
+                      className={`h-1.5 rounded-full ${barColorClass}`}
+                      style={{ width: `${clampedPct}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })() : null}
             {showCommissionMetrics ? (
               <>
                 <div className="flex justify-between">

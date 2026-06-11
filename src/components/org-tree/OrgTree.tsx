@@ -278,6 +278,11 @@ interface Props {
    * 기본 false. /admin/organization 처럼 관리자 화면에서만 켠다.
    */
   showGoalUnitsLine?: boolean;
+  /**
+   * showMetrics 영역에 달성률(%) + 색별 게이지바를 추가로 표시할지.
+   * 기본 false. /admin/organization 처럼 관리자 화면에서만 켠다.
+   */
+  showGoalProgressBar?: boolean;
   /** inline: 기존처럼 트리 아래 패널. bottom-sheet: 모바일형 하단 시트 */
   contractDetailPresentation?: 'inline' | 'bottom-sheet';
   /** 멤버용 조직 페이지: 상세 테이블에서 상품·계약코드 열 숨김 */
@@ -296,6 +301,7 @@ export default function OrgTree({
   metricsById,
   goalUnitsByMemberId,
   showGoalUnitsLine = false,
+  showGoalProgressBar = false,
   editable = true,
   showMetrics = true,
   showCommissionMetrics = true,
@@ -592,6 +598,7 @@ export default function OrgTree({
               showForecast={showForecast}
               goalUnits={goalUnitsByMemberId?.[node.id]}
               showGoalUnitsLine={showGoalUnitsLine}
+              showGoalProgressBar={showGoalProgressBar}
               nodeMetrics={metricsById?.[node.id] ?? null}
               selectedId={selectedId}
               onSelect={handleSelect}

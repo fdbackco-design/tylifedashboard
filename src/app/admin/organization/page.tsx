@@ -883,6 +883,7 @@ export default async function OrganizationPage({
             return out;
           })()}
           showGoalUnitsLine={true}
+          showGoalProgressBar={true}
           showCommissionMetrics={false}
         />
       </div>
