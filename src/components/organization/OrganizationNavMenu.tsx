@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 const MENU_ITEMS = [
   { href: '/organization', label: '홈' },
   { href: '/organization/notice', label: '공지사항' },
+  { href: '/organization/code-request', label: '영업자 코드 발급' },
 ] as const;
 
 export default function OrganizationNavMenu() {

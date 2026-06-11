@@ -10,6 +10,7 @@ export const metadata: Metadata = {
 const NAV_ITEMS = [
   { href: '/admin', label: '대시보드' },
   { href: '/admin/account-issue', label: '계정 발급' },
+  { href: '/admin/newcode', label: '영업자 코드 발급' },
   { href: '/admin/contracts', label: '계약 관리' },
   { href: '/admin/organization', label: '조직도' },
   { href: '/admin/settlement', label: '정산 현황' },
