@@ -19,6 +19,7 @@ interface PageProps {
   searchParams: Promise<{
     year_month?: string;
     member_id?: string;
+    debug?: string;
   }>;
 }
 
@@ -54,6 +55,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
   const params = await searchParams;
   const yearMonth = params.year_month;
   const memberId = params.member_id;
+  const debugFlag = String(params.debug ?? '') === '1';
 
   if (!yearMonth || !memberId) {
     return (
@@ -495,12 +497,52 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     subtotal: number;
   }>;
 
+  // Rollup 후보 멤버 집합 구성.
+  //
+  // 정산 본체(`calcRollupItemsWithLeaderPromotion`)는
+  //   1) root 의 직접 자식 별로 그 subtree 전체 계약을 모아 rollup_items 의 from_member 로 저장하고,
+  //   2) "본사 직속으로 재배치된 승격자"의 승격 전 계약은 `previousLeaderByPromotedMemberId` 보강을
+  //      통해 rollup_items 에 별도 항목(=promoted 본인이 from_member) 으로 추가한다.
+  //
+  // 따라서 화면 후보는 다음을 모두 포함해야 한다:
+  //   - 현재 트리 기준 root subtree (parentByChild)
+  //   - rollup_items.from_member_id 자체 (현재 트리에서 root 밖에 있을 수도 있는 promoted 멤버)
+  //   - 그 from_member_id 의 자손 (parentByChild 기준, 현재 트리)
+  //
+  // root 본인은 직접 수당이므로 rollup 후보에서 제외.
+  const candidateMemberIds = new Set<string>();
+  for (const id of subtreeIds) {
+    if (id !== memberId) candidateMemberIds.add(id);
+  }
+  const childrenOfByParent = new Map<string, Set<string>>();
+  for (const [child, parent] of parentByChild.entries()) {
+    if (!parent) continue;
+    if (!childrenOfByParent.has(parent)) childrenOfByParent.set(parent, new Set());
+    childrenOfByParent.get(parent)!.add(child);
+  }
+  const addDescendantsTo = (startId: string, target: Set<string>) => {
+    const stack = [startId];
+    const seen = new Set<string>([startId]);
+    while (stack.length) {
+      const cur = stack.pop()!;
+      if (cur !== memberId) target.add(cur);
+      for (const ch of childrenOfByParent.get(cur) ?? []) {
+        if (seen.has(ch)) continue;
+        seen.add(ch);
+        stack.push(ch);
+      }
+    }
+  };
+  for (const it of rollupItems) {
+    const fid = it.from_member_id;
+    if (!fid || fid === memberId) continue;
+    candidateMemberIds.add(fid);
+    addDescendantsTo(fid, candidateMemberIds);
+  }
+
   // 누락된 contract id 들을 한 번에 보강 조회
-  // Rollup 후보는 root subtree 내 모든 멤버(본인 제외)의 direct_contracts 이므로,
-  // 그 범위까지 모두 prefetch 한다.
   const neededContractIds = new Set<string>();
-  for (const subMemberId of subtreeIds) {
-    if (subMemberId === memberId) continue;
+  for (const subMemberId of candidateMemberIds) {
     const cs = calcDirectContractsByMember.get(subMemberId) ?? [];
     for (const c of cs) {
       if (!contractMetaById.has(c.contract_id)) neededContractIds.add(c.contract_id);
@@ -577,29 +619,71 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     return rate;
   };
 
-  // 계약 단가 산정 시 사용할 "계약 시점의 historic rank".
-  //
-  // 정산 본체(`calcRollupItemsWithLeaderPromotion` + `commissionPerUnitForDirectContract`)는
-  // 계약 단위로 leader_rank_effective_at / promotion threshold 를 보고 단가를 분기한다.
-  // 화면도 같은 기준을 따라야 한다:
-  //   - effective member 가 현재는 리더라도, leader_rank_effective_at 이전(joinYmd < eff) 계약은
-  //     "그 시점에는 영업사원" 이었으므로 lower rank='영업사원' 로 보고 정책 단가를 계산한다.
-  //   - 그렇지 않으면 현재 직급 그대로 사용.
-  //
-  // 이 처리가 없으면 `리더 - 리더 = 0` 으로 빠져 산하 리더 승격 전 계약이 화면에서 누락된다.
-  const getHistoricRankForPolicy = (effectiveMemberId: string, joinYmd: string): string => {
+  // root 와 effective member 사이 path 에서 가장 가까운 "리더" 노드를 찾는다 (effective 자신 포함).
+  // path 가 root 에 닿지 않더라도(예: 본사 직속으로 재배치된 promoted 멤버) 만나는 첫 리더를 반환.
+  type NearestLeaderInfo = {
+    id: string;
+    rank: string;
+    leader_rank_effective_at: string | null;
+  };
+  const findNearestLeaderBetweenRootAndEffective = (
+    effectiveMemberId: string,
+  ): NearestLeaderInfo | null => {
+    if (!effectiveMemberId) return null;
+    const visited = new Set<string>();
+    let cur: string | null = effectiveMemberId;
+    while (cur && !visited.has(cur)) {
+      visited.add(cur);
+      if (cur === memberId) return null;
+      if ((rankById.get(cur) ?? '') === '리더') {
+        return {
+          id: cur,
+          rank: rankById.get(cur) ?? '',
+          leader_rank_effective_at: leaderEffectiveAtById.get(cur) ?? null,
+        };
+      }
+      cur = parentByChild.get(cur) ?? null;
+    }
+    return null;
+  };
+
+  // 정산 본체 정합성 판정
+  //   isBeforeDownlineLeaderPromotion === true  → root 의 Rollup 내역에 포함
+  //   isBeforeDownlineLeaderPromotion === false → 그 산하 리더 본인의 Rollup 내역으로 흡수, root 에서 제외
+  // - root rank 가 '리더' 이고 path 에 리더가 있을 때만 게이트 동작.
+  // - leader_rank_effective_at 이 없으면 보수적으로 포함(true).
+  // - 게이트와 별개로, 단가 산정 시 effective member 가 현재 리더이지만
+  //   join_date < leader_rank_effective_at 이라면 "그 시점에는 영업사원" 이므로 lower rank='영업사원'.
+  const evaluateRollupGate = (
+    effectiveMemberId: string,
+    joinYmd: string,
+  ): {
+    nearest: NearestLeaderInfo | null;
+    isBeforeDownlineLeaderPromotion: boolean;
+    historicLowerRank: string;
+  } => {
     const currentRank = rankById.get(effectiveMemberId) ?? '';
-    if (currentRank !== '리더') return currentRank;
-    const eff = leaderEffectiveAtById.get(effectiveMemberId) ?? null;
-    if (!eff) return currentRank;
-    const effYmd = String(eff).slice(0, 10);
-    if (!effYmd || !joinYmd) return currentRank;
-    if (joinYmd < effYmd) return '영업사원';
-    return currentRank;
+    const nearest = findNearestLeaderBetweenRootAndEffective(effectiveMemberId);
+
+    let isBefore = true;
+    if (rootRank === '리더' && nearest && joinYmd) {
+      const eff = nearest.leader_rank_effective_at;
+      const effYmd = eff ? String(eff).slice(0, 10) : '';
+      if (effYmd) isBefore = joinYmd < effYmd;
+    }
+
+    let historicLowerRank = currentRank;
+    if (currentRank === '리더') {
+      const eff = leaderEffectiveAtById.get(effectiveMemberId) ?? null;
+      const effYmd = eff ? String(eff).slice(0, 10) : '';
+      if (effYmd && joinYmd && joinYmd < effYmd) historicLowerRank = '영업사원';
+    }
+
+    return { nearest, isBeforeDownlineLeaderPromotion: isBefore, historicLowerRank };
   };
 
   // root 의 직접 자식 path 매핑: subtree 내 임의 멤버에서 root 까지 거슬러 올라갈 때 마지막으로 통과하는
-  // (=root 직전) 노드. 이 값을 "Rollup 귀속 가지" 컬럼에 표시한다.
+  // (=root 직전) 노드. 이 값을 "Rollup 귀속 가지" 컬럼에 표시한다. 트리 밖 promoted 멤버는 자기 자신.
   const rootDirectChildById = new Map<string, string>();
   for (const mid of subtreeIds) {
     if (mid === memberId) continue;
@@ -613,46 +697,56 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     }
     if (cur === memberId && last) rootDirectChildById.set(mid, last);
   }
-  const rollupItemByFromId = new Map<string, (typeof rollupItems)[number]>();
-  for (const it of rollupItems) rollupItemByFromId.set(it.from_member_id, it);
+  // rollup_items 의 from_member 자체(및 그 자손)는 root 의 "직속 자식" 으로 간주해 매핑한다.
+  // 본사 직속으로 재배치된 promoted 멤버의 보강 항목도 동일하게 처리.
+  for (const it of rollupItems) {
+    const fid = it.from_member_id;
+    if (!fid || fid === memberId) continue;
+    if (!rootDirectChildById.has(fid)) rootDirectChildById.set(fid, fid);
+    const desc = new Set<string>();
+    addDescendantsTo(fid, desc);
+    for (const d of desc) {
+      if (!rootDirectChildById.has(d)) rootDirectChildById.set(d, fid);
+    }
+  }
+  const debugLogEnabled = debugFlag || process.env.NODE_ENV !== 'production';
 
-  const isDev = process.env.NODE_ENV == 'production';
-
-  // root subtree 내 모든 멤버(본인 제외) 의 direct_contracts 를 평탄화해 rollup 후보로 수집한다.
+  // 후보 멤버의 direct_contracts 를 평탄화해 rollup 후보 계약을 수집한다.
   const rollupRows: RollupRowOut[] = [];
-  for (const subMemberId of subtreeIds) {
-    if (subMemberId === memberId) continue;
+  for (const subMemberId of candidateMemberIds) {
     const directs = calcDirectContractsByMember.get(subMemberId) ?? [];
     for (const c of directs) {
       const meta = contractMetaById.get(c.contract_id) ?? null;
       const unit = meta?.unit_count ?? c.unit_count ?? 0;
       const effectiveMemberId = meta?.effective_sales_member_id ?? subMemberId;
-      const effectiveRank = rankById.get(effectiveMemberId) ?? '';
-      const historicRank = getHistoricRankForPolicy(effectiveMemberId, meta?.join_ymd ?? '');
-      const policyRate = getPolicyRateForRank(historicRank);
+      const effectiveMemberCurrentRank = rankById.get(effectiveMemberId) ?? '';
+      const contractDate = meta?.join_ymd ?? '';
 
-      const gateOk = isDownlineEligibleForLeaderGate(effectiveMemberId, meta?.join_ymd ?? '');
-      const includeRow = gateOk && policyRate > 0;
+      const { nearest, isBeforeDownlineLeaderPromotion, historicLowerRank } = evaluateRollupGate(
+        effectiveMemberId,
+        contractDate,
+      );
+      const policyRate = getPolicyRateForRank(historicLowerRank);
+      const includeRow = isBeforeDownlineLeaderPromotion && policyRate > 0;
 
       const rootChildId =
         rootDirectChildById.get(effectiveMemberId) ?? rootDirectChildById.get(subMemberId) ?? subMemberId;
-      const matchedFromItem = rollupItemByFromId.get(rootChildId) ?? null;
 
-      if (isDev) {
+      if (debugLogEnabled) {
         // eslint-disable-next-line no-console
-        console.log('[rollup-detail-rate]', {
+        console.log('[rollup-detail-include-check]', {
           rootMemberId: memberId,
-          rootRank: rootRankForRollup,
-          subtreeOwnerMemberId: subMemberId,
+          rootRank,
           contractId: c.contract_id,
           effectiveSalesMemberId: effectiveMemberId,
-          contractEffectiveRank: effectiveRank,
-          historicRankForPolicy: historicRank,
-          rootDirectChildId: rootChildId,
-          rootDirectChildRank: rankById.get(rootChildId) ?? null,
+          effectiveMemberCurrentRank,
+          historicLowerRank,
+          nearestLeaderId: nearest?.id ?? null,
+          nearestLeaderRank: nearest?.rank ?? null,
+          nearestLeaderEffectiveAt: nearest?.leader_rank_effective_at ?? null,
+          contractDate,
+          isBeforeDownlineLeaderPromotion,
           policyRate,
-          fallbackAvgRate: matchedFromItem?.rollup_amount_per_unit ?? null,
-          gateOk,
           includeRow,
         });
       }
