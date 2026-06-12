@@ -56,6 +56,18 @@ function statusBadgeClass(status: string): string {
   }
 }
 
+/**
+ * 사용자(영업자) 화면 표시용 상태 레이블.
+ *   DB '시트등록완료' → 화면 '처리중'
+ *   그 외 status 는 그대로 노출.
+ *
+ * 관리자 화면(/admin/newcode)은 기존 UX 유지(시트등록완료 그대로 표기).
+ */
+function statusDisplayLabel(status: string): string {
+  if (status === '시트등록완료') return '처리중';
+  return status;
+}
+
 export default function CodeRequestClient({
   initialItems,
   canSubmit,
@@ -417,7 +429,7 @@ export default function CodeRequestClient({
                               it.status,
                             )}`}
                           >
-                            {it.status}
+                            {statusDisplayLabel(it.status)}
                           </span>
                         </td>
                         <td className="whitespace-nowrap px-3 py-2 text-right">

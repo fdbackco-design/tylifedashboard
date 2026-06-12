@@ -30,6 +30,7 @@ import {
   preIssueUnmappedAccount,
 } from '@/lib/account-issue/issue';
 import { normalizePhone } from '@/lib/account-issue/normalize';
+import { notifySalesCodeCompletedForAccount } from '@/lib/sales-code/notify';
 
 export type SheetSyncRowResult = {
   rowNumber: number;
@@ -331,6 +332,22 @@ export async function syncAccountIssueFromGoogleSheet(
         loginId: accountValue,
         userId: pre.user_id,
       });
+      // 영업자 코드 발급 신청자 알림: 같은 이름+전화번호의 sales_code_requests 에 push.
+      // 매칭이 없으면 helper 가 조용히 종료한다.
+      try {
+        await notifySalesCodeCompletedForAccount(adminDb, {
+          name,
+          phone: phoneRaw,
+          matchedAccountId: pre.user_id,
+        });
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error('[sales-code-notification:error]', {
+          requestId: null,
+          stage: 'notify_completed_pre_issued_invoke',
+          message: e instanceof Error ? e.message : String(e),
+        });
+      }
       continue;
     }
 
@@ -446,6 +463,21 @@ export async function syncAccountIssueFromGoogleSheet(
       userId: issued.user_id,
       existed: issued.existed,
     });
+    // 영업자 코드 발급 신청자 알림: 같은 이름+전화번호의 sales_code_requests 에 push.
+    try {
+      await notifySalesCodeCompletedForAccount(adminDb, {
+        name,
+        phone: phoneRaw,
+        matchedAccountId: issued.user_id,
+      });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[sales-code-notification:error]', {
+        requestId: null,
+        stage: 'notify_completed_issued_invoke',
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
   }
 
   return out;

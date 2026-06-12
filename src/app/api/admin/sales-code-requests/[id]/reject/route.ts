@@ -17,6 +17,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdminAuthed } from '@/lib/admin-auth';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
+import { notifySalesCodeRejected } from '@/lib/sales-code/notify';
 
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const MAX_REASON_LEN = 1000;
@@ -99,5 +100,19 @@ export async function POST(
       { status: 409 },
     );
   }
+
+  // 반려 알림 발송 (rejected_notified_at IS NULL 일 때만 1회).
+  // 푸시 발송 실패가 reject 응답 자체를 막지 않도록 try/catch 로 격리한다.
+  try {
+    await notifySalesCodeRejected(db, id);
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[sales-code-notification:error]', {
+      requestId: id,
+      stage: 'notify_rejected_invoke',
+      message: e instanceof Error ? e.message : String(e),
+    });
+  }
+
   return NextResponse.json({ item: data });
 }
