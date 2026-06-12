@@ -709,7 +709,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
       if (!rootDirectChildById.has(d)) rootDirectChildById.set(d, fid);
     }
   }
-  const debugLogEnabled = debugFlag || process.env.NODE_ENV !== 'production';
+  const debugLogEnabled = debugFlag || process.env.NODE_ENV == 'production';
 
   // 후보 멤버의 direct_contracts 를 평탄화해 rollup 후보 계약을 수집한다.
   const rollupRows: RollupRowOut[] = [];
