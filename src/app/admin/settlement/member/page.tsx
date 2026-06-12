@@ -367,6 +367,222 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
   const rootIncentiveWon = Number(rootMs?.incentive_amount ?? 0) || 0;
   const rootTotalWon = Number(rootMs?.total_amount ?? 0) || 0;
 
+  // ── Rollup 수당 발생 계약 내역 ─────────────────────────────
+  // SSOT: monthly_settlements[root].calculation_detail.rollup_items (from_member 단위)
+  // 화면 표시는 계약 단위 — RollupItem 자체에는 contract_id 가 없으므로
+  // 각 from_member 의 calculation_detail.direct_contracts 의 contract_id 를 가져와
+  // (계약 unit_count × rollup_amount_per_unit) 로 분배한다.
+  // 분배 합은 from_member.subtotal 과 동일해야 하며 (rate × Σ unit), 계약 정보가 빠진
+  // 경우(=윈도우 밖) 에는 fallback 으로 contract_id 만 표시한다.
+  type CalcDetailRow = { member_id: string | null; calculation_detail: SettlementCalculationDetail | null };
+  const allCalcRows = ((settlementsRes.data ?? []) as CalcDetailRow[]).filter(
+    (r) => r.calculation_detail != null,
+  );
+  const rootCalcDetail =
+    allCalcRows.find((r) => String(r.member_id ?? '') === memberId)?.calculation_detail ?? null;
+  const calcDirectContractsByMember = new Map<string, Array<{ contract_id: string; unit_count: number; subtotal: number }>>();
+  for (const r of allCalcRows) {
+    const mid = String(r.member_id ?? '');
+    if (!mid) continue;
+    const items: Array<{ contract_id: string; unit_count: number; subtotal: number }> = [];
+    for (const dc of r.calculation_detail?.direct_contracts ?? []) {
+      const cid = String((dc as any).contract_id ?? '');
+      if (!cid) continue;
+      items.push({
+        contract_id: cid,
+        unit_count: Number((dc as any).unit_count ?? 0) || 0,
+        subtotal: Number((dc as any).subtotal ?? 0) || 0,
+      });
+    }
+    calcDirectContractsByMember.set(mid, items);
+  }
+
+  // contractRowsRes 의 raw 계약 데이터를 contract_id → 기본 정보 맵으로 변환 (v2 정적 필터 거치지 않음)
+  type RawContractRow = {
+    id: string;
+    contract_code: string;
+    join_date: string | null;
+    item_name?: string | null;
+    sales_member_id: string;
+    customer_id: string | null;
+    customers?: { name?: string | null } | null;
+    happy_call_at?: string | null;
+    happycall_result?: string | null;
+    invoice_no?: string | null;
+    memo?: string | null;
+    rental_request_no?: string | null;
+    status?: string | null;
+    is_cancelled?: boolean | null;
+    settlement_sales_member_id?: string | null;
+  };
+  const contractMetaById = new Map<
+    string,
+    {
+      contract_code: string;
+      customer_name: string;
+      join_ymd: string;
+      happycall_ymd: string;
+      item_name: string | null;
+      unit_count: number;
+      raw_sales_member_id: string;
+      override_sales_member_id: string | null;
+      effective_sales_member_id: string;
+      origin: string;
+      display_status: string;
+    }
+  >();
+  for (const r of (contractRowsRes.data ?? []) as unknown as Array<RawContractRow & { unit_count?: number | null }>) {
+    const id = r.id;
+    if (!id) continue;
+    const rawSalesMemberId = String(r.sales_member_id ?? '');
+    const overrideId = (r.settlement_sales_member_id ?? null) as string | null;
+    const effectiveSalesMemberId = (overrideId && overrideId.trim() !== '' ? overrideId : rawSalesMemberId) as string;
+    contractMetaById.set(id, {
+      contract_code: String(r.contract_code ?? ''),
+      customer_name: String(r.customers?.name ?? '-'),
+      join_ymd: String(r.join_date ?? '').slice(0, 10),
+      happycall_ymd: happycallYmdSeoul(r.happy_call_at ?? null),
+      item_name: (r.item_name ?? null) as string | null,
+      unit_count: Number((r as any).unit_count ?? 0) || 0,
+      raw_sales_member_id: rawSalesMemberId,
+      override_sales_member_id: overrideId,
+      effective_sales_member_id: effectiveSalesMemberId,
+      origin: attributedSalesMemberId({
+        customer_id: (r.customer_id ?? null) as string | null,
+        sales_member_id: rawSalesMemberId,
+      }),
+      display_status: getContractDisplayStatus({
+        status: String(r.status ?? ''),
+        rental_request_no: (r.rental_request_no ?? null) as string | null,
+        invoice_no: (r.invoice_no ?? null) as string | null,
+        memo: (r.memo ?? null) as string | null,
+      }),
+    });
+  }
+
+  // join_date 윈도우 밖의 rollup 대상 계약이 있으면 추가로 조회해 보강
+  type RollupRowOut = {
+    contract_id: string;
+    contract_code: string;
+    customer_name: string;
+    join_ymd: string;
+    happycall_ymd: string;
+    item_name: string | null;
+    unit_count: number;
+    raw_sales_member_id: string;
+    override_sales_member_id: string | null;
+    effective_sales_member_id: string;
+    origin: string;
+    from_member_id: string;
+    from_member_name: string;
+    from_rank: string;
+    rollup_amount_per_unit: number;
+    rollup_amount: number;
+    display_status: string;
+    missingMeta: boolean;
+  };
+
+  const rollupItems = (rootCalcDetail?.rollup_items ?? []) as Array<{
+    from_member_id: string;
+    from_member_name: string;
+    from_rank: string;
+    unit_count: number;
+    rollup_amount_per_unit: number;
+    subtotal: number;
+  }>;
+
+  // 누락된 contract id 들을 한 번에 보강 조회
+  const neededContractIds = new Set<string>();
+  for (const it of rollupItems) {
+    const cs = calcDirectContractsByMember.get(it.from_member_id) ?? [];
+    for (const c of cs) {
+      if (!contractMetaById.has(c.contract_id)) neededContractIds.add(c.contract_id);
+    }
+  }
+  if (neededContractIds.size > 0) {
+    const ids = [...neededContractIds];
+    // Supabase in() 의 인자 수 제한을 고려하여 청크 처리
+    const chunks: string[][] = [];
+    for (let i = 0; i < ids.length; i += 500) chunks.push(ids.slice(i, i + 500));
+    for (const cidChunk of chunks) {
+      const { data } = await db
+        .from('contracts')
+        .select(
+          'id, contract_code, join_date, status, unit_count, item_name, sales_member_id, customer_id, settlement_sales_member_id, rental_request_no, invoice_no, memo, happy_call_at, customers(name)',
+        )
+        .in('id', cidChunk);
+      for (const r of (data ?? []) as unknown as Array<RawContractRow & { unit_count?: number | null }>) {
+        const id = r.id;
+        if (!id || contractMetaById.has(id)) continue;
+        const rawSalesMemberId = String(r.sales_member_id ?? '');
+        const overrideId = (r.settlement_sales_member_id ?? null) as string | null;
+        const effectiveSalesMemberId = (overrideId && overrideId.trim() !== '' ? overrideId : rawSalesMemberId) as string;
+        contractMetaById.set(id, {
+          contract_code: String(r.contract_code ?? ''),
+          customer_name: String(r.customers?.name ?? '-'),
+          join_ymd: String(r.join_date ?? '').slice(0, 10),
+          happycall_ymd: happycallYmdSeoul(r.happy_call_at ?? null),
+          item_name: (r.item_name ?? null) as string | null,
+          unit_count: Number((r as any).unit_count ?? 0) || 0,
+          raw_sales_member_id: rawSalesMemberId,
+          override_sales_member_id: overrideId,
+          effective_sales_member_id: effectiveSalesMemberId,
+          origin: attributedSalesMemberId({
+            customer_id: (r.customer_id ?? null) as string | null,
+            sales_member_id: rawSalesMemberId,
+          }),
+          display_status: getContractDisplayStatus({
+            status: String(r.status ?? ''),
+            rental_request_no: (r.rental_request_no ?? null) as string | null,
+            invoice_no: (r.invoice_no ?? null) as string | null,
+            memo: (r.memo ?? null) as string | null,
+          }),
+        });
+      }
+    }
+  }
+
+  // 계약 단위로 분해
+  const rollupRows: RollupRowOut[] = [];
+  for (const it of rollupItems) {
+    const rate = Number(it.rollup_amount_per_unit ?? 0) || 0;
+    const directs = calcDirectContractsByMember.get(it.from_member_id) ?? [];
+    for (const c of directs) {
+      const meta = contractMetaById.get(c.contract_id) ?? null;
+      const unit = meta?.unit_count ?? c.unit_count ?? 0;
+      rollupRows.push({
+        contract_id: c.contract_id,
+        contract_code: meta?.contract_code ?? c.contract_id,
+        customer_name: meta?.customer_name ?? '-',
+        join_ymd: meta?.join_ymd ?? '',
+        happycall_ymd: meta?.happycall_ymd ?? '',
+        item_name: meta?.item_name ?? null,
+        unit_count: unit,
+        raw_sales_member_id: meta?.raw_sales_member_id ?? it.from_member_id,
+        override_sales_member_id: meta?.override_sales_member_id ?? null,
+        effective_sales_member_id: meta?.effective_sales_member_id ?? it.from_member_id,
+        origin: meta?.origin ?? it.from_member_id,
+        from_member_id: it.from_member_id,
+        from_member_name: it.from_member_name ?? (nameById.get(it.from_member_id) ?? it.from_member_id),
+        from_rank: String(it.from_rank ?? ''),
+        rollup_amount_per_unit: rate,
+        rollup_amount: Math.max(0, Math.round(unit * rate)),
+        display_status: meta?.display_status ?? '-',
+        missingMeta: !meta,
+      });
+    }
+  }
+  rollupRows.sort((a, b) => (b.join_ymd ?? '').localeCompare(a.join_ymd ?? ''));
+
+  const rollupItemsSubtotalSum = rollupItems.reduce((s, it) => s + (Number(it.subtotal ?? 0) || 0), 0);
+  const rollupContractCount = rollupRows.length;
+  const rollupUnitSum = rollupRows.reduce((s, r) => s + Number(r.unit_count ?? 0), 0);
+  const rollupAmountSum = rollupRows.reduce((s, r) => s + Number(r.rollup_amount ?? 0), 0);
+
+  // 합계 검증: detail rollup 합 vs monthly_settlements.rollup_commission
+  const rollupMismatch = Math.round(rollupItemsSubtotalSum) !== Math.round(rootRollupWon);
+  const rollupContractDistributionMismatch = Math.round(rollupAmountSum) !== Math.round(rollupItemsSubtotalSum);
+
   const displayName = String(member.name ?? '').replace(/^\[고객\]\s*/, '');
 
   // 정산 담당자 표시 도우미
@@ -396,12 +612,28 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
       </div>
 
       {/* 합계 카드 */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
         <SummaryCard label="직접구좌 수" value={`${directRows.length.toLocaleString('ko-KR')}건 / ${directUnitSum.toLocaleString('ko-KR')}구좌`} />
         <SummaryCard label="직접구좌 정산금 합계" value={formatWon(directWonSum)} accent="emerald" />
         <SummaryCard label="산하구좌 수" value={`${downlineRows.length.toLocaleString('ko-KR')}건 / ${downlineUnitSum.toLocaleString('ko-KR')}구좌`} />
-        <SummaryCard label="산하구좌 반영 금액 (rollup)" value={formatWon(rootRollupWon)} accent="amber" hint={`산하 직접수당 합: ${formatWon(downlineMemberDirectWonSum)}`} />
-        <SummaryCard label="전체 정산금 합계" value={formatWon(rootTotalWon)} accent="indigo" hint={rootMs ? `기본 ${formatWon(rootMs.base_commission ?? 0)} + 산하 ${formatWon(rootRollupWon)} + 보너스 ${formatWon(rootIncentiveWon)}` : '월정산 결과 없음'} />
+        <SummaryCard
+          label="Rollup 대상"
+          value={`${rollupContractCount.toLocaleString('ko-KR')}건 / ${rollupUnitSum.toLocaleString('ko-KR')}구좌`}
+          accent="amber"
+          hint={`from_member ${rollupItems.length.toLocaleString('ko-KR')}명`}
+        />
+        <SummaryCard
+          label="Rollup 수당 합계"
+          value={formatWon(rootRollupWon)}
+          accent="amber"
+          hint={`상세 분배 합 ${formatWon(rollupAmountSum)} / detail subtotal 합 ${formatWon(rollupItemsSubtotalSum)}`}
+        />
+        <SummaryCard
+          label="전체 정산금 합계"
+          value={formatWon(rootTotalWon)}
+          accent="indigo"
+          hint={rootMs ? `기본 ${formatWon(rootMs.base_commission ?? 0)} + 산하 ${formatWon(rootRollupWon)} + 보너스 ${formatWon(rootIncentiveWon)}` : '월정산 결과 없음'}
+        />
       </div>
 
       {/* 직접구좌 섹션 */}
@@ -483,7 +715,122 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         </div>
         <p className="px-4 py-3 text-xs text-gray-500 border-t border-gray-100">
           ※ "산하 담당자 정산금(직접)" 은 그 계약을 직접 담당한 산하 멤버의 직접 수당입니다.
-          본인({displayName})에게 반영되는 금액은 위 합계 카드의 "산하구좌 반영 금액 (rollup)" 으로 표시됩니다.
+          본인({displayName})에게 반영되는 금액은 아래 "Rollup 수당 발생 계약 내역" 으로 표시됩니다.
+        </p>
+      </div>
+
+      {/* Rollup 수당 발생 계약 내역 */}
+      <div className="mt-10" />
+      <SectionTitle
+        title="Rollup 수당 발생 계약 내역"
+        countLabel={`${rollupContractCount.toLocaleString('ko-KR')}건 · ${rollupUnitSum.toLocaleString('ko-KR')}구좌 · 분배 합 ${formatWon(rollupAmountSum)} · 정산 rollup_commission ${formatWon(rootRollupWon)}`}
+      />
+
+      {/* 합계 검증 경고 */}
+      {(rollupMismatch || rollupContractDistributionMismatch) && (
+        <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+          {rollupMismatch && (
+            <p>
+              ⚠ 상세 rollup 합계({formatWon(rollupItemsSubtotalSum)})와 정산
+              rollup_commission({formatWon(rootRollupWon)})이 일치하지 않습니다. 정산 재계산 또는
+              calculation_detail 저장 구조를 확인해주세요.
+            </p>
+          )}
+          {rollupContractDistributionMismatch && (
+            <p className={rollupMismatch ? 'mt-1' : ''}>
+              ⚠ 계약 단위로 분배한 rollup 합({formatWon(rollupAmountSum)})이 detail subtotal 합(
+              {formatWon(rollupItemsSubtotalSum)})과 일치하지 않습니다. 일부 계약 정보가 누락되었거나
+              from_member 단위 unit_count 와 direct_contracts unit_count 가 다를 수 있습니다.
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                {[
+                  '계약코드', '고객명', '가입일', '해피콜일', '물품명', '구좌',
+                  '실제 정산 담당자', '원본 담당자', '정산 override',
+                  'Rollup 대상 산하', 'Rollup 단가', 'Rollup 금액',
+                ].map((h) => (
+                  <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-600 whitespace-nowrap">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {rollupRows.length === 0 && (
+                <tr>
+                  <td colSpan={12} className="px-6 py-10 text-center text-sm text-gray-500">
+                    Rollup 수당이 발생한 계약이 없습니다.
+                  </td>
+                </tr>
+              )}
+              {rollupRows.map((r) => (
+                <tr key={`${r.from_member_id}__${r.contract_id}`} className="hover:bg-gray-50">
+                  <td className="px-3 py-2 font-mono text-xs text-gray-700 whitespace-nowrap">
+                    {r.contract_code}
+                    {r.missingMeta && (
+                      <span className="ml-1 inline-block px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 text-[10px] align-middle">
+                        meta?
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap">{r.customer_name}</td>
+                  <td className="px-3 py-2 tabular-nums text-gray-600 whitespace-nowrap">{r.join_ymd || '-'}</td>
+                  <td className="px-3 py-2 tabular-nums text-gray-600 whitespace-nowrap">{r.happycall_ymd || '-'}</td>
+                  <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">{r.item_name ?? '-'}</td>
+                  <td className="px-3 py-2 tabular-nums text-right whitespace-nowrap">{Number(r.unit_count ?? 0).toLocaleString('ko-KR')}</td>
+                  <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">
+                    {labelOfMember(r.effective_sales_member_id)}
+                    {r.override_sales_member_id && (
+                      <span className="ml-1 inline-block px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] align-middle">
+                        override
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{labelOfMember(r.raw_sales_member_id)}</td>
+                  <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">
+                    {r.override_sales_member_id ? labelOfMember(r.override_sales_member_id) : '-'}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">
+                    {labelOfMember(r.from_member_id)}
+                    {r.from_rank && (
+                      <span className="ml-1 text-[10px] text-gray-400 align-middle">({r.from_rank})</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 tabular-nums text-right whitespace-nowrap text-xs text-gray-600">
+                    {formatWon(r.rollup_amount_per_unit)} <span className="text-gray-400">/구좌</span>
+                  </td>
+                  <td className="px-3 py-2 tabular-nums text-right whitespace-nowrap font-semibold text-amber-700">
+                    {formatWon(r.rollup_amount)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            {rollupRows.length > 0 && (
+              <tfoot className="bg-gray-50">
+                <tr>
+                  <td colSpan={5} className="px-3 py-2 text-xs text-gray-600 text-right">합계</td>
+                  <td className="px-3 py-2 tabular-nums text-right text-xs">{rollupUnitSum.toLocaleString('ko-KR')}</td>
+                  <td colSpan={5} />
+                  <td className="px-3 py-2 tabular-nums text-right text-xs font-semibold text-amber-700">
+                    {formatWon(rollupAmountSum)}
+                  </td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+        <p className="px-4 py-3 text-xs text-gray-500 border-t border-gray-100">
+          ※ Rollup 수당 발생 계약 내역은 monthly_settlements.calculation_detail.rollup_items
+          (SSOT) 의 from_member 단위 금액을 그 멤버의 direct_contracts 의 unit_count × rollup
+          단가로 분배한 결과입니다. 분배 합과 detail subtotal 합이 일치하지 않으면 상단에 경고가
+          표시됩니다.
         </p>
       </div>
     </div>
