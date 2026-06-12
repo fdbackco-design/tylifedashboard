@@ -151,7 +151,14 @@ export default function NewCodeClient() {
     if (!confirm(`${ids.length}건을 구글 시트에 동기화합니다. 진행할까요?`)) return;
     setSyncing(true);
     try {
-      const res = await fetch('/api/admin/sales-code-requests/sync-sheet', {
+      // `/admin/newcode?debug=1` 로 진입한 경우 server 라우트에도 ?debug=1 을 전달해
+      // 정상 흐름 로그까지 출력하도록 한다.
+      const debugQs =
+        typeof window !== 'undefined' &&
+        new URLSearchParams(window.location.search).get('debug') === '1'
+          ? '?debug=1'
+          : '';
+      const res = await fetch(`/api/admin/sales-code-requests/sync-sheet${debugQs}`, {
         method: 'POST',
         credentials: 'include',
         cache: 'no-store',
@@ -159,8 +166,36 @@ export default function NewCodeClient() {
         body: JSON.stringify({ ids }),
       });
       const json = await res.json().catch(() => ({}));
+
+      // 시트 write 가 실패했거나 갱신 셀이 0 인 경우 (502 등): DB 상태는 그대로,
+      // 화면에도 실패 메시지만 표시한다 (성공으로 보이지 않게).
       if (!res.ok && res.status !== 207) {
-        setError(json?.error ?? '동기화 실패');
+        const errMsg =
+          json?.message || json?.error || `동기화 실패 (HTTP ${res.status})`;
+        const failedCount = Array.isArray(json?.failedRequestIds)
+          ? json.failedRequestIds.length
+          : ids.length;
+        setError(`${errMsg} · 실패 ${failedCount}건 (DB 상태 유지)`);
+        await load();
+        return;
+      }
+
+      // 부분 성공: 시트는 성공했지만 DB 마킹이 실패한 케이스.
+      // → 사용자에게 실패임을 명확히 알리고 syncMessage 에 시트 갱신 사실만 보조 안내한다.
+      if (res.status === 207) {
+        const errMsg = json?.message || json?.error || 'DB 마킹 실패';
+        const failedCount = Array.isArray(json?.failedRequestIds)
+          ? json.failedRequestIds.length
+          : ids.length;
+        setError(`${errMsg} · 실패 ${failedCount}건 (시트는 기록됨)`);
+        await load();
+        return;
+      }
+
+      // 완전 성공 분기: 응답에 ok:true 가 명시되어야 한다.
+      if (json?.ok !== true) {
+        setError(json?.message || json?.error || '동기화 실패: 응답 형식 오류');
+        await load();
         return;
       }
       const updatedCells = json?.updated?.updatedCells ?? 0;
@@ -171,7 +206,7 @@ export default function NewCodeClient() {
         (updatedRows
           ? ` · 시트 갱신 ${updatedRows}행/${updatedCells}셀${updatedRange ? ` (${updatedRange})` : ''}`
           : '');
-      setSyncMessage(json?.error ? `${msg} · ${json.error}` : msg);
+      setSyncMessage(msg);
       await load();
       setChecked({});
     } catch (e) {
