@@ -577,6 +577,27 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     return rate;
   };
 
+  // 계약 단가 산정 시 사용할 "계약 시점의 historic rank".
+  //
+  // 정산 본체(`calcRollupItemsWithLeaderPromotion` + `commissionPerUnitForDirectContract`)는
+  // 계약 단위로 leader_rank_effective_at / promotion threshold 를 보고 단가를 분기한다.
+  // 화면도 같은 기준을 따라야 한다:
+  //   - effective member 가 현재는 리더라도, leader_rank_effective_at 이전(joinYmd < eff) 계약은
+  //     "그 시점에는 영업사원" 이었으므로 lower rank='영업사원' 로 보고 정책 단가를 계산한다.
+  //   - 그렇지 않으면 현재 직급 그대로 사용.
+  //
+  // 이 처리가 없으면 `리더 - 리더 = 0` 으로 빠져 산하 리더 승격 전 계약이 화면에서 누락된다.
+  const getHistoricRankForPolicy = (effectiveMemberId: string, joinYmd: string): string => {
+    const currentRank = rankById.get(effectiveMemberId) ?? '';
+    if (currentRank !== '리더') return currentRank;
+    const eff = leaderEffectiveAtById.get(effectiveMemberId) ?? null;
+    if (!eff) return currentRank;
+    const effYmd = String(eff).slice(0, 10);
+    if (!effYmd || !joinYmd) return currentRank;
+    if (joinYmd < effYmd) return '영업사원';
+    return currentRank;
+  };
+
   // root 의 직접 자식 path 매핑: subtree 내 임의 멤버에서 root 까지 거슬러 올라갈 때 마지막으로 통과하는
   // (=root 직전) 노드. 이 값을 "Rollup 귀속 가지" 컬럼에 표시한다.
   const rootDirectChildById = new Map<string, string>();
@@ -607,7 +628,8 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
       const unit = meta?.unit_count ?? c.unit_count ?? 0;
       const effectiveMemberId = meta?.effective_sales_member_id ?? subMemberId;
       const effectiveRank = rankById.get(effectiveMemberId) ?? '';
-      const policyRate = getPolicyRateForRank(effectiveRank);
+      const historicRank = getHistoricRankForPolicy(effectiveMemberId, meta?.join_ymd ?? '');
+      const policyRate = getPolicyRateForRank(historicRank);
 
       const gateOk = isDownlineEligibleForLeaderGate(effectiveMemberId, meta?.join_ymd ?? '');
       const includeRow = gateOk && policyRate > 0;
@@ -625,6 +647,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
           contractId: c.contract_id,
           effectiveSalesMemberId: effectiveMemberId,
           contractEffectiveRank: effectiveRank,
+          historicRankForPolicy: historicRank,
           rootDirectChildId: rootChildId,
           rootDirectChildRank: rankById.get(rootChildId) ?? null,
           policyRate,
