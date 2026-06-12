@@ -233,7 +233,10 @@ export default function SettlementSalesMemberOverridePanel() {
         />
       )}
 
-      <OrgBasedAutoFixSection />
+      {/* 조직도 기준 정산 담당자 자동 보정 섹션은 현재 UI 에서 숨김.
+          관련 API(/api/admin/contracts/settlement-sales-member/preview, /bulk-apply) 와
+          OrgBasedAutoFixSection 컴포넌트는 그대로 보존되어 있어, 한 줄 주석 해제로 다시 노출 가능. */}
+      {/* <OrgBasedAutoFixSection /> */}
     </section>
   );
 }
