@@ -496,9 +496,12 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
   }>;
 
   // 누락된 contract id 들을 한 번에 보강 조회
+  // Rollup 후보는 root subtree 내 모든 멤버(본인 제외)의 direct_contracts 이므로,
+  // 그 범위까지 모두 prefetch 한다.
   const neededContractIds = new Set<string>();
-  for (const it of rollupItems) {
-    const cs = calcDirectContractsByMember.get(it.from_member_id) ?? [];
+  for (const subMemberId of subtreeIds) {
+    if (subMemberId === memberId) continue;
+    const cs = calcDirectContractsByMember.get(subMemberId) ?? [];
     for (const c of cs) {
       if (!contractMetaById.has(c.contract_id)) neededContractIds.add(c.contract_id);
     }
@@ -547,14 +550,14 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
   }
 
   // 정책 단가 계산용 컨텍스트
-  // - calculator.ts 의 calcRollupItemsWithLeaderPromotion 은 rollup_amount_per_unit 을
-  //   `subtotal / unit_count` 평균값으로 저장한다. 같은 from_member(=root 직접 자식)의 subtree 가
-  //   여러 단가의 계약을 섞으면 평균이 정책 단가와 달라진다(예: ₩33,333).
-  // - 또한 rollupItem.from_rank 는 root 직접 자식의 직급이라 산하 리더 페이지처럼 중간에 리더가
-  //   끼면 root rank=리더 / from_rank=리더 로 매핑되어 정책 단가가 0 으로 잡힌다.
-  //   실제로는 그 산하 리더의 자손(영업사원)의 계약일 수 있고, 정확한 단가는 root rank vs
-  //   "계약의 실제 정산 담당자(effectiveSalesMemberId)의 rank" 차이로 계산해야 한다.
-  // - 따라서 단가는 계약 단위로 (rootRank − effectiveSalesMemberRank) 정책 단가를 사용한다.
+  // - calculator.ts 의 calcRollupItemsWithLeaderPromotion 은 root 의 "직접 자식" 별로 subtree
+  //   전체 계약(자손 포함)의 합 subtotal 과 그 평균(subtotal/childUnits) 을 RollupItem 으로 저장한다.
+  //   따라서 RollupItem.from_member_id 는 root 의 직접 자식만, from_rank 는 그 자식의 직급이라
+  //   계약별 실제 담당자/단가 정보가 아니다.
+  // - 화면에서 계약별 정확한 Rollup 단가를 표시하려면 root subtree 내 모든 멤버의 direct_contracts
+  //   를 직접 모아 (rootRank − contractEffectiveSalesMemberRank) 정책 단가를 계약별로 산정해야 한다.
+  // - 정책 단가가 0 이면 그 계약은 본 root 에게 rollup 이 발생하지 않으므로 행에서 제외한다.
+  // - 산하 리더 승격 게이트(isDownlineEligibleForLeaderGate) 도 동일하게 적용해 정산 본체와 분류 기준을 맞춘다.
   // - 합계 검증은 그대로 monthly_settlements.rollup_commission 과 비교한다 (= SSOT).
   const settlementRules = ((rulesRes.data ?? []) as SettlementRule[]) ?? [];
   const policyRefDate = `${yearMonth}-25`;
@@ -574,37 +577,64 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     return rate;
   };
 
-  const isDev = process.env.NODE_ENV == 'production';
+  // root 의 직접 자식 path 매핑: subtree 내 임의 멤버에서 root 까지 거슬러 올라갈 때 마지막으로 통과하는
+  // (=root 직전) 노드. 이 값을 "Rollup 귀속 가지" 컬럼에 표시한다.
+  const rootDirectChildById = new Map<string, string>();
+  for (const mid of subtreeIds) {
+    if (mid === memberId) continue;
+    let cur: string | null = mid;
+    let last: string | null = null;
+    const seen = new Set<string>();
+    while (cur && cur !== memberId && !seen.has(cur)) {
+      seen.add(cur);
+      last = cur;
+      cur = parentByChild.get(cur) ?? null;
+    }
+    if (cur === memberId && last) rootDirectChildById.set(mid, last);
+  }
+  const rollupItemByFromId = new Map<string, (typeof rollupItems)[number]>();
+  for (const it of rollupItems) rollupItemByFromId.set(it.from_member_id, it);
 
-  // 계약 단위로 분해
+  const isDev = process.env.NODE_ENV !== 'production';
+
+  // root subtree 내 모든 멤버(본인 제외) 의 direct_contracts 를 평탄화해 rollup 후보로 수집한다.
   const rollupRows: RollupRowOut[] = [];
-  for (const it of rollupItems) {
-    const detailAvg = Number(it.rollup_amount_per_unit ?? 0) || 0;
-    const directs = calcDirectContractsByMember.get(it.from_member_id) ?? [];
+  for (const subMemberId of subtreeIds) {
+    if (subMemberId === memberId) continue;
+    const directs = calcDirectContractsByMember.get(subMemberId) ?? [];
     for (const c of directs) {
       const meta = contractMetaById.get(c.contract_id) ?? null;
       const unit = meta?.unit_count ?? c.unit_count ?? 0;
+      const effectiveMemberId = meta?.effective_sales_member_id ?? subMemberId;
+      const effectiveRank = rankById.get(effectiveMemberId) ?? '';
+      const policyRate = getPolicyRateForRank(effectiveRank);
 
-      // 계약의 실제 정산 담당자 직급으로 정책 단가 산정
-      const contractEffectiveMemberId = meta?.effective_sales_member_id ?? it.from_member_id;
-      const contractEffectiveRank = rankById.get(contractEffectiveMemberId) ?? String(it.from_rank ?? '');
-      const policyRate = getPolicyRateForRank(contractEffectiveRank);
-      const rate = policyRate > 0 ? policyRate : detailAvg;
+      const gateOk = isDownlineEligibleForLeaderGate(effectiveMemberId, meta?.join_ymd ?? '');
+      const includeRow = gateOk && policyRate > 0;
+
+      const rootChildId =
+        rootDirectChildById.get(effectiveMemberId) ?? rootDirectChildById.get(subMemberId) ?? subMemberId;
+      const matchedFromItem = rollupItemByFromId.get(rootChildId) ?? null;
 
       if (isDev) {
         // eslint-disable-next-line no-console
         console.log('[rollup-detail-rate]', {
           rootMemberId: memberId,
           rootRank: rootRankForRollup,
-          rollupFromMemberId: it.from_member_id,
-          rollupFromRank: it.from_rank,
+          subtreeOwnerMemberId: subMemberId,
           contractId: c.contract_id,
-          effectiveSalesMemberId: contractEffectiveMemberId,
-          contractEffectiveRank,
+          effectiveSalesMemberId: effectiveMemberId,
+          contractEffectiveRank: effectiveRank,
+          rootDirectChildId: rootChildId,
+          rootDirectChildRank: rankById.get(rootChildId) ?? null,
           policyRate,
-          fallbackAvgRate: detailAvg,
+          fallbackAvgRate: matchedFromItem?.rollup_amount_per_unit ?? null,
+          gateOk,
+          includeRow,
         });
       }
+
+      if (!includeRow) continue;
 
       rollupRows.push({
         contract_id: c.contract_id,
@@ -614,15 +644,15 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         happycall_ymd: meta?.happycall_ymd ?? '',
         item_name: meta?.item_name ?? null,
         unit_count: unit,
-        raw_sales_member_id: meta?.raw_sales_member_id ?? it.from_member_id,
+        raw_sales_member_id: meta?.raw_sales_member_id ?? subMemberId,
         override_sales_member_id: meta?.override_sales_member_id ?? null,
-        effective_sales_member_id: meta?.effective_sales_member_id ?? it.from_member_id,
-        origin: meta?.origin ?? it.from_member_id,
-        from_member_id: it.from_member_id,
-        from_member_name: it.from_member_name ?? (nameById.get(it.from_member_id) ?? it.from_member_id),
-        from_rank: String(it.from_rank ?? ''),
-        rollup_amount_per_unit: rate,
-        rollup_amount: Math.max(0, Math.round(unit * rate)),
+        effective_sales_member_id: effectiveMemberId,
+        origin: meta?.origin ?? subMemberId,
+        from_member_id: rootChildId,
+        from_member_name: nameById.get(rootChildId) ?? rootChildId,
+        from_rank: rankById.get(rootChildId) ?? '',
+        rollup_amount_per_unit: policyRate,
+        rollup_amount: Math.max(0, Math.round(unit * policyRate)),
         display_status: meta?.display_status ?? '-',
         missingMeta: !meta,
       });
