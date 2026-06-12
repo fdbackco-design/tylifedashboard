@@ -46,6 +46,12 @@ function jsonNoStore(body: unknown, init?: ResponseInit): NextResponse {
 
 const SPREADSHEET_ID = '1zqNSyKn6fnCE2ABiPOTUPfPPZiYLxtr4TCndlJ70v6o';
 const SHEET_NAME = '시트1';
+/**
+ * 영업자 코드 발급 시트의 실제 데이터 입력 시작 행.
+ * 시트 상단 1~3 행은 헤더/안내 영역이라 절대 덮어쓰지 않는다.
+ * 빈 행 탐색과 write target row 계산은 모두 이 상수를 기준으로 한다.
+ */
+const SALES_CODE_SHEET_START_ROW = 4;
 const FIXED_I_VALUE = '영업 사원';
 const FIXED_J_VALUE = '인천광역시 연수구 송도과학로 32 IT센터 S동 3003-3호';
 
@@ -163,28 +169,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  // 시트에서 B열/C열 전체를 읽어 "둘 다 빈" 첫 행 번호 결정
-  // 충분한 범위 확보를 위해 B1:C2000 까지 조회
-  let firstEmptyRow = 1;
+  // 시트에서 B열/C열의 데이터 영역을 읽어 "둘 다 빈" 첫 행 번호 결정.
+  // 입력은 SALES_CODE_SHEET_START_ROW(=4) 부터 시작하므로 그 위 영역(1~3행 헤더)은
+  // 절대 스캔/덮어쓰지 않는다. 충분한 범위 확보를 위해 B{start}:C2000 까지 조회.
+  let firstEmptyRow = SALES_CODE_SHEET_START_ROW;
   let scannedRows = 0;
-  const scannedRange = `${SHEET_REF}!B1:C2000`;
+  const scannedRange = `${SHEET_REF}!B${SALES_CODE_SHEET_START_ROW}:C2000`;
   try {
     const bc = await sheetsValuesGet(SPREADSHEET_ID, scannedRange);
     scannedRows = bc.length;
-    let found = -1;
-    for (let i = 0; i < bc.length; i++) {
-      const r = bc[i] ?? [];
+    const relativeIndex = bc.findIndex((row) => {
+      const r = row ?? [];
       const b = (r[0] ?? '').toString().trim();
       const c = (r[1] ?? '').toString().trim();
-      if (b === '' && c === '') {
-        found = i + 1;
-        break;
-      }
-    }
-    firstEmptyRow = found > 0 ? found : bc.length + 1;
-    if (firstEmptyRow < 1) firstEmptyRow = 1;
+      return b === '' && c === '';
+    });
+    firstEmptyRow =
+      relativeIndex >= 0
+        ? SALES_CODE_SHEET_START_ROW + relativeIndex
+        : SALES_CODE_SHEET_START_ROW + bc.length;
+    if (firstEmptyRow < SALES_CODE_SHEET_START_ROW) firstEmptyRow = SALES_CODE_SHEET_START_ROW;
     logVerbose('empty-row', {
       sheetName: SHEET_NAME,
+      startRow: SALES_CODE_SHEET_START_ROW,
       scannedRange,
       scannedRows,
       nextRow: firstEmptyRow,
