@@ -641,9 +641,13 @@ async function processItem(
     }
 
     // ── 3. 기존 계약 조회 (상세 fetch 스킵 여부 + 실적 경로 1회 스탬핑 유지) ──
+    // - settlement_deferred / deferred_reason 도 함께 가져온다: 신규 송장 등록 시
+    //   "invoice_missing 사유로 다음 달 이월 처리된 계약" 만 자동 해제하기 위함.
     const { data: existingContract } = await db
       .from('contracts')
-      .select('id, status, unit_count, invoice_no, rental_request_no, item_name, performance_path_json')
+      .select(
+        'id, status, unit_count, invoice_no, rental_request_no, item_name, performance_path_json, settlement_deferred, deferred_reason',
+      )
       .eq('contract_code', item.contract_code)
       .maybeSingle();
 
@@ -654,6 +658,8 @@ async function processItem(
       rental_request_no: string | null;
       item_name: string | null;
       performance_path_json: unknown;
+      settlement_deferred: boolean | null;
+      deferred_reason: string | null;
     } | null;
     const existingPathStamped = ec != null && ec.performance_path_json != null;
     const alreadyHasDetail =
@@ -789,15 +795,43 @@ async function processItem(
     // - 이미 기록되어 있으면 덮어쓰지 않는다(기존 시점 보존).
     // - upsert 가 PATCH 가 아니라 INSERT 충돌→UPDATE 흐름이므로, 이미 기록된 행은 같은 시점으로 다시 set
     //   되지 않도록 별도 SELECT 결과(ec.invoice_no 가 비어있는 경우)에서만 set 한다.
+    //
+    // 부가 처리: 송장 누락(deferred_reason='invoice_missing')으로 다음 달 이월 마킹된 계약은
+    // 송장이 새로 들어오는 시점에 이월 마킹을 자동으로 해제해 원래 정산월로 복귀시킨다.
+    // - 관리자가 다른 사유로 수동 이월시킨 경우(deferred_reason !== 'invoice_missing')는 보존.
+    // - settlement-eligibility-v2.evaluateContractEligibility 의 manualDeferToOther 분기 때문에
+    //   이월 마킹이 남아 있으면 송장이 충족되어도 그 정산월에서는 EXCLUDED 되어 들어가지 않는다.
+    let shouldClearInvoiceMissingDefer = false;
     {
       const newInvoiceNo = String(contractFinal.invoice_no ?? '').trim();
       const oldInvoiceNo = String(ec?.invoice_no ?? '').trim();
       if (newInvoiceNo !== '' && oldInvoiceNo === '') {
         contractFinal = { ...contractFinal, invoice_registered_at: new Date().toISOString() };
+        if (ec?.settlement_deferred === true && String(ec?.deferred_reason ?? '') === 'invoice_missing') {
+          shouldClearInvoiceMissingDefer = true;
+        }
       }
     }
 
     const { id: contractId, isNew } = await upsertContract(db, contractFinal);
+
+    if (shouldClearInvoiceMissingDefer) {
+      const { error: clearDefErr } = await db
+        .from('contracts')
+        .update({
+          settlement_deferred: false,
+          deferred_from_month: null,
+          deferred_to_month: null,
+          deferred_reason: null,
+          settlement_status: null,
+        })
+        .eq('id', contractId);
+      if (clearDefErr) {
+        // 동기화 자체는 멈추지 않고, 후속 정산 재계산이 다음 사이클에 보완하도록 한다.
+        // eslint-disable-next-line no-console
+        console.warn('[sync-service] 송장 신규 등록으로 인한 invoice_missing 이월 해제 실패', clearDefErr);
+      }
+    }
 
     // ── 4.5. 본사(안성준) 아래 영업사원 노드 자동 편입 ──
     // 조건:
