@@ -548,18 +548,21 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
 
   // 정책 단가 계산용 컨텍스트
   // - calculator.ts 의 calcRollupItemsWithLeaderPromotion 은 rollup_amount_per_unit 을
-  //   `subtotal / unit_count` 평균값으로 저장한다. 같은 from_member 가 여러 단가의 계약을 섞으면
-  //   평균이 정책 단가와 달라진다(예: ₩33,333). 사용자는 정책 단가(예: 리더-영업사원 = ₩100,000) 를 보고 싶어 하므로,
-  //   화면에서는 SettlementRule 기반으로 (root rank − from_rank) 의 단가를 계산해 표시한다.
-  // - 계약별 Rollup 금액 = unit_count × 정책 단가.
+  //   `subtotal / unit_count` 평균값으로 저장한다. 같은 from_member(=root 직접 자식)의 subtree 가
+  //   여러 단가의 계약을 섞으면 평균이 정책 단가와 달라진다(예: ₩33,333).
+  // - 또한 rollupItem.from_rank 는 root 직접 자식의 직급이라 산하 리더 페이지처럼 중간에 리더가
+  //   끼면 root rank=리더 / from_rank=리더 로 매핑되어 정책 단가가 0 으로 잡힌다.
+  //   실제로는 그 산하 리더의 자손(영업사원)의 계약일 수 있고, 정확한 단가는 root rank vs
+  //   "계약의 실제 정산 담당자(effectiveSalesMemberId)의 rank" 차이로 계산해야 한다.
+  // - 따라서 단가는 계약 단위로 (rootRank − effectiveSalesMemberRank) 정책 단가를 사용한다.
   // - 합계 검증은 그대로 monthly_settlements.rollup_commission 과 비교한다 (= SSOT).
   const settlementRules = ((rulesRes.data ?? []) as SettlementRule[]) ?? [];
   const policyRefDate = `${yearMonth}-25`;
   const rootRankForRollup = (rootRank || (member as { rank?: string }).rank || '') as RankType;
-  const policyRateByFromRank = new Map<string, number>();
-  const getPolicyRate = (fromRank: string): number => {
+  const policyRateByRank = new Map<string, number>();
+  const getPolicyRateForRank = (fromRank: string): number => {
     const key = String(fromRank ?? '');
-    if (policyRateByFromRank.has(key)) return policyRateByFromRank.get(key)!;
+    if (policyRateByRank.has(key)) return policyRateByRank.get(key)!;
     const fromRankType = key as RankType;
     let rate = 0;
     try {
@@ -567,21 +570,42 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     } catch {
       rate = 0;
     }
-    policyRateByFromRank.set(key, rate);
+    policyRateByRank.set(key, rate);
     return rate;
   };
+
+  const isDev = process.env.NODE_ENV !== 'production';
 
   // 계약 단위로 분해
   const rollupRows: RollupRowOut[] = [];
   for (const it of rollupItems) {
     const detailAvg = Number(it.rollup_amount_per_unit ?? 0) || 0;
-    const policyRate = getPolicyRate(String(it.from_rank ?? ''));
-    // 정책 단가가 산정 불가(=0) 인 경우에만 detail 평균값으로 폴백
-    const rate = policyRate > 0 ? policyRate : detailAvg;
     const directs = calcDirectContractsByMember.get(it.from_member_id) ?? [];
     for (const c of directs) {
       const meta = contractMetaById.get(c.contract_id) ?? null;
       const unit = meta?.unit_count ?? c.unit_count ?? 0;
+
+      // 계약의 실제 정산 담당자 직급으로 정책 단가 산정
+      const contractEffectiveMemberId = meta?.effective_sales_member_id ?? it.from_member_id;
+      const contractEffectiveRank = rankById.get(contractEffectiveMemberId) ?? String(it.from_rank ?? '');
+      const policyRate = getPolicyRateForRank(contractEffectiveRank);
+      const rate = policyRate > 0 ? policyRate : detailAvg;
+
+      if (isDev) {
+        // eslint-disable-next-line no-console
+        console.log('[rollup-detail-rate]', {
+          rootMemberId: memberId,
+          rootRank: rootRankForRollup,
+          rollupFromMemberId: it.from_member_id,
+          rollupFromRank: it.from_rank,
+          contractId: c.contract_id,
+          effectiveSalesMemberId: contractEffectiveMemberId,
+          contractEffectiveRank,
+          policyRate,
+          fallbackAvgRate: detailAvg,
+        });
+      }
+
       rollupRows.push({
         contract_id: c.contract_id,
         contract_code: meta?.contract_code ?? c.contract_id,
