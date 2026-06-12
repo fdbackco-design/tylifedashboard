@@ -27,9 +27,7 @@ import {
   type AttributedJoinContractRow,
 } from '@/lib/settlement/leader-promotion';
 import SyncButton from './SyncButton';
-// 조직도 기준 정산 담당자 자동 보정 패널 — 현재 UI 에서는 숨김 처리.
-// 컴포넌트 자체는 보존 (필요 시 다시 노출 가능).
-// import SettlementSalesMemberOverridePanel from './SettlementSalesMemberOverridePanel';
+import SettlementSalesMemberOverridePanel from './SettlementSalesMemberOverridePanel';
 
 export const metadata: Metadata = { title: '조직도' };
 export const dynamic = 'force-dynamic';
@@ -892,9 +890,7 @@ export default async function OrganizationPage({
         />
       </div>
 
-      {/* 조직도 기준 정산 담당자 자동 보정 패널은 현재 UI 에서는 숨김 처리.
-          관련 API(/api/admin/contracts/settlement-sales-member/*) 와 컴포넌트는 보존된다. */}
-      {/* <SettlementSalesMemberOverridePanel /> */}
+      <SettlementSalesMemberOverridePanel />
     </div>
   );
 }
