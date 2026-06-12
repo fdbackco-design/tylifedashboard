@@ -278,49 +278,280 @@ async function log(
 // Upsert 헬퍼
 // ─────────────────────────────────────────────
 
+/**
+ * 새 영업자 노드를 insert 하기 전에 같은 사람이 기존 노드(특히 `[고객] ` prefix 가 붙은
+ * customer 노드) 로 이미 있는지 찾는다.
+ *
+ * 우선순위:
+ *   1) phone digits 동일 + 이름(prefix 제거) 동일 + rank != '본사'  → 1건이면 'phone' 매칭
+ *   2) 이름(prefix 제거) 동일 + rank != '본사'                       → 1건이면 'normalized_name' 매칭
+ *
+ * 후보가 2개 이상이면 (동명이인 등) 자동 병합은 위험하므로 null 반환 + 'skip_ambiguous' 로 로그.
+ * external_id 매칭은 호출 측에서 (`onConflict: 'external_id'`) 별도로 처리한다.
+ */
+type SalesLookupResult =
+  | { kind: 'matched'; matchedBy: 'phone' | 'normalized_name'; id: string; name: string }
+  | { kind: 'ambiguous'; matchedBy: 'phone' | 'normalized_name' };
+
+async function findExistingMemberForSales(
+  db: SupabaseClient,
+  args: { salesName: string; salesPhone: string | null },
+): Promise<SalesLookupResult | null> {
+  const salesNameTrim = String(args.salesName ?? '').trim();
+  if (!salesNameTrim) return null;
+  const nameNorm = stripCustomerNamePrefix(salesNameTrim);
+  const phoneDigits = normalizePhoneDigits(args.salesPhone);
+
+  // 1) phone digits 동일 + 이름 정규화 동일
+  if (phoneDigits.length >= 4) {
+    const last4 = phoneDigits.slice(-4);
+    const { data, error } = await db
+      .from('organization_members')
+      .select('id, name, phone, rank')
+      .not('phone', 'is', null)
+      .neq('rank', '본사')
+      .ilike('phone', `%${last4}%`)
+      .limit(100);
+    if (error) throw new Error(`organization_members lookup(sales phone) 실패: ${error.message}`);
+    const rows = (data ?? []) as Array<{ id: string; name: string | null; phone: string | null; rank: string | null }>;
+    const matches = rows.filter(
+      (r) =>
+        normalizePhoneDigits(r.phone) === phoneDigits &&
+        stripCustomerNamePrefix(r.name) === nameNorm,
+    );
+    if (matches.length === 1) {
+      return { kind: 'matched', matchedBy: 'phone', id: matches[0].id, name: String(matches[0].name ?? '') };
+    }
+    if (matches.length > 1) {
+      return { kind: 'ambiguous', matchedBy: 'phone' };
+    }
+  }
+
+  // 2) 이름 정규화로 1개 매칭
+  const { data, error } = await db
+    .from('organization_members')
+    .select('id, name, rank')
+    .neq('rank', '본사')
+    .or(`name.eq.${nameNorm},name.eq.[고객] ${nameNorm}`)
+    .limit(100);
+  if (error) throw new Error(`organization_members lookup(sales name) 실패: ${error.message}`);
+  const rows = (data ?? []) as Array<{ id: string; name: string | null; rank: string | null }>;
+  const candidates = rows.filter((r) => stripCustomerNamePrefix(r.name) === nameNorm);
+  if (candidates.length === 1) {
+    return { kind: 'matched', matchedBy: 'normalized_name', id: candidates[0].id, name: String(candidates[0].name ?? '') };
+  }
+  if (candidates.length > 1) {
+    return { kind: 'ambiguous', matchedBy: 'normalized_name' };
+  }
+
+  return null;
+}
+
+/**
+ * `findExistingMemberForSales` 로 찾은 기존 노드를 영업자 정보로 정리한다.
+ *
+ *   - name: "[고객]" prefix 제거된 이름으로 갱신
+ *   - rank: 신규 영업자 rank 가 들어오면 적용 (본사 노드는 위에서 제외)
+ *   - phone: 기존 값이 비어 있으면 신규 phone 으로 보강 (덮어쓰지 않음)
+ *   - external_id: 신규 영업자 external_id 가 있으면 부착.
+ *       기존 external_id 가 `customer:{cid}` 형태였다면 cid 를 source_customer_id 로 이동시킨 뒤
+ *       영업자 external_id 로 교체한다 (customer 식별 정보는 source_customer_id 로 보존).
+ *       기존 external_id 가 다른 영업자 ID 이면 보존(덮어쓰지 않음).
+ *   - source_customer_id: 기존 값이 있으면 보존, 없으면 customer:{cid} 이동분으로 채움.
+ *   - is_active: true 보강
+ *
+ * source_customer_id unique 충돌 등의 후속 정리는 호출 측에서 `attachCustomerIdentityToMember`
+ * 가 필요 시 처리한다. 본 함수는 단순 update 만 시도하고, 실패 시 경고만 출력한다.
+ */
+async function reconcileExistingMemberForSales(
+  db: SupabaseClient,
+  memberId: string,
+  salesData: ReturnType<typeof normalizeSalesMember>,
+): Promise<void> {
+  const { data: cur, error } = await db
+    .from('organization_members')
+    .select('id, name, external_id, source_customer_id, phone, rank')
+    .eq('id', memberId)
+    .maybeSingle();
+  if (error) throw new Error(`organization_members 조회 실패: ${error.message}`);
+  if (!cur) return;
+  const curRow = cur as {
+    id: string;
+    name: string | null;
+    external_id: string | null;
+    source_customer_id: string | null;
+    phone: string | null;
+    rank: string | null;
+  };
+  if (curRow.rank === '본사') return;
+
+  const next: Record<string, unknown> = {};
+
+  const desiredName = stripCustomerNamePrefix(String(salesData.name ?? ''));
+  if (desiredName && curRow.name !== desiredName) next.name = desiredName;
+
+  if (salesData.rank && curRow.rank !== salesData.rank) next.rank = salesData.rank;
+
+  const curPhoneEmpty = curRow.phone == null || String(curRow.phone).trim() === '';
+  if (curPhoneEmpty && (salesData as { phone?: string | null }).phone) {
+    next.phone = (salesData as { phone?: string | null }).phone;
+  }
+
+  if (salesData.external_id) {
+    const curExt = curRow.external_id ?? '';
+    if (!curExt) {
+      next.external_id = salesData.external_id;
+    } else if (curExt.startsWith('customer:')) {
+      const cid = curExt.slice('customer:'.length);
+      if (!curRow.source_customer_id && cid) {
+        next.source_customer_id = cid;
+      }
+      next.external_id = salesData.external_id;
+    }
+    // 그 외(다른 영업자 external_id 등)는 덮어쓰지 않고 보존
+  }
+
+  next.is_active = true;
+
+  const { error: upErr } = await db.from('organization_members').update(next).eq('id', memberId);
+  if (upErr) {
+    // eslint-disable-next-line no-console
+    console.warn('[sync-service] sales 노드 재사용 update 실패', { memberId, error: upErr.message });
+  }
+}
+
 async function upsertSalesMember(
   db: SupabaseClient,
   memberData: ReturnType<typeof normalizeSalesMember>,
 ): Promise<string | null> {
   if (!memberData.name) return null;
 
+  const isDev = process.env.NODE_ENV !== 'production';
+  const salesName = String(memberData.name).trim();
+  const salesPhone = ((memberData as { phone?: string | null }).phone ?? null) as string | null;
+
+  // 1) external_id 매칭 우선. 기존 영업자 노드가 동일 external_id 로 이미 있으면 그것을 재사용한다.
   if (memberData.external_id) {
-    const { data, error } = await db
+    const { data: byExt, error: byExtErr } = await db
       .from('organization_members')
-      .upsert(memberData, { onConflict: 'external_id' })
       .select('id')
-      .single();
-    if (error) throw new Error(`organization_members upsert 실패: ${error.message}`);
-    return (data as { id: string }).id;
+      .eq('external_id', memberData.external_id)
+      .limit(1)
+      .maybeSingle();
+    if (byExtErr) throw new Error(`organization_members lookup(external_id) 실패: ${byExtErr.message}`);
+    if (byExt) {
+      const matchedId = (byExt as { id: string }).id;
+      // 영업자 정보로 update (기존 onConflict upsert 와 동등한 효과)
+      await db.from('organization_members').update(memberData).eq('id', matchedId);
+      if (isDev) {
+        // eslint-disable-next-line no-console
+        console.log('[member-dedupe-sales]', {
+          salesName,
+          salesPhone,
+          matchedMemberId: matchedId,
+          matchedName: null,
+          matchedBy: 'external_id',
+          action: 'reuse',
+        });
+      }
+      return matchedId;
+    }
   }
 
-  // external_id 없으면 이름으로 조회 후 없으면 insert
-  // (병렬 동기화 레이스 방지) DB unique index(WHERE external_id IS NULL)와 함께 동작:
-  // - 동시에 insert 경쟁이 나면 1개만 성공, 나머지는 다시 select로 회수
-  const name = memberData.name.trim();
-  const { data: existing } = await db
-    .from('organization_members')
-    .select('id')
-    .eq('name', name)
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle();
+  // 2) phone / 이름 기반 lookup — customer:* 노드와의 양방향 중복 방지 핵심
+  const lookup = await findExistingMemberForSales(db, { salesName, salesPhone });
+  if (lookup && lookup.kind === 'ambiguous') {
+    if (isDev) {
+      // eslint-disable-next-line no-console
+      console.log('[member-dedupe-sales]', {
+        salesName,
+        salesPhone,
+        matchedMemberId: null,
+        matchedName: null,
+        matchedBy: lookup.matchedBy,
+        action: 'skip_ambiguous',
+      });
+    }
+    // 자동 병합 위험 → 일반 insert 흐름으로 떨어트림 (동명이인은 수동 검토 대상)
+  } else if (lookup && lookup.kind === 'matched') {
+    await reconcileExistingMemberForSales(db, lookup.id, memberData);
+    if (isDev) {
+      // eslint-disable-next-line no-console
+      console.log('[member-dedupe-sales]', {
+        salesName,
+        salesPhone,
+        matchedMemberId: lookup.id,
+        matchedName: lookup.name,
+        matchedBy: lookup.matchedBy,
+        action: 'reuse',
+      });
+    }
+    return lookup.id;
+  }
 
-  if (existing) return (existing as { id: string }).id;
+  // 3) 새 노드 생성 (external_id 가 있는 경우와 없는 경우 모두 같은 insert 로직 사용)
+  //    external_id 가 있어도 1)에서 매칭 실패 + 2)에서도 매칭 실패 한 경우이므로 insert 안전.
+  //    external_id 없는 경우: 병렬 sync 레이스 방어를 위해 name 기준 select → insert → 재select.
+  if (!memberData.external_id) {
+    const { data: existing } = await db
+      .from('organization_members')
+      .select('id')
+      .eq('name', salesName)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (existing) {
+      if (isDev) {
+        // eslint-disable-next-line no-console
+        console.log('[member-dedupe-sales]', {
+          salesName,
+          salesPhone,
+          matchedMemberId: (existing as { id: string }).id,
+          matchedName: salesName,
+          matchedBy: 'normalized_name',
+          action: 'reuse',
+        });
+      }
+      return (existing as { id: string }).id;
+    }
+  }
 
   const { data: inserted, error: insErr } = await db
     .from('organization_members')
-    .insert({ ...memberData, name })
+    .insert({ ...memberData, name: salesName })
     .select('id')
     .single();
 
-  if (!insErr && inserted) return (inserted as { id: string }).id;
+  if (!insErr && inserted) {
+    const newId = (inserted as { id: string }).id;
+    if (isDev) {
+      // eslint-disable-next-line no-console
+      console.log('[member-dedupe-sales]', {
+        salesName,
+        salesPhone,
+        matchedMemberId: newId,
+        matchedName: salesName,
+        matchedBy: 'none',
+        action: 'insert',
+      });
+    }
+    return newId;
+  }
 
   // unique 충돌 등으로 insert가 실패한 경우: 누군가 먼저 만들었을 수 있으니 다시 조회
+  if (memberData.external_id) {
+    const { data: retryExt } = await db
+      .from('organization_members')
+      .select('id')
+      .eq('external_id', memberData.external_id)
+      .limit(1)
+      .maybeSingle();
+    if (retryExt) return (retryExt as { id: string }).id;
+  }
   const { data: retry, error: retryErr } = await db
     .from('organization_members')
     .select('id')
-    .eq('name', name)
+    .eq('name', salesName)
     .order('created_at', { ascending: true })
     .limit(1)
     .maybeSingle();
@@ -416,6 +647,165 @@ async function attachCustomerIdentityToMember(
   }
 
   throw new Error(`organization_members 업데이트 실패: ${upErr.message}`);
+}
+
+/** 전화번호 문자열에서 숫자만 남긴 정규화 값. */
+function normalizePhoneDigits(s: unknown): string {
+  return String(s ?? '').replace(/\D/g, '');
+}
+
+/** 이름 문자열에서 "[고객]" prefix 와 양끝 공백을 제거. */
+function stripCustomerNamePrefix(s: unknown): string {
+  return String(s ?? '').replace(/^\[고객\]\s*/, '').trim();
+}
+
+/**
+ * 신규 customer 동기화 시, 같은 사람이 organization_members 에 이미 존재하는지
+ * 다음 우선순위로 확인한다. 1건이라도 매칭되면 그 노드 id 를 반환하고, 그렇지 않으면 null.
+ *
+ *   1) external_id = `customer:{customer_id}`
+ *   2) source_customer_id = customer_id
+ *   3) 전화번호 숫자만 정규화한 값이 동일한 노드
+ *   4) 이름("[고객]" prefix 제거) 이 동일하고 전화번호도 동일한 노드
+ *
+ * - 본사 노드(rank='본사') 는 매칭 후보에서 제외 (HQ에 customer 식별자 부착 금지).
+ * - 3·4 단계는 phone digits 의 끝 4자리로 후보를 좁힌 뒤 클라이언트에서 정확 비교한다
+ *   (organization_members.phone 의 저장 형식 일관성을 가정하지 않음).
+ */
+async function findExistingMemberForCustomer(
+  db: SupabaseClient,
+  args: { customerId: string; customerName: string; customerPhone: string | null },
+): Promise<string | null> {
+  const { customerId, customerName, customerPhone } = args;
+  const targetExt = `customer:${customerId}`;
+
+  // 1. external_id = customer:{customer_id}
+  {
+    const { data, error } = await db
+      .from('organization_members')
+      .select('id')
+      .eq('external_id', targetExt)
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(`organization_members lookup(external_id) 실패: ${error.message}`);
+    if (data) return (data as { id: string }).id;
+  }
+
+  // 2. source_customer_id = customer_id
+  {
+    const { data, error } = await db
+      .from('organization_members')
+      .select('id')
+      .eq('source_customer_id', customerId)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(`organization_members lookup(source_customer_id) 실패: ${error.message}`);
+    if (data) return (data as { id: string }).id;
+  }
+
+  const phoneDigits = normalizePhoneDigits(customerPhone);
+
+  // 3. 전화번호 정규화 동일
+  if (phoneDigits.length >= 4) {
+    const last4 = phoneDigits.slice(-4);
+    const { data, error } = await db
+      .from('organization_members')
+      .select('id, phone')
+      .not('phone', 'is', null)
+      .neq('rank', '본사')
+      .ilike('phone', `%${last4}%`)
+      .limit(100);
+    if (error) throw new Error(`organization_members lookup(phone) 실패: ${error.message}`);
+    const rows = (data ?? []) as Array<{ id: string; phone: string | null }>;
+    const hit = rows.find((r) => normalizePhoneDigits(r.phone) === phoneDigits);
+    if (hit) return hit.id;
+  }
+
+  // 4. 이름(prefix 제거) + 전화번호 동일
+  const desiredName = stripCustomerNamePrefix(customerName);
+  if (desiredName && phoneDigits.length >= 4) {
+    const { data, error } = await db
+      .from('organization_members')
+      .select('id, name, phone')
+      .neq('rank', '본사')
+      .or(`name.eq.${desiredName},name.eq.[고객] ${desiredName}`)
+      .limit(100);
+    if (error) throw new Error(`organization_members lookup(name+phone) 실패: ${error.message}`);
+    const rows = (data ?? []) as Array<{ id: string; name: string | null; phone: string | null }>;
+    const hit = rows.find(
+      (r) =>
+        stripCustomerNamePrefix(r.name) === desiredName &&
+        normalizePhoneDigits(r.phone) === phoneDigits,
+    );
+    if (hit) return hit.id;
+  }
+
+  return null;
+}
+
+/**
+ * `findExistingMemberForCustomer` 로 찾은 기존 노드를 customer 정보로 보강한다.
+ *
+ *   - name: "[고객]" prefix 없는 이름을 우선 (기존 이름이 prefix 형태이면 정리)
+ *   - external_id: 비어 있으면 `customer:{customer_id}` 로 채움
+ *   - source_customer_id: 비어 있으면 customer_id 로 채움
+ *   - phone: 비어 있으면 채움
+ *   - 기존 id 는 유지하며, 본사 노드는 건드리지 않음
+ *
+ * source_customer_id unique 충돌 (이미 다른 customer:* 노드에 잡혀 있는 경우) 정리는
+ * 이어서 호출되는 `attachCustomerIdentityToMember` 가 담당하므로 여기서는 단순 update 만 시도하고
+ * 실패 시 경고만 출력한다 (동기화 자체는 멈추지 않음).
+ */
+async function reconcileExistingMemberForCustomer(
+  db: SupabaseClient,
+  memberId: string,
+  customer: { customerId: string; customerName: string; customerPhone: string | null },
+): Promise<void> {
+  const { data: cur, error } = await db
+    .from('organization_members')
+    .select('id, name, external_id, source_customer_id, phone, rank')
+    .eq('id', memberId)
+    .maybeSingle();
+  if (error) throw new Error(`organization_members 조회 실패: ${error.message}`);
+  if (!cur) return;
+  const curRow = cur as {
+    id: string;
+    name: string | null;
+    external_id: string | null;
+    source_customer_id: string | null;
+    phone: string | null;
+    rank: string | null;
+  };
+  if (curRow.rank === '본사') return;
+
+  const next: Record<string, unknown> = {};
+
+  const desiredName = stripCustomerNamePrefix(customer.customerName);
+  const curName = String(curRow.name ?? '');
+  if (desiredName && curName !== desiredName) {
+    next.name = desiredName;
+  }
+
+  if (!curRow.external_id) {
+    next.external_id = `customer:${customer.customerId}`;
+  }
+  if (!curRow.source_customer_id) {
+    next.source_customer_id = customer.customerId;
+  }
+  const curPhoneEmpty = curRow.phone == null || String(curRow.phone).trim() === '';
+  if (curPhoneEmpty && customer.customerPhone) {
+    next.phone = customer.customerPhone;
+  }
+
+  if (Object.keys(next).length === 0) return;
+
+  const { error: upErr } = await db.from('organization_members').update(next).eq('id', memberId);
+  if (upErr) {
+    // attachCustomerIdentityToMember 가 후속으로 동일 케이스(unique 충돌 등)를 정리한다.
+    // eslint-disable-next-line no-console
+    console.warn('[sync-service] customer 식별자 보강 update 실패', { memberId, error: upErr.message });
+  }
 }
 
 async function findSingleEmployeeMemberIdByName(
@@ -575,9 +965,30 @@ async function processItem(
       // (본사 노드에 customer 식별자가 붙거나, 본사<->고객 노드가 순환/중복되는 문제 방지)
       if (customerNameNormalized.replace(/^\[고객\]\s*/, '') === '안성준') return null;
 
-      // 요구사항(최종): DB에도 1개 노드만 유지
-      // - 동일 이름의 "직원 노드(external_id NULL)"가 1개면 그 노드를 고객 노드로 재사용한다.
-      // - 없으면 customer:* 노드를 생성하되 source_customer_id를 기록한다.
+      // ── 중복 노드 방지 lookup (4단계) ──
+      // 1) external_id = customer:{customer_id}
+      // 2) source_customer_id = customer_id
+      // 3) 전화번호 정규화 동일
+      // 4) 이름(prefix 제거) + 전화번호 동일
+      // 위 중 하나라도 매칭되면 새 row 를 만들지 않고 기존 노드를 customer 정보로 보강 update.
+      const reusableMemberId = await findExistingMemberForCustomer(db, {
+        customerId,
+        customerName: customerNameNormalized,
+        customerPhone,
+      });
+      if (reusableMemberId) {
+        await reconcileExistingMemberForCustomer(db, reusableMemberId, {
+          customerId,
+          customerName: customerNameNormalized,
+          customerPhone,
+        });
+        // source_customer_id unique 충돌 / 기존 customer:* 노드 정리 등 후속 처리.
+        await attachCustomerIdentityToMember(db, reusableMemberId, { id: customerId, phone: customerPhone });
+        return reusableMemberId;
+      }
+
+      // 호환: 동일 이름의 "직원 노드(external_id NULL)" 가 정확히 1개인 경우 그 노드를 재사용한다.
+      // (phone 정보가 없는 customer 도 매칭 가능하도록 보존)
       const existingEmployeeId = await findSingleEmployeeMemberIdByName(db, customerNameNormalized);
       if (existingEmployeeId) {
         await attachCustomerIdentityToMember(db, existingEmployeeId, { id: customerId, phone: customerPhone });
@@ -614,6 +1025,12 @@ async function processItem(
         salesLinkStatus = hqId ? 'linked' : 'pending_mapping';
       } else {
       const nameRes = await resolveSalesMemberByNameOnly(db, rawSalesName);
+      // "자기 가입" 케이스 hint: customer 와 sales 이름이 같으면 그 customer 의 phone 을
+      // 영업자 lookup hint 로 전달해 [고객]/영업자 중복 노드를 정확히 방지한다.
+      const salesPhoneHint =
+        stripCustomerNamePrefix(rawSalesName) === stripCustomerNamePrefix(customerNameNormalized)
+          ? customerPhone
+          : null;
       if (nameRes.kind === 'single') {
         finalSalesMemberId = nameRes.memberId;
         salesLinkStatus = 'linked';
@@ -623,9 +1040,10 @@ async function processItem(
         // → rank는 무조건 영업사원으로 생성한다.
         const memberData = {
           ...normalizeSalesMember({
-          sales_member_name: rawSalesName,
-          sales_member_external_id: null,
-          org_rank: item.affiliation_name,
+            sales_member_name: rawSalesName,
+            sales_member_external_id: null,
+            org_rank: item.affiliation_name,
+            phone: salesPhoneHint,
           }),
           rank: '영업사원' as const,
         };
@@ -690,10 +1108,17 @@ async function processItem(
         detail = parseContractDetailHtml(html, item.contract_code);
 
         if (detail.sales_member_external_id) {
+          const detailSalesName = item.sales_member_name?.trim() || '담당';
+          // 자기 가입 케이스에서 customer phone 을 lookup hint 로 전달 (중복 노드 방지).
+          const detailSalesPhoneHint =
+            stripCustomerNamePrefix(detailSalesName) === stripCustomerNamePrefix(customerNameNormalized)
+              ? customerPhone
+              : null;
           const memberData = normalizeSalesMember({
-            sales_member_name: item.sales_member_name?.trim() || '담당',
+            sales_member_name: detailSalesName,
             sales_member_external_id: detail.sales_member_external_id,
             org_rank: item.affiliation_name,
+            phone: detailSalesPhoneHint,
           });
           const extSalesId = await upsertSalesMember(db, memberData);
           if (extSalesId) {

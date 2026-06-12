@@ -221,6 +221,13 @@ export interface SalesMemberSource {
   sales_member_name: string;
   sales_member_external_id: string | null;
   org_rank?: string | null;
+  /**
+   * 영업자 전화번호 hint. TY 리스트에는 영업자 phone 이 직접 들어오지 않지만,
+   * "자기 가입(customer == sales_member)" 케이스에서 호출 지점이 customer phone 을 전달하면
+   * upsertSalesMember 의 중복 노드 방지(phone digits 매칭) lookup 에 사용된다.
+   * null/undefined 면 set 하지 않는다 (기존 phone 을 덮어쓰지 않도록).
+   */
+  phone?: string | null;
 }
 
 /**
@@ -230,12 +237,16 @@ export interface SalesMemberSource {
 export function normalizeSalesMember(
   item: SalesMemberSource,
 ): OrganizationMemberInsert {
-  return {
+  const out: OrganizationMemberInsert = {
     name: item.sales_member_name,
     rank: inferRank(item.org_rank ?? ''),
     external_id: item.sales_member_external_id || null,
     is_active: true,
   };
+  if (item.phone != null && String(item.phone).trim() !== '') {
+    out.phone = item.phone;
+  }
+  return out;
 }
 
 /** 소속명 / 직책 문자열에서 직급 추론 */
