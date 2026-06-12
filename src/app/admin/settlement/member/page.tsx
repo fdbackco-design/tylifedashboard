@@ -8,7 +8,9 @@ import {
   isV2EligibleStatic,
   happycallYmdSeoul,
 } from '@/lib/settlement/settlement-eligibility-v2';
-import type { SettlementCalculationDetail } from '@/lib/types/settlement';
+import { getRollupAmountPerUnit } from '@/lib/settlement/calculator';
+import type { SettlementCalculationDetail, SettlementRule } from '@/lib/types/settlement';
+import type { RankType } from '@/lib/types';
 
 export const metadata: Metadata = { title: '정산 현황 · 정산 상세' };
 export const dynamic = 'force-dynamic';
@@ -68,7 +70,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
   const { start_date, end_date } = getSettlementWindowForYearMonth(yearMonth);
   const endExclusive = nextDay(end_date);
 
-  const [memberRes, membersRes, edgesRes, contractRowsRes, settlementsRes, rootSettlementRes] =
+  const [memberRes, membersRes, edgesRes, contractRowsRes, settlementsRes, rootSettlementRes, rulesRes] =
     await Promise.all([
       db
         .from('organization_members')
@@ -101,6 +103,8 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         .eq('year_month', yearMonth)
         .eq('member_id', memberId)
         .maybeSingle(),
+      // 정책 단가 계산용: settlement_rules 전체 (효력일자별)
+      db.from('settlement_rules').select('*'),
     ]);
 
   const member = memberRes.data as any;
@@ -542,10 +546,38 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     }
   }
 
+  // 정책 단가 계산용 컨텍스트
+  // - calculator.ts 의 calcRollupItemsWithLeaderPromotion 은 rollup_amount_per_unit 을
+  //   `subtotal / unit_count` 평균값으로 저장한다. 같은 from_member 가 여러 단가의 계약을 섞으면
+  //   평균이 정책 단가와 달라진다(예: ₩33,333). 사용자는 정책 단가(예: 리더-영업사원 = ₩100,000) 를 보고 싶어 하므로,
+  //   화면에서는 SettlementRule 기반으로 (root rank − from_rank) 의 단가를 계산해 표시한다.
+  // - 계약별 Rollup 금액 = unit_count × 정책 단가.
+  // - 합계 검증은 그대로 monthly_settlements.rollup_commission 과 비교한다 (= SSOT).
+  const settlementRules = ((rulesRes.data ?? []) as SettlementRule[]) ?? [];
+  const policyRefDate = `${yearMonth}-25`;
+  const rootRankForRollup = (rootRank || (member as { rank?: string }).rank || '') as RankType;
+  const policyRateByFromRank = new Map<string, number>();
+  const getPolicyRate = (fromRank: string): number => {
+    const key = String(fromRank ?? '');
+    if (policyRateByFromRank.has(key)) return policyRateByFromRank.get(key)!;
+    const fromRankType = key as RankType;
+    let rate = 0;
+    try {
+      rate = getRollupAmountPerUnit(rootRankForRollup, fromRankType, settlementRules, policyRefDate);
+    } catch {
+      rate = 0;
+    }
+    policyRateByFromRank.set(key, rate);
+    return rate;
+  };
+
   // 계약 단위로 분해
   const rollupRows: RollupRowOut[] = [];
   for (const it of rollupItems) {
-    const rate = Number(it.rollup_amount_per_unit ?? 0) || 0;
+    const detailAvg = Number(it.rollup_amount_per_unit ?? 0) || 0;
+    const policyRate = getPolicyRate(String(it.from_rank ?? ''));
+    // 정책 단가가 산정 불가(=0) 인 경우에만 detail 평균값으로 폴백
+    const rate = policyRate > 0 ? policyRate : detailAvg;
     const directs = calcDirectContractsByMember.get(it.from_member_id) ?? [];
     for (const c of directs) {
       const meta = contractMetaById.get(c.contract_id) ?? null;
