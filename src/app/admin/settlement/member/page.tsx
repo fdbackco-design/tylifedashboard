@@ -574,7 +574,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     return rate;
   };
 
-  const isDev = process.env.NODE_ENV !== 'production';
+  const isDev = process.env.NODE_ENV == 'production';
 
   // 계약 단위로 분해
   const rollupRows: RollupRowOut[] = [];
