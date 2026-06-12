@@ -595,7 +595,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
   const rollupItemByFromId = new Map<string, (typeof rollupItems)[number]>();
   for (const it of rollupItems) rollupItemByFromId.set(it.from_member_id, it);
 
-  const isDev = process.env.NODE_ENV !== 'production';
+  const isDev = process.env.NODE_ENV == 'production';
 
   // root subtree 내 모든 멤버(본인 제외) 의 direct_contracts 를 평탄화해 rollup 후보로 수집한다.
   const rollupRows: RollupRowOut[] = [];
