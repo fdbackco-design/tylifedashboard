@@ -72,12 +72,12 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     await Promise.all([
       db
         .from('organization_members')
-        .select('id, name, rank, external_id, phone, source_customer_id')
+        .select('id, name, rank, external_id, phone, source_customer_id, leader_rank_effective_at')
         .eq('id', memberId)
         .maybeSingle(),
       db
         .from('organization_members')
-        .select('id, name, rank, external_id, phone, source_customer_id')
+        .select('id, name, rank, external_id, phone, source_customer_id, leader_rank_effective_at')
         .eq('is_active', true),
       db.from('organization_edges').select('parent_id, child_id'),
       db
@@ -202,9 +202,54 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
   };
 
   const nameById = new Map<string, string>();
+  const rankById = new Map<string, string>();
+  const leaderEffectiveAtById = new Map<string, string | null>();
   for (const m of membersRaw as any[]) {
-    nameById.set(m.id as string, String(m.name ?? '').replace(/^\[고객\]\s*/, ''));
+    const id = m.id as string;
+    nameById.set(id, String(m.name ?? '').replace(/^\[고객\]\s*/, ''));
+    rankById.set(id, String(m.rank ?? ''));
+    const effRaw = (m.leader_rank_effective_at ?? null) as string | null;
+    leaderEffectiveAtById.set(id, effRaw && String(effRaw).trim() !== '' ? String(effRaw) : null);
   }
+
+  // ── 산하구좌 게이트: 하위 리더 승격 전 계약만 상위 리더(=root)의 산하구좌에 포함 ──────
+  //
+  // 정산 계산(`computeStatementDownlineUnitsWithSharedContext`)의 `excludedByPromotionAfter`
+  // 동작과 일치하도록, 산하구좌 상세에서도 다음 규칙을 적용한다:
+  //   - root(memberId) 의 rank 가 '리더' 인 경우에만 게이트 작동
+  //   - 계약의 effectiveSalesMemberId 부터 root 까지 path 를 따라 올라가며
+  //     가장 가까운 "리더" 노드(effective 자신 포함)를 찾는다.
+  //   - 그 리더의 leader_rank_effective_at 이 존재하면, 계약 가입일이 그 시점보다
+  //     strict before 인 계약만 root 의 산하구좌 상세에 포함한다.
+  //   - leader_rank_effective_at 이 null 이거나 path 위에 리더가 없으면 그대로 포함.
+  //
+  // 정산 본체와 동일하게 root 자신의 승격 시점 게이트(`excludedByRootLeaderEffectiveAt`)
+  // 는 본 상세 화면 분류에서는 적용하지 않는다(사용자 요구 범위 외).
+  const rootRank = String((member as { rank?: string | null }).rank ?? '');
+  const isDownlineEligibleForLeaderGate = (
+    effectiveMemberId: string,
+    joinYmd: string,
+  ): boolean => {
+    if (rootRank !== '리더') return true;
+    if (!joinYmd) return true;
+    const visited = new Set<string>();
+    let cur: string | null = effectiveMemberId;
+    while (cur && !visited.has(cur)) {
+      visited.add(cur);
+      if (cur === memberId) return true; // root 본인까지 도달
+      if ((rankById.get(cur) ?? '') === '리더') {
+        const eff = leaderEffectiveAtById.get(cur) ?? null;
+        if (!eff) return true; // 승격 시점 정보 없음 → 보수적으로 포함
+        const effYmd = String(eff).slice(0, 10);
+        if (!effYmd) return true;
+        // 계약 가입일이 리더 승격 시점 이전이면 상위 리더의 산하구좌에 포함
+        // 같은 날이나 이후이면 그 하위 리더 자신의 산하 카운트로 흡수됨 → 제외
+        return joinYmd < effYmd;
+      }
+      cur = parentByChild.get(cur) ?? null;
+    }
+    return true;
+  };
 
   // ── 계약별 정산금(직접 수당) 맵 구축 ─────────────────────────
   // monthly_settlements.calculation_detail.direct_contracts 를 모든 멤버에 대해 모은다.
@@ -292,6 +337,9 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         r.effective_sales_member_id !== memberId &&
         subtreeIds.has(r.effective_sales_member_id),
     )
+    // 하위 리더의 leader_rank_effective_at 이후 계약은 그 하위 리더 본인의 산하 카운트로
+    // 흡수되므로 root 의 산하구좌 상세에서 제외 (정산 본체와 동일 기준)
+    .filter((r) => isDownlineEligibleForLeaderGate(r.effective_sales_member_id, r.join_ymd))
     .sort((a, b) => (b.join_date ?? '').localeCompare(a.join_date ?? ''));
 
   const directUnitSum = directRows.reduce((s, r) => s + Number(r.unit_count ?? 0), 0);
@@ -342,7 +390,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
             {displayName} · {yearMonth}
           </h2>
           <p className="text-sm text-gray-500 mt-1">
-            기준 {start_date}~{end_date} · 정산용 담당자 = settlement_sales_member_id ?? sales_member_id 기준으로 분류합니다.
+            기준 {start_date}~{end_date}
           </p>
         </div>
       </div>
