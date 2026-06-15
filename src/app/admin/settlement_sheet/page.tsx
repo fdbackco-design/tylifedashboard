@@ -220,6 +220,15 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
       } satisfies SheetRowVM;
     })
     .filter((x): x is SheetRowVM => x !== null)
+    // 표시값(개인구좌·산하구좌·개인수당·오버라이드·보너스)이 모두 0인 행은 표·엑셀에서 제외.
+    .filter((r) => {
+      const pu = r.override?.personalUnitCount ?? r.base.personalUnitCount;
+      const du = r.override?.downlineUnitCount ?? r.base.downlineUnitCount;
+      const pc = r.override?.personalCommission ?? r.base.personalCommission;
+      const ov = r.override?.overrideAmount ?? r.base.overrideAmount;
+      const bn = r.override?.bonusAmount ?? r.base.bonusAmount;
+      return pu !== 0 || du !== 0 || pc !== 0 || ov !== 0 || bn !== 0;
+    })
     .sort((a, b) => a.name.localeCompare(b.name, 'ko-KR'));
 
   return (

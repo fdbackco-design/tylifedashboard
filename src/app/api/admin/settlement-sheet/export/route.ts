@@ -18,6 +18,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isAdminAuthed } from '@/lib/admin-auth';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import {
+  getSettlementWindowForYearMonth,
   getSettlementWindowDisplayForYearMonth,
   normalizeYearMonthLabel,
 } from '@/lib/settlement/settlement-window';
@@ -26,6 +27,11 @@ import {
   formatYearMonthKo,
   formatYmdDot,
 } from '@/lib/settlement/statement-sheet';
+import {
+  loadStatementDownlineSharedData,
+  computeStatementDownlineUnitsWithSharedContext,
+  loadGlobalStatementWindowContractPool,
+} from '@/lib/organization/statement-downline-units';
 import type { RankType } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -77,12 +83,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const db = createAdminSupabaseClient();
   const { data: settlements, error: sErr } = await db
     .from('monthly_settlements')
-    .select('member_id')
+    .select('member_id, direct_unit_count, base_commission, rollup_commission, incentive_amount')
     .eq('year_month', yearMonth);
   if (sErr) return NextResponse.json({ error: sErr.message }, { status: 500 });
-  const memberIds = ((settlements ?? []) as Array<{ member_id: string }>)
-    .map((r) => r.member_id)
-    .filter(Boolean);
+  const settlementRows = (settlements ?? []) as Array<{
+    member_id: string;
+    direct_unit_count: number | null;
+    base_commission: number | null;
+    rollup_commission: number | null;
+    incentive_amount: number | null;
+  }>;
+  const memberIds = settlementRows.map((r) => r.member_id).filter(Boolean);
   if (memberIds.length === 0) {
     return new NextResponse(`${UTF8_BOM}전화번호,고객명,직책,정산월,정산기간,링크\n`, {
       status: 200,
@@ -95,9 +106,52 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const { data: members, error: mErr } = await db
     .from('organization_members')
-    .select('id, name, rank, phone')
+    .select('id, name, rank, phone, leader_rank_effective_at')
     .in('id', memberIds);
   if (mErr) return NextResponse.json({ error: mErr.message }, { status: 500 });
+  const memberById = new Map(
+    ((members ?? []) as Array<{
+      id: string;
+      name: string;
+      rank: RankType;
+      phone: string | null;
+      leader_rank_effective_at: string | null;
+    }>).map((m) => [m.id, m]),
+  );
+
+  // 관리자 보정값 (settlement_statement_overrides) — 표시값 우선
+  const { data: overrideRows, error: oErr } = await db
+    .from('settlement_statement_overrides')
+    .select('member_id, personal_unit_count, downline_unit_count, personal_commission, override_amount, bonus_amount')
+    .eq('year_month', yearMonth)
+    .in('member_id', memberIds);
+  if (oErr) return NextResponse.json({ error: oErr.message }, { status: 500 });
+  const overrideByMemberId = new Map<
+    string,
+    {
+      personal_unit_count: number | null;
+      downline_unit_count: number | null;
+      personal_commission: number | null;
+      override_amount: number | null;
+      bonus_amount: number | null;
+    }
+  >();
+  for (const r of ((overrideRows ?? []) as Array<{
+    member_id: string;
+    personal_unit_count: number | null;
+    downline_unit_count: number | null;
+    personal_commission: number | null;
+    override_amount: number | null;
+    bonus_amount: number | null;
+  }>)) {
+    overrideByMemberId.set(r.member_id, {
+      personal_unit_count: r.personal_unit_count,
+      downline_unit_count: r.downline_unit_count,
+      personal_commission: r.personal_commission,
+      override_amount: r.override_amount,
+      bonus_amount: r.bonus_amount,
+    });
+  }
 
   // 영업자 로그인 ID(=공유 URL 의 tyCode) 매핑 — user_profiles.login_code 기준.
   const { data: profileRows, error: pErr } = await db
@@ -119,13 +173,60 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  const rows = ((members ?? []) as Array<{
-    id: string;
-    name: string;
-    rank: RankType;
-    phone: string | null;
-  }>)
-    .map((m) => {
+  // 산하 실적 구좌 — admin/settlement_sheet 페이지와 동일한 방식으로 일괄 계산.
+  const { start_date, end_date } = getSettlementWindowForYearMonth(yearMonth);
+  const downlineUnitsByMemberId: Record<string, number> = {};
+  {
+    const sharedDownline = await loadStatementDownlineSharedData(db);
+    const window = { start_date, end_date };
+    const preloadedGlobalPool = await loadGlobalStatementWindowContractPool(db, sharedDownline, window);
+    const BATCH = 48;
+    for (let i = 0; i < memberIds.length; i += BATCH) {
+      const slice = memberIds.slice(i, i + BATCH);
+      const direct = slice.map((mid) => {
+        const row = settlementRows.find((r) => r.member_id === mid);
+        return Math.max(0, Math.floor(Number(row?.direct_unit_count ?? 0) || 0));
+      });
+      const results = await Promise.all(
+        slice.map((mid, j) =>
+          computeStatementDownlineUnitsWithSharedContext(
+            db,
+            sharedDownline,
+            mid,
+            window,
+            direct[j],
+            memberById.get(mid)?.leader_rank_effective_at ?? null,
+            { preloadedGlobalPool },
+          ),
+        ),
+      );
+      slice.forEach((mid, j) => {
+        const res = results[j];
+        downlineUnitsByMemberId[mid] = typeof res === 'number' ? res : res.downline_units;
+      });
+    }
+  }
+
+  const rows = settlementRows
+    .map((sr) => {
+      const m = memberById.get(sr.member_id);
+      if (!m) return null;
+      const ov = overrideByMemberId.get(sr.member_id) ?? null;
+      const personalUnit = ov?.personal_unit_count ?? Number(sr.direct_unit_count ?? 0);
+      const downlineUnit = ov?.downline_unit_count ?? (downlineUnitsByMemberId[sr.member_id] ?? 0);
+      const personalCommission = ov?.personal_commission ?? Number(sr.base_commission ?? 0);
+      const overrideAmount = ov?.override_amount ?? Number(sr.rollup_commission ?? 0);
+      const bonusAmount = ov?.bonus_amount ?? Number(sr.incentive_amount ?? 0);
+      // 표시값이 모두 0 이면 export 에서도 제외 (페이지와 동일 기준).
+      if (
+        personalUnit === 0 &&
+        downlineUnit === 0 &&
+        personalCommission === 0 &&
+        overrideAmount === 0 &&
+        bonusAmount === 0
+      ) {
+        return null;
+      }
       const name = (m.name ?? '').replace(/^\[고객\]\s*/, '') || '';
       const phoneDigits = digitsOnlyPhone(m.phone);
       const tyCode = (loginCodeByMemberId.get(m.id) ?? '').trim();
@@ -140,6 +241,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         link,
       };
     })
+    .filter((x): x is { phoneDigits: string; name: string; rank: string; link: string } => x !== null)
     .sort((a, b) => a.name.localeCompare(b.name, 'ko-KR'));
 
   const header = ['전화번호', '고객명', '직책', '정산월', '정산기간', '링크'].map(csvEscape).join(',');
