@@ -451,7 +451,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
             {displayName} · {yearMonth}
           </h2>
           <p className="text-sm text-gray-500 mt-1">
-            기준 {start_date}~{end_date} · 이 멤버가 정산 담당자로 직접 정산받는 계약만 아래 표에 표시합니다. (산하 롤업 계약은 "롤업수당 상세" 섹션 참고)
+            기준 {start_date}~{end_date} · 이 멤버가 정산 담당자로 직접 정산받는 계약만 아래 표에 표시합니다.
           </p>
           <p className="text-xs text-gray-400 mt-1">
             총 {groupedRows.length.toLocaleString()}행
