@@ -75,7 +75,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     db
       .from('contracts')
       .select(
-        'id, contract_code, join_date, status, unit_count, item_name, sales_member_id, customer_id, sales_link_status, is_cancelled, rental_request_no, invoice_no, memo, happy_call_at, happycall_result, customers(name)',
+        'id, contract_code, join_date, status, unit_count, item_name, sales_member_id, settlement_sales_member_id, customer_id, sales_link_status, is_cancelled, rental_request_no, invoice_no, memo, happy_call_at, happycall_result, customers(name)',
       )
       .gte('join_date', start_date)
       .lt('join_date', endExclusive),
@@ -203,6 +203,13 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         sales_member_id: c.sales_member_id as string,
       });
       const joinYmd = String(c.join_date ?? '').slice(0, 10);
+      const settlementOverride = (c.settlement_sales_member_id ?? null) as string | null;
+      const rawSales = c.sales_member_id as string;
+      // effectiveSettlementMemberId:
+      //   settlement_sales_member_id 가 있으면 그것을 정산 담당자로 사용,
+      //   없으면 sales_member_id 사용 (요구사항 그대로).
+      const effective_settlement_member_id: string | null =
+        settlementOverride ?? (rawSales ?? null);
       return {
         contract_id: c.id as string,
         contract_code: c.contract_code as string,
@@ -219,14 +226,16 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
           invoice_no: (c.invoice_no ?? null) as string | null,
           memo: (c.memo ?? null) as string | null,
         }),
-        raw_sales_member_id: c.sales_member_id as string,
+        raw_sales_member_id: rawSales,
+        effective_settlement_member_id,
       };
     })
     // 표시 기준(요구):
-    // - 조직도처럼 "귀속(산하)" 기준(origin)이 서브트리에 포함되는 계약
-    // - + 원 담당자(contracts.sales_member_id)가 서브트리에 포함되는 계약도 함께 표시
-    //   (customer↔member 매핑으로 origin이 다른 사람으로 치환되어도 담당자 관점 내역을 잃지 않기 위함)
-    .filter((x) => subtreeIds.has(x.origin) || subtreeIds.has(x.raw_sales_member_id))
+    //   effectiveSettlementMemberId === selectedMemberId 인 계약만 표시.
+    //   즉, "선택한 영업자가 직접 정산을 받는 계약"만 보여준다.
+    //   (산하 멤버의 계약 / 롤업수당 발생 계약은 이 목록에서 제외하고,
+    //    별도의 "롤업수당 상세" 섹션에서 rollup_contract_items 기반으로 보여준다.)
+    .filter((x) => x.effective_settlement_member_id === memberId)
     .sort((a, b) => (b.join_date ?? '').localeCompare(a.join_date ?? ''));
 
   // 같은 고객명 + 같은 가입일 계약은 구좌 합산으로 한 줄로 묶는다.
@@ -442,7 +451,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
             {displayName} · {yearMonth}
           </h2>
           <p className="text-sm text-gray-500 mt-1">
-            기준 {start_date}~{end_date} · 정산 대상(가입 인정) 계약 중, 조직 트리 기준 산하에 귀속된 계약만 표시합니다.
+            기준 {start_date}~{end_date} · 이 멤버가 정산 담당자로 직접 정산받는 계약만 아래 표에 표시합니다. (산하 롤업 계약은 "롤업수당 상세" 섹션 참고)
           </p>
           <p className="text-xs text-gray-400 mt-1">
             총 {groupedRows.length.toLocaleString()}행
@@ -609,7 +618,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         )}
       </section>
 
-      {/* ── 산하 계약 목록 ─────────────────────────────────────────────────── */}
+      {/* ── 직접 정산 계약 목록 ────────────────────────────────────────────── */}
       {(() => {
         // 표시용: 각 그룹의 (직접 + 롤업) 수당 합. 정산 합계 값은 변경하지 않는다.
         const groupedRowsWithAmount = groupedRows.map((r) => {
@@ -626,7 +635,11 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         const totalAmount = groupedRowsWithAmount.reduce((s, x) => s + x.amount, 0);
         return (
           <>
-            <h3 className="text-base font-semibold text-gray-800 mb-2">산하 계약 목록</h3>
+            <h3 className="text-base font-semibold text-gray-800 mb-2">직접 정산 계약 목록</h3>
+            <p className="text-xs text-gray-500 mb-2">
+              <code className="font-mono text-[11px] bg-gray-100 px-1 rounded">settlement_sales_member_id ?? sales_member_id</code>{' '}
+              가 이 멤버인 계약만 표시합니다. (정산 담당자 보정 계약 포함)
+            </p>
             <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
