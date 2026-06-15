@@ -11,6 +11,14 @@ import {
   getSettlementWindowSeoul,
   normalizeYearMonthLabel,
 } from '@/lib/settlement/settlement-window';
+import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
+import { isV2EligibleStatic } from '@/lib/settlement/settlement-eligibility-v2';
+import type {
+  SettlementCalculationDetail,
+  RollupContractItem,
+  RollupItem,
+  RankType,
+} from '@/lib/types';
 
 export const metadata: Metadata = { title: '지급 명세서' };
 export const dynamic = 'force-dynamic';
@@ -77,7 +85,7 @@ export default async function OrganizationStatementPage({
         db
           .from('monthly_settlements')
           .select(
-            'year_month, member_id, rank, direct_unit_count, base_commission, rollup_commission, incentive_amount, total_amount',
+            'year_month, member_id, rank, direct_unit_count, base_commission, rollup_commission, incentive_amount, total_amount, calculation_detail',
           )
           .eq('year_month', label_year_month)
           .eq('member_id', memberId as string)
@@ -186,6 +194,332 @@ export default async function OrganizationStatementPage({
   const no = `${label_year_month}-${isUnmapped ? 'GUEST' : String(memberId).slice(0, 4)}`;
   const statementTotalUnits = (ss.direct_unit_count ?? 0) + downlineAttributedUnits;
   const [basisYear, basisMonth] = label_year_month.split('-');
+
+  // ── 본인 정산 상세 (직접 정산 계약 목록 + 롤업수당 상세) ──────────────────────
+  // 관리자 페이지 `/admin/settlement/member` 와 동일한 기준으로 본인 데이터만 조회한다.
+  const calcDetail = ((settlementRes as { data?: { calculation_detail?: SettlementCalculationDetail | null } | null })
+    ?.data?.calculation_detail ?? null) as SettlementCalculationDetail | null;
+
+  type DirectRow = {
+    contract_id: string;
+    customer_name: string;
+    join_ymd: string;
+    item_name: string | null;
+    display_status: string;
+    unit_count: number;
+    origin_member_id: string;
+    raw_sales_member_id: string;
+    settlement_override_id: string | null;
+    join_date: string | null;
+  };
+  let directRowsGrouped: Array<{
+    key: string;
+    contract_ids: string[];
+    customer_name: string;
+    join_ymd: string;
+    item_name: string | null;
+    display_status: string;
+    unit_count: number;
+    origin_member_id: string;
+    raw_sales_member_id: string;
+    sort_join_date: string;
+    amount: number;
+  }> = [];
+
+  type RollupGroupedRow = {
+    key: string;
+    customer_name: string;
+    join_ymd: string;
+    item_name: string | null;
+    display_status: string;
+    from_member_id: string;
+    from_member_name: string;
+    from_rank: RankType;
+    effective_sales_member_id: string;
+    effective_sales_member_name: string;
+    unit_count: number;
+    subtotal: number;
+  }[];
+  let rollupGroupedRows: RollupGroupedRow = [];
+  const rollupItemsForFallback: RollupItem[] = Array.isArray(calcDetail?.rollup_items)
+    ? (calcDetail!.rollup_items as RollupItem[])
+    : [];
+  let rollupContractItemsTotal = 0;
+  let directRowsTotalUnits = 0;
+  let directRowsTotalAmount = 0;
+  let memberNameByIdForRollup = new Map<string, string>();
+  const rollupCommissionVal = Number(ss.rollup_commission ?? 0);
+
+  if (!isUnmapped) {
+    const endExclusive = (() => {
+      const [y, m, d] = end_date.split('-').map(Number);
+      const dt = new Date(Date.UTC(y, m - 1, d));
+      dt.setUTCDate(dt.getUTCDate() + 1);
+      return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+    })();
+
+    // 1) 직접 정산 계약: (settlement_sales_member_id ?? sales_member_id) === currentMemberId
+    //    두 조건을 별도 쿼리로 받아 union (Supabase or 문법 복잡성 회피)
+    const baseSelect =
+      'id, contract_code, join_date, status, unit_count, item_name, sales_member_id, settlement_sales_member_id, customer_id, sales_link_status, is_cancelled, rental_request_no, invoice_no, memo, happycall_result, customers(name)';
+    const [byOverrideRes, byRawRes] = await Promise.all([
+      db
+        .from('contracts')
+        .select(baseSelect)
+        .gte('join_date', start_date)
+        .lt('join_date', endExclusive)
+        .eq('settlement_sales_member_id', memberId as string),
+      db
+        .from('contracts')
+        .select(baseSelect)
+        .gte('join_date', start_date)
+        .lt('join_date', endExclusive)
+        .is('settlement_sales_member_id', null)
+        .eq('sales_member_id', memberId as string),
+    ]);
+
+    const seenContractIds = new Set<string>();
+    const directRowsRaw: DirectRow[] = [];
+    for (const list of [byOverrideRes.data ?? [], byRawRes.data ?? []]) {
+      for (const c of list as any[]) {
+        if (seenContractIds.has(c.id)) continue;
+        seenContractIds.add(c.id);
+        // 관리자 페이지와 동일한 v2 정적 가입 인정 기준 적용
+        if (
+          !isV2EligibleStatic({
+            status: String(c.status ?? ''),
+            is_cancelled: Boolean(c.is_cancelled ?? false),
+            sales_member_id: (c.sales_member_id ?? null) as string | null,
+            sales_link_status: (c.sales_link_status ?? null) as string | null,
+            happycall_result: (c.happycall_result ?? null) as string | null,
+            invoice_no: (c.invoice_no ?? null) as string | null,
+          })
+        ) {
+          continue;
+        }
+        directRowsRaw.push({
+          contract_id: c.id as string,
+          customer_name: ((c.customers as any)?.name as string | undefined)?.replace(/^\[고객\]\s*/, '') ?? '-',
+          join_ymd: String(c.join_date ?? '').slice(0, 10),
+          item_name: (c.item_name as string | null | undefined) ?? null,
+          display_status: getContractDisplayStatus({
+            status: String(c.status ?? ''),
+            rental_request_no: (c.rental_request_no ?? null) as string | null,
+            invoice_no: (c.invoice_no ?? null) as string | null,
+            memo: (c.memo ?? null) as string | null,
+          }),
+          unit_count: Number(c.unit_count ?? 0),
+          origin_member_id: (c.settlement_sales_member_id ?? c.sales_member_id) as string,
+          raw_sales_member_id: c.sales_member_id as string,
+          settlement_override_id: (c.settlement_sales_member_id ?? null) as string | null,
+          join_date: c.join_date as string | null,
+        });
+      }
+    }
+
+    // 계약별 (직접 + 롤업) 수당 합 — 본인 정산의 calculation_detail 기준
+    const directContractItems = Array.isArray(calcDetail?.direct_contracts)
+      ? (calcDetail!.direct_contracts as Array<{ contract_id: string; subtotal: number }>)
+      : [];
+    const rollupContractItems: RollupContractItem[] = Array.isArray(calcDetail?.rollup_contract_items)
+      ? (calcDetail!.rollup_contract_items as RollupContractItem[])
+      : [];
+    rollupContractItemsTotal = rollupContractItems.reduce((s, x) => s + Number(x.subtotal ?? 0), 0);
+    const amountByContractId = new Map<string, number>();
+    for (const it of directContractItems) {
+      const prev = amountByContractId.get(it.contract_id) ?? 0;
+      amountByContractId.set(it.contract_id, prev + Number(it.subtotal ?? 0));
+    }
+    for (const it of rollupContractItems) {
+      const prev = amountByContractId.get(it.contract_id) ?? 0;
+      amountByContractId.set(it.contract_id, prev + Number(it.subtotal ?? 0));
+    }
+
+    // 그룹화: (고객명, 가입일, 상품명, 표시상태) 가 동일하면 한 줄로 묶어 구좌·수당 합산
+    const directGroupMap = new Map<
+      string,
+      {
+        key: string;
+        contract_ids: string[];
+        customer_name: string;
+        join_ymd: string;
+        item_name: string | null;
+        display_status: string;
+        unit_count: number;
+        origin_member_id: string;
+        raw_sales_member_id: string;
+        sort_join_date: string;
+        amount: number;
+      }
+    >();
+    for (const r of directRowsRaw) {
+      const key = [r.customer_name, r.join_ymd, r.item_name ?? '', r.display_status].join('||');
+      const amount = amountByContractId.get(r.contract_id) ?? 0;
+      const existing = directGroupMap.get(key);
+      if (!existing) {
+        directGroupMap.set(key, {
+          key,
+          contract_ids: [r.contract_id],
+          customer_name: r.customer_name,
+          join_ymd: r.join_ymd,
+          item_name: r.item_name,
+          display_status: r.display_status,
+          unit_count: r.unit_count,
+          origin_member_id: r.origin_member_id,
+          raw_sales_member_id: r.raw_sales_member_id,
+          sort_join_date: String(r.join_date ?? ''),
+          amount,
+        });
+        continue;
+      }
+      existing.contract_ids.push(r.contract_id);
+      existing.unit_count += r.unit_count;
+      existing.amount += amount;
+      if (!existing.item_name && r.item_name) existing.item_name = r.item_name;
+    }
+    directRowsGrouped = [...directGroupMap.values()].sort((a, b) =>
+      (b.sort_join_date ?? '').localeCompare(a.sort_join_date ?? ''),
+    );
+    directRowsTotalUnits = directRowsGrouped.reduce((s, x) => s + x.unit_count, 0);
+    directRowsTotalAmount = directRowsGrouped.reduce((s, x) => s + x.amount, 0);
+
+    // 2) 롤업수당 상세 — rollup_contract_items 기준 메타 fetch
+    const rollupContractIds = Array.from(
+      new Set(rollupContractItems.map((r) => r.contract_id).filter(Boolean)),
+    );
+    const rollupContractMetaById = new Map<
+      string,
+      { customer_name: string; join_ymd: string; item_name: string | null; display_status: string }
+    >();
+    if (rollupContractIds.length > 0) {
+      const { data: metaRows } = await db
+        .from('contracts')
+        .select(
+          'id, status, join_date, item_name, rental_request_no, invoice_no, memo, customers(name)',
+        )
+        .in('id', rollupContractIds);
+      for (const c of (metaRows ?? []) as any[]) {
+        rollupContractMetaById.set(c.id as string, {
+          customer_name: ((c.customers as any)?.name as string | undefined)?.replace(/^\[고객\]\s*/, '') ?? '-',
+          join_ymd: String(c.join_date ?? '').slice(0, 10),
+          item_name: (c.item_name as string | null | undefined) ?? null,
+          display_status: getContractDisplayStatus({
+            status: String(c.status ?? ''),
+            rental_request_no: (c.rental_request_no ?? null) as string | null,
+            invoice_no: (c.invoice_no ?? null) as string | null,
+            memo: (c.memo ?? null) as string | null,
+          }),
+        });
+      }
+    }
+
+    // 멤버 이름 매핑 (rollup 의 from_member_id / effective_sales_member_id)
+    const memberIdsForRollup = Array.from(
+      new Set(
+        rollupContractItems.flatMap((r) => [r.from_member_id, r.effective_sales_member_id]).filter(Boolean) as string[],
+      ),
+    );
+    if (memberIdsForRollup.length > 0) {
+      const { data: nameRows } = await db
+        .from('organization_members')
+        .select('id, name')
+        .in('id', memberIdsForRollup);
+      for (const m of (nameRows ?? []) as any[]) {
+        memberNameByIdForRollup.set(
+          m.id as string,
+          String(m.name ?? '').replace(/^\[고객\]\s*/, ''),
+        );
+      }
+    }
+
+    // 그룹화: (고객명, 가입일, 상품명, 표시상태, 산하멤버)
+    const rollupGroupMap = new Map<
+      string,
+      {
+        key: string;
+        customer_name: string;
+        join_ymd: string;
+        item_name: string | null;
+        display_status: string;
+        from_member_id: string;
+        from_member_name: string;
+        from_rank: RankType;
+        effective_sales_member_id: string;
+        effective_sales_member_name: string;
+        unit_count: number;
+        subtotal: number;
+      }
+    >();
+    for (const r of rollupContractItems) {
+      const meta = rollupContractMetaById.get(r.contract_id);
+      const customer_name = meta?.customer_name ?? '-';
+      const join_ymd = meta?.join_ymd ?? '';
+      const item_name = meta?.item_name ?? null;
+      const display_status = meta?.display_status ?? '-';
+      const key = [
+        customer_name,
+        join_ymd,
+        item_name ?? '',
+        display_status,
+        r.from_member_id,
+      ].join('||');
+      const fromName =
+        memberNameByIdForRollup.get(r.from_member_id) ?? r.from_member_name ?? r.from_member_id;
+      const effName =
+        memberNameByIdForRollup.get(r.effective_sales_member_id) ??
+        r.effective_sales_member_name ??
+        r.effective_sales_member_id;
+      const units = Number(r.unit_count ?? 0);
+      const sub = Number(r.subtotal ?? 0);
+      const existing = rollupGroupMap.get(key);
+      if (!existing) {
+        rollupGroupMap.set(key, {
+          key,
+          customer_name,
+          join_ymd,
+          item_name,
+          display_status,
+          from_member_id: r.from_member_id,
+          from_member_name: fromName,
+          from_rank: r.from_rank,
+          effective_sales_member_id: r.effective_sales_member_id,
+          effective_sales_member_name: effName,
+          unit_count: units,
+          subtotal: sub,
+        });
+        continue;
+      }
+      existing.unit_count += units;
+      existing.subtotal += sub;
+      if (!existing.item_name && item_name) existing.item_name = item_name;
+    }
+    rollupGroupedRows = [...rollupGroupMap.values()].sort((a, b) => {
+      if (a.join_ymd !== b.join_ymd) return b.join_ymd.localeCompare(a.join_ymd);
+      return a.from_member_name.localeCompare(b.from_member_name);
+    });
+  }
+
+  // 이름 보강용 (직접 정산 계약 목록의 원 담당자 표시)
+  const directMemberIdsToResolve = Array.from(
+    new Set(
+      directRowsGrouped
+        .flatMap((r) => [r.origin_member_id, r.raw_sales_member_id])
+        .filter(Boolean) as string[],
+    ),
+  );
+  const memberNameByIdForDirect = new Map<string, string>();
+  if (!isUnmapped && directMemberIdsToResolve.length > 0) {
+    const { data: nameRows } = await db
+      .from('organization_members')
+      .select('id, name')
+      .in('id', directMemberIdsToResolve);
+    for (const m of (nameRows ?? []) as any[]) {
+      memberNameByIdForDirect.set(
+        m.id as string,
+        String(m.name ?? '').replace(/^\[고객\]\s*/, ''),
+      );
+    }
+  }
 
   return (
     <div className="p-4 sm:p-6">
@@ -376,6 +710,232 @@ export default async function OrganizationStatementPage({
           </div>
         </div>
       </div>
+
+      {!isUnmapped && (
+        <>
+          {/* ── 직접 정산 계약 목록 ──────────────────────────────────────────── */}
+          <section className="mt-6">
+            <h3 className="text-base font-semibold text-gray-800 mb-2">직접 정산 계약 목록</h3>
+            <p className="text-xs text-gray-500 mb-2">
+              본인이 정산 담당자로 직접 정산받는 계약만 표시합니다. (정산 담당자 보정 계약 포함)
+            </p>
+            <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      {['고객명', '가입일', '물품명', '표시상태', '구좌', '원 담당자', '수당'].map((h) => (
+                        <th
+                          key={h}
+                          className="px-3 py-2 text-left text-xs font-semibold text-gray-600 whitespace-nowrap"
+                        >
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {directRowsGrouped.length === 0 && (
+                      <tr>
+                        <td colSpan={7} className="px-6 py-8 text-center text-sm text-gray-500">
+                          표시할 계약이 없습니다.
+                        </td>
+                      </tr>
+                    )}
+                    {directRowsGrouped.map((r) => {
+                      const rawName =
+                        memberNameByIdForDirect.get(r.raw_sales_member_id) ?? r.raw_sales_member_id;
+                      return (
+                        <tr key={r.key} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 whitespace-nowrap">{r.customer_name}</td>
+                          <td className="px-3 py-2 tabular-nums text-gray-600 whitespace-nowrap">
+                            {r.join_ymd || '-'}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">
+                            {r.item_name ?? '-'}
+                          </td>
+                          <td className="px-3 py-2">{r.display_status}</td>
+                          <td className="px-3 py-2 tabular-nums text-right">
+                            {r.unit_count.toLocaleString('ko-KR')}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">
+                            {rawName}
+                          </td>
+                          <td className="px-3 py-2 tabular-nums text-right font-semibold">
+                            ₩{r.amount.toLocaleString('ko-KR')}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  {directRowsGrouped.length > 0 && (
+                    <tfoot className="bg-gray-50 border-t border-gray-200">
+                      <tr>
+                        <td colSpan={4} className="px-3 py-2 text-right text-xs text-gray-500">
+                          합계
+                        </td>
+                        <td className="px-3 py-2 tabular-nums text-right">
+                          {directRowsTotalUnits.toLocaleString('ko-KR')}
+                        </td>
+                        <td className="px-3 py-2" />
+                        <td className="px-3 py-2 tabular-nums text-right font-semibold">
+                          ₩{directRowsTotalAmount.toLocaleString('ko-KR')}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            </div>
+          </section>
+
+          {/* ── 롤업수당 상세 ───────────────────────────────────────────────── */}
+          <section className="mt-6 mb-6">
+            <div className="mb-2 flex items-end justify-between gap-3">
+              <h3 className="text-base font-semibold text-gray-800">롤업수당 상세</h3>
+              <div className="text-xs text-gray-500">
+                롤업수당 합계{' '}
+                <span className="font-semibold text-gray-700">
+                  ₩{rollupCommissionVal.toLocaleString('ko-KR')}
+                </span>
+              </div>
+            </div>
+
+            {rollupGroupedRows.length > 0 ? (
+              <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        {[
+                          '고객명',
+                          '가입일',
+                          '상품명',
+                          '계약 상태',
+                          '산하 멤버',
+                          '실제 계약 담당자',
+                          '구좌',
+                          '구좌당 롤업',
+                          '롤업 소계',
+                        ].map((h) => (
+                          <th
+                            key={h}
+                            className="px-3 py-2 text-left text-xs font-semibold text-gray-600 whitespace-nowrap"
+                          >
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {rollupGroupedRows.map((r) => {
+                        const perUnitAvg = r.unit_count > 0 ? r.subtotal / r.unit_count : 0;
+                        return (
+                          <tr key={r.key} className="hover:bg-gray-50">
+                            <td className="px-3 py-2 whitespace-nowrap">{r.customer_name}</td>
+                            <td className="px-3 py-2 tabular-nums text-gray-600 whitespace-nowrap">
+                              {r.join_ymd || '-'}
+                            </td>
+                            <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">
+                              {r.item_name ?? '-'}
+                            </td>
+                            <td className="px-3 py-2 text-xs whitespace-nowrap">
+                              {r.display_status}
+                            </td>
+                            <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">
+                              {r.from_member_name}
+                              <span className="ml-1 text-[11px] text-gray-400">
+                                ({r.from_rank ?? '-'})
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">
+                              {r.effective_sales_member_name}
+                            </td>
+                            <td className="px-3 py-2 tabular-nums text-right">
+                              {r.unit_count.toLocaleString('ko-KR')}
+                            </td>
+                            <td className="px-3 py-2 tabular-nums text-right text-gray-700">
+                              ₩{Math.round(perUnitAvg).toLocaleString('ko-KR')}
+                            </td>
+                            <td className="px-3 py-2 tabular-nums text-right font-semibold">
+                              ₩{r.subtotal.toLocaleString('ko-KR')}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot className="bg-gray-50 border-t border-gray-200">
+                      <tr>
+                        <td colSpan={6} className="px-3 py-2 text-right text-xs text-gray-500">
+                          합계
+                        </td>
+                        <td className="px-3 py-2 tabular-nums text-right">
+                          {rollupGroupedRows
+                            .reduce((s, x) => s + x.unit_count, 0)
+                            .toLocaleString('ko-KR')}
+                        </td>
+                        <td className="px-3 py-2" />
+                        <td className="px-3 py-2 tabular-nums text-right font-semibold">
+                          ₩{rollupContractItemsTotal.toLocaleString('ko-KR')}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            ) : rollupItemsForFallback.length > 0 ? (
+              <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+                <div className="px-4 py-3 text-xs text-amber-700 bg-amber-50 border-b border-amber-100">
+                  이 월의 정산은 계약 단위 근거가 저장되기 전 데이터입니다. 멤버 단위 요약만 표시합니다.
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        {['산하 멤버', '직급', '구좌', '구좌당 롤업(평균)', '롤업 소계'].map((h) => (
+                          <th
+                            key={h}
+                            className="px-3 py-2 text-left text-xs font-semibold text-gray-600 whitespace-nowrap"
+                          >
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {rollupItemsForFallback.map((r, idx) => {
+                        const nm =
+                          memberNameByIdForRollup.get(r.from_member_id) ??
+                          r.from_member_name ??
+                          r.from_member_id;
+                        return (
+                          <tr key={`${r.from_member_id}__${idx}`} className="hover:bg-gray-50">
+                            <td className="px-3 py-2 text-xs text-gray-700">{nm}</td>
+                            <td className="px-3 py-2 text-xs text-gray-500">{r.from_rank}</td>
+                            <td className="px-3 py-2 tabular-nums text-right">
+                              {Number(r.unit_count ?? 0).toLocaleString('ko-KR')}
+                            </td>
+                            <td className="px-3 py-2 tabular-nums text-right text-gray-700">
+                              ₩{Math.round(Number(r.rollup_amount_per_unit ?? 0)).toLocaleString('ko-KR')}
+                            </td>
+                            <td className="px-3 py-2 tabular-nums text-right font-semibold">
+                              ₩{Number(r.subtotal ?? 0).toLocaleString('ko-KR')}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-white rounded-lg border border-gray-200 px-4 py-6 text-center text-sm text-gray-500">
+                이번 달 롤업수당 내역이 없습니다.
+              </div>
+            )}
+          </section>
+        </>
+      )}
     </div>
   );
 }
