@@ -9,7 +9,12 @@
  * 새 정산 가입 인정 기준
  *   1) 해피콜 결과(happycall_result) ∈ { '성공', '완료', '심사완료', '계약변경' }
  *      ※ '심사완료' 는 '완료' 와 동일하게 처리한다.
- *   2) 해피콜 완료일(happy_call_at) 가 정산월 윈도우(전월26일~당월25일, 주말/공휴일 익영업일 보정) 안에 있음
+ *   2) 해피콜 완료일(happy_call_at) 가 정산월 윈도우 안에 있음
+ *      - 정산월 마감일 = 매월 25일, 단 주말/공휴일이면 다음 영업일.
+ *      - 정산월 시작일 = 이전 정산월 마감일의 다음 날 (윈도우는 절대 겹치지 않음).
+ *      - 예) 2026-05 = 2026-04-28 ~ 2026-05-26, 2026-06 = 2026-05-27 ~ 2026-06-25
+ *        (2026-05-25 부처님오신날 대체공휴일이라 5월 마감일이 5/26 으로 밀림.
+ *         따라서 5/26 해피콜 완료 건은 6월이 아닌 5월 정산에 포함된다.)
  *   3) 송장번호(invoice_no) 가 yearMonth 30일 23:59:59 (KST) 까지 존재
  *      - 송장 마감일은 공휴일/주말 보정을 적용하지 않는다. 매월 30일 23:59:59 KST 가 절대 마감선.
  *        (해피콜 윈도우에는 공휴일/주말 보정이 적용되는 것과 다르다.)
@@ -31,7 +36,6 @@
  *     스킵하고 송장번호 조건만 재평가한다(이미 관리자가 명시적으로 이번 월에 정산되도록 지정한 케이스).
  */
 
-import { getSettlementWindowForYearMonth } from './settlement-window';
 import { isKoreanHoliday } from './korean-holidays';
 
 export const SETTLEMENT_VALID_HAPPYCALL_RESULTS: ReadonlySet<string> = new Set([
@@ -91,18 +95,40 @@ function shiftToNextWorkday(ymd: string): string {
 }
 
 /**
- * 정산월의 해피콜 인정 윈도우 (전월26일~당월25일, 양끝 주말/공휴일이면 다음 영업일까지).
+ * 정산월의 해피콜 인정 윈도우.
  *
- * 예) 2026-05 → start: 2026-04-27 (원 26은 일), end: 2026-05-26 (25일이 부처님오신날 대체공휴일)
+ * 계산 규칙:
+ *   - 정산월 마감일 = 매월 25일. 단, 25일이 주말/공휴일이면 다음 영업일.
+ *   - 정산월 시작일 = "이전 정산월 마감일"의 다음 날.
+ *     (이전 정산월 종료일과 시작일이 절대 겹치지 않도록 +1 일 보정)
+ *
+ * 예) 2026-05 정산: 2026-05-25(대체공휴일) → 다음 영업일 2026-05-26 이 마감일.
+ *     ⇒ 2026-05 윈도우 = 2026-04-28 ~ 2026-05-26
+ *       (2026-04-25 토 → 다음 영업일 2026-04-27 월 = 4월 마감, 시작은 그 다음 날인 2026-04-28)
+ *     ⇒ 2026-06 윈도우 = 2026-05-27 ~ 2026-06-25
+ *
+ * 따라서 2026-05-26 해피콜 완료 계약은 2026-06 이 아니라 2026-05 정산에 포함된다.
  */
 export function getHappycallWindowForYearMonth(yearMonth: string): {
   start_date: string;
   end_date: string;
 } {
-  const base = getSettlementWindowForYearMonth(yearMonth);
+  if (!/^\d{4}-\d{2}$/.test(yearMonth)) {
+    throw new Error(`Invalid year_month: ${yearMonth}`);
+  }
+  const [ys, ms] = yearMonth.split('-');
+  const y = parseInt(ys, 10);
+  const m = parseInt(ms, 10);
+  const py = m === 1 ? y - 1 : y;
+  const pm = m === 1 ? 12 : m - 1;
+  const prevYm = `${String(py).padStart(4, '0')}-${String(pm).padStart(2, '0')}`;
+
+  const thisEnd = shiftToNextWorkday(`${yearMonth}-25`);
+  const prevEnd = shiftToNextWorkday(`${prevYm}-25`);
+  const start = addDaysYmd(prevEnd, 1);
   return {
-    start_date: shiftToNextWorkday(base.start_date),
-    end_date: shiftToNextWorkday(base.end_date),
+    start_date: start,
+    end_date: thisEnd,
   };
 }
 
