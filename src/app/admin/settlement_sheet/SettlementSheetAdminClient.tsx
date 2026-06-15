@@ -86,7 +86,6 @@ export default function SettlementSheetAdminClient({
   const [filter, setFilter] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [flash, setFlash] = useState<string | null>(null);
 
   const filteredRows = useMemo(() => {
     const f = filter.trim();
@@ -125,8 +124,6 @@ export default function SettlementSheetAdminClient({
   async function onCopy(text: string) {
     try {
       await navigator.clipboard.writeText(text);
-      setFlash('클립보드에 복사했습니다.');
-      setTimeout(() => setFlash(null), 1500);
     } catch {
       setError('복사에 실패했습니다.');
     }
@@ -137,11 +134,6 @@ export default function SettlementSheetAdminClient({
       {error ? (
         <div className="mb-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800">
           {error}
-        </div>
-      ) : null}
-      {flash ? (
-        <div className="mb-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
-          {flash}
         </div>
       ) : null}
 
