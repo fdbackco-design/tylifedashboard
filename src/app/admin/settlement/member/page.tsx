@@ -637,8 +637,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
           <>
             <h3 className="text-base font-semibold text-gray-800 mb-2">직접 정산 계약 목록</h3>
             <p className="text-xs text-gray-500 mb-2">
-              <code className="font-mono text-[11px] bg-gray-100 px-1 rounded">settlement_sales_member_id ?? sales_member_id</code>{' '}
-              가 이 멤버인 계약만 표시합니다. (정산 담당자 보정 계약 포함)
+              직접 계약 + 정산 담단자 보정 계약
             </p>
             <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
               <div className="overflow-x-auto">
