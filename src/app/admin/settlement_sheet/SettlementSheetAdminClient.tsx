@@ -44,10 +44,20 @@ interface Props {
   rows: SheetRowVM[];
 }
 
-function buildShareUrl(tyCode: string, yearMonth: string): string {
-  if (typeof window === 'undefined') return '';
-  const base = window.location.origin;
-  return `${base}/organization/statement/${encodeURIComponent(tyCode)}?year_month=${encodeURIComponent(yearMonth)}`;
+/**
+ * 공유 명세서 상대 경로(렌더 안정성을 위해 origin 은 포함하지 않는다).
+ * - 서버 렌더와 클라이언트 hydration 시 동일한 값이 나오도록 window 를 참조하지 않는다.
+ * - 실제 절대 URL 은 클립보드 복사 시점에 `window.location.origin` 과 결합한다.
+ */
+function buildSharePath(tyCode: string, yearMonth: string): string {
+  if (!tyCode) return '';
+  return `/organization/statement/${encodeURIComponent(tyCode)}?year_month=${encodeURIComponent(yearMonth)}`;
+}
+
+function toAbsoluteUrl(path: string): string {
+  if (!path) return '';
+  if (typeof window === 'undefined') return path;
+  return `${window.location.origin}${path}`;
 }
 
 function effectiveValue(override: number | null | undefined, base: number): number {
@@ -82,12 +92,18 @@ export default function SettlementSheetAdminClient({
     const f = filter.trim();
     if (!f) return rows;
     const lower = f.toLowerCase();
-    return rows.filter(
-      (r) =>
-        r.name.toLowerCase().includes(lower) ||
-        r.tyCode.toLowerCase().includes(lower) ||
-        r.phone.replace(/\D+/g, '').includes(f.replace(/\D+/g, '')),
-    );
+    const digits = f.replace(/\D+/g, '');
+    return rows.filter((r) => {
+      if (r.name.toLowerCase().includes(lower)) return true;
+      if (r.tyCode && r.tyCode.toLowerCase().includes(lower)) return true;
+      // 전화번호는 입력에 숫자가 한 자리 이상 있을 때만 매칭. 그렇지 않으면
+      // `''.includes('')` 가 항상 true 가 되어 모든 행이 들어가는 버그가 생긴다.
+      if (digits.length > 0) {
+        const phoneDigits = r.phone.replace(/\D+/g, '');
+        if (phoneDigits.includes(digits)) return true;
+      }
+      return false;
+    });
   }, [rows, filter]);
 
   function onSubmitSearch(e: React.FormEvent<HTMLFormElement>) {
@@ -203,7 +219,7 @@ export default function SettlementSheetAdminClient({
                   r.override.overrideAmount != null ||
                   r.override.bonusAmount != null
                 );
-                const shareUrl = r.tyCode ? buildShareUrl(r.tyCode, yearMonth) : '';
+                const sharePath = buildSharePath(r.tyCode, yearMonth);
                 return (
                   <tr key={r.memberId} className="border-t border-slate-100 hover:bg-slate-50/60">
                     <td className="px-3 py-2 font-medium text-slate-900">
@@ -230,12 +246,12 @@ export default function SettlementSheetAdminClient({
                         >
                           수정
                         </button>
-                        {shareUrl ? (
+                        {sharePath ? (
                           <button
                             type="button"
                             className="rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
-                            onClick={() => onCopy(shareUrl)}
-                            title={shareUrl}
+                            onClick={() => onCopy(toAbsoluteUrl(sharePath))}
+                            title={sharePath}
                           >
                             링크
                           </button>
