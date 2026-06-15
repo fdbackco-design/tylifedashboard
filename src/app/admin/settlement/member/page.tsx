@@ -4,7 +4,11 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { getSettlementWindowForYearMonth } from '@/lib/settlement/settlement-window';
 import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
 import { isOrgDisplayHiddenMemberName } from '@/lib/organization/org-display-hidden';
-import { isV2EligibleStatic } from '@/lib/settlement/settlement-eligibility-v2';
+import {
+  isV2EligibleStatic,
+  getHappycallWindowForYearMonth,
+  happycallYmdSeoul,
+} from '@/lib/settlement/settlement-eligibility-v2';
 import type { RankType, SettlementCalculationDetail, RollupContractItem, RollupItem } from '@/lib/types';
 
 export const metadata: Metadata = { title: '정산 현황 · 산하 내역' };
@@ -22,6 +26,16 @@ function nextDay(dateYmd: string): string {
   const dt = new Date(Date.UTC(y, m - 1, d));
   dt.setUTCDate(dt.getUTCDate() + 1);
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Asia/Seoul 기준 'YYYY-MM-DD' 자정의 UTC ISO 문자열을 반환.
+ * (예: '2026-06-26' → '2026-06-25T15:00:00.000Z')
+ * happy_call_at (timestamptz) 범위 쿼리에 사용.
+ */
+function kstYmdToUtcIso(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d, -9, 0, 0)).toISOString();
 }
 
 function collectSubtreeMemberIds(
@@ -58,8 +72,12 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
   }
 
   const db = createAdminSupabaseClient();
+  // 가입 정산월 윈도우(참고용 표시) — 필터에는 사용하지 않는다.
   const { start_date, end_date } = getSettlementWindowForYearMonth(yearMonth);
-  const endExclusive = nextDay(end_date);
+  // 해피콜 완료 일자 기준 정산월 윈도우(공휴일/주말 보정 반영) — 본 페이지의 표시 필터 기준.
+  const hcWindow = getHappycallWindowForYearMonth(yearMonth);
+  const hcFromIso = kstYmdToUtcIso(hcWindow.start_date); // KST 자정 (inclusive)
+  const hcToIso = kstYmdToUtcIso(nextDay(hcWindow.end_date)); // KST 다음날 자정 (exclusive)
 
   const [memberRes, membersRes, edgesRes, contractRowsRes, settlementRes] = await Promise.all([
     db
@@ -77,8 +95,9 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
       .select(
         'id, contract_code, join_date, status, unit_count, item_name, sales_member_id, settlement_sales_member_id, customer_id, sales_link_status, is_cancelled, rental_request_no, invoice_no, memo, happy_call_at, happycall_result, customers(name)',
       )
-      .gte('join_date', start_date)
-      .lt('join_date', endExclusive),
+      .not('happy_call_at', 'is', null)
+      .gte('happy_call_at', hcFromIso)
+      .lt('happy_call_at', hcToIso),
     db
       .from('monthly_settlements')
       .select('rollup_commission, calculation_detail')
@@ -185,8 +204,15 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
   };
 
   const rows = ((contractRowsRes.data ?? []) as any[])
-    // v_contract_settlement_base 와 동일한 "v2 정적 가입 인정 기준" 으로 필터
-    // (취소/해약/계약취소 제외, sales_link_status='linked', happycall_result valid, invoice_no 존재)
+    // 1) 해피콜 완료 일자(서울시각 YMD)가 본 정산월의 해피콜 윈도우 [start..end] 안인지 정확 검증.
+    //    DB 쿼리는 KST 자정 ISO 로 보수적으로 가져왔고, 여기서 한 번 더 확정한다.
+    .filter((c) => {
+      const hcYmd = happycallYmdSeoul(c.happy_call_at);
+      if (!hcYmd) return false;
+      return hcYmd >= hcWindow.start_date && hcYmd <= hcWindow.end_date;
+    })
+    // 2) v_contract_settlement_base 와 동일한 "v2 정적 가입 인정 기준" 으로 필터
+    //    (취소/해약/계약취소 제외, sales_link_status='linked', happycall_result valid, invoice_no 존재)
     .filter((c) =>
       isV2EligibleStatic({
         status: String(c.status ?? ''),
@@ -203,6 +229,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         sales_member_id: c.sales_member_id as string,
       });
       const joinYmd = String(c.join_date ?? '').slice(0, 10);
+      const hcYmd = happycallYmdSeoul(c.happy_call_at);
       const settlementOverride = (c.settlement_sales_member_id ?? null) as string | null;
       const rawSales = c.sales_member_id as string;
       // effectiveSettlementMemberId:
@@ -215,6 +242,8 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         contract_code: c.contract_code as string,
         join_date: c.join_date as string | null,
         join_ymd: joinYmd,
+        hc_ymd: hcYmd,
+        happy_call_at: (c.happy_call_at ?? null) as string | null,
         unit_count: Number(c.unit_count ?? 0),
         status: String(c.status ?? ''),
         origin,
@@ -236,9 +265,10 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     //   (산하 멤버의 계약 / 롤업수당 발생 계약은 이 목록에서 제외하고,
     //    별도의 "롤업수당 상세" 섹션에서 rollup_contract_items 기반으로 보여준다.)
     .filter((x) => x.effective_settlement_member_id === memberId)
-    .sort((a, b) => (b.join_date ?? '').localeCompare(a.join_date ?? ''));
+    // 정렬은 해피콜 완료 일자(정산월 기준 키) 내림차순
+    .sort((a, b) => (b.hc_ymd ?? '').localeCompare(a.hc_ymd ?? ''));
 
-  // 같은 고객명 + 같은 가입일 계약은 구좌 합산으로 한 줄로 묶는다.
+  // 같은 고객명 + 같은 해피콜 완료일자 계약은 구좌 합산으로 한 줄로 묶는다.
   const groupedRows = (() => {
     const m = new Map<
       string,
@@ -247,18 +277,19 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         contract_codes: string[];
         customer_name: string;
         join_ymd: string;
-        // 표시값은 첫 항목 기준(동일 가입일 그룹 내에는 보통 동일하나, 다를 수 있어도 UI 요구는 구좌 묶기)
+        hc_ymd: string;
+        // 표시값은 첫 항목 기준(동일 키 그룹 내에는 보통 동일하나, 다를 수 있어도 UI 요구는 구좌 묶기)
         display_status: string;
         item_name: string | null;
         unit_count: number;
         origin: string;
         raw_sales_member_id: string;
-        sort_join_date: string;
+        sort_key: string;
       }
     >();
 
     for (const r of rows) {
-      const key = `${r.customer_name}__${r.join_ymd}`;
+      const key = `${r.customer_name}__${r.hc_ymd}`;
       const existing = m.get(key);
       if (!existing) {
         m.set(key, {
@@ -266,12 +297,13 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
           contract_codes: [r.contract_code],
           customer_name: r.customer_name,
           join_ymd: r.join_ymd,
+          hc_ymd: r.hc_ymd,
           display_status: r.display_status,
           item_name: r.item_name,
           unit_count: Number(r.unit_count ?? 0),
           origin: r.origin,
           raw_sales_member_id: r.raw_sales_member_id,
-          sort_join_date: String(r.join_date ?? ''),
+          sort_key: r.hc_ymd ?? '',
         });
         continue;
       }
@@ -282,7 +314,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
       if (!existing.item_name && r.item_name) existing.item_name = r.item_name;
     }
 
-    return [...m.values()].sort((a, b) => (b.sort_join_date ?? '').localeCompare(a.sort_join_date ?? ''));
+    return [...m.values()].sort((a, b) => (b.sort_key ?? '').localeCompare(a.sort_key ?? ''));
   })();
 
   const displayName = String(member.name ?? '').replace(/^\[고객\]\s*/, '');
@@ -451,7 +483,8 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
             {displayName} · {yearMonth}
           </h2>
           <p className="text-sm text-gray-500 mt-1">
-            기준 {start_date}~{end_date} · 이 멤버가 정산 담당자로 직접 정산받는 계약만 아래 표에 표시합니다.
+            해피콜 완료 일자 기준 {hcWindow.start_date}~{hcWindow.end_date} 정산월의 계약을 표시합니다.
+            <span className="text-gray-400"> (가입 정산 윈도우 {start_date}~{end_date})</span>
           </p>
           <p className="text-xs text-gray-400 mt-1">
             총 {groupedRows.length.toLocaleString()}행
@@ -647,6 +680,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                       {[
                         '계약코드',
                         '고객명',
+                        '해피콜 완료일',
                         '가입일',
                         '물품명',
                         '표시상태',
@@ -667,18 +701,23 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                   <tbody className="divide-y divide-gray-100">
                     {groupedRowsWithAmount.length === 0 && (
                       <tr>
-                        <td colSpan={9} className="px-6 py-10 text-center text-sm text-gray-500">
+                        <td colSpan={10} className="px-6 py-10 text-center text-sm text-gray-500">
                           표시할 계약이 없습니다.
                         </td>
                       </tr>
                     )}
                     {groupedRowsWithAmount.map((r) => (
-                      <tr key={`${r.customer_name}__${r.join_ymd}`} className="hover:bg-gray-50">
+                      <tr key={`${r.customer_name}__${r.hc_ymd}`} className="hover:bg-gray-50">
                         <td className="px-4 py-3 font-mono text-xs text-gray-700">
                           {r.contract_codes.join(', ')}
                         </td>
                         <td className="px-4 py-3">{r.customer_name}</td>
-                        <td className="px-4 py-3 tabular-nums text-gray-600">{r.join_ymd}</td>
+                        <td className="px-4 py-3 tabular-nums text-gray-700 whitespace-nowrap font-medium">
+                          {r.hc_ymd || '-'}
+                        </td>
+                        <td className="px-4 py-3 tabular-nums text-gray-500 whitespace-nowrap">
+                          {r.join_ymd}
+                        </td>
                         <td className="px-4 py-3 text-xs text-gray-700 whitespace-nowrap">
                           {r.item_name ?? '-'}
                         </td>
@@ -704,7 +743,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                   {groupedRowsWithAmount.length > 0 && (
                     <tfoot className="bg-gray-50 border-t border-gray-200">
                       <tr>
-                        <td colSpan={5} className="px-4 py-3 text-right text-xs text-gray-500">
+                        <td colSpan={6} className="px-4 py-3 text-right text-xs text-gray-500">
                           합계
                         </td>
                         <td className="px-4 py-3 tabular-nums text-right">
