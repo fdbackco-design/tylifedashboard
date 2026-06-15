@@ -179,7 +179,7 @@ export default function StatementSheetView(props: StatementSheetViewProps) {
                 <td className="px-4 py-3">실지급액</td>
                 <td className="px-4 py-3 text-right tabular-nums">{formatWon(netPayment)}</td>
                 <td className="px-4 py-3 text-right text-[12px] font-normal text-slate-500">
-                  세후 지급액
+                  
                 </td>
               </tr>
             </tbody>
