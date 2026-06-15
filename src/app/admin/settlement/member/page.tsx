@@ -336,6 +336,25 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     (membersRaw as any[]).map((m) => [m.id as string, String(m.name ?? '').replace(/^\[고객\]\s*/, '')]),
   );
 
+  // 산하 계약 목록 표시용: 계약별로 이 멤버에게 발생한 정산 금액(직접 + 롤업) 합.
+  // - direct_contracts: 그 계약이 멤버 본인에게 직접 발생시킨 수당
+  // - rollup_contract_items: 그 계약이 멤버에게 롤업으로 발생시킨 수당
+  // 정산 결과 자체(monthly_settlements 합계)를 변경하지 않고 표시만 한다.
+  const directContractItems: { contract_id: string; subtotal: number }[] = Array.isArray(
+    calcDetail?.direct_contracts,
+  )
+    ? (calcDetail!.direct_contracts as Array<{ contract_id: string; subtotal: number }>)
+    : [];
+  const amountByContractId = new Map<string, number>();
+  for (const it of directContractItems) {
+    const prev = amountByContractId.get(it.contract_id) ?? 0;
+    amountByContractId.set(it.contract_id, prev + Number(it.subtotal ?? 0));
+  }
+  for (const it of rollupContractItemsRaw) {
+    const prev = amountByContractId.get(it.contract_id) ?? 0;
+    amountByContractId.set(it.contract_id, prev + Number(it.subtotal ?? 0));
+  }
+
   // 그룹화: (고객명, 가입일, 상품명, 계약상태, 산하멤버) 가 동일한 계약은 한 줄로 묶어
   // 구좌수/롤업 소계를 합산하고, 구좌당 롤업은 가중평균(= sum(subtotal)/sum(units)) 으로 표시.
   // (계약 단위 합계 자체는 변경되지 않으므로 정합성 영향 없음)
@@ -591,51 +610,108 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
       </section>
 
       {/* ── 산하 계약 목록 ─────────────────────────────────────────────────── */}
-      <h3 className="text-base font-semibold text-gray-800 mb-2">산하 계약 목록</h3>
-      <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                {['계약코드', '고객명', '가입일', '물품명', '표시상태', '구좌', '귀속(산하)', '원 담당자'].map((h) => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-600 whitespace-nowrap">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {groupedRows.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="px-6 py-10 text-center text-sm text-gray-500">
-                    표시할 계약이 없습니다.
-                  </td>
-                </tr>
-              )}
-              {groupedRows.map((r) => (
-                <tr key={`${r.customer_name}__${r.join_ymd}`} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-mono text-xs text-gray-700">
-                    {r.contract_codes.join(', ')}
-                  </td>
-                  <td className="px-4 py-3">{r.customer_name}</td>
-                  <td className="px-4 py-3 tabular-nums text-gray-600">{r.join_ymd}</td>
-                  <td className="px-4 py-3 text-xs text-gray-700 whitespace-nowrap">
-                    {r.item_name ?? '-'}
-                  </td>
-                  <td className="px-4 py-3">{r.display_status}</td>
-                  <td className="px-4 py-3 tabular-nums text-right">{Number(r.unit_count ?? 0).toLocaleString()}</td>
-                  <td className="px-4 py-3 text-xs text-gray-600">
-                    {(membersRaw.find((m: any) => m.id === r.origin)?.name ?? r.origin) as string}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-gray-500">
-                    {(membersRaw.find((m: any) => m.id === r.raw_sales_member_id)?.name ?? r.raw_sales_member_id) as string}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {(() => {
+        // 표시용: 각 그룹의 (직접 + 롤업) 수당 합. 정산 합계 값은 변경하지 않는다.
+        const groupedRowsWithAmount = groupedRows.map((r) => {
+          const amount = r.contract_ids.reduce(
+            (s, id) => s + (amountByContractId.get(id) ?? 0),
+            0,
+          );
+          return { ...r, amount };
+        });
+        const totalUnits = groupedRowsWithAmount.reduce(
+          (s, x) => s + Number(x.unit_count ?? 0),
+          0,
+        );
+        const totalAmount = groupedRowsWithAmount.reduce((s, x) => s + x.amount, 0);
+        return (
+          <>
+            <h3 className="text-base font-semibold text-gray-800 mb-2">산하 계약 목록</h3>
+            <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      {[
+                        '계약코드',
+                        '고객명',
+                        '가입일',
+                        '물품명',
+                        '표시상태',
+                        '구좌',
+                        '귀속(산하)',
+                        '원 담당자',
+                        '수당',
+                      ].map((h) => (
+                        <th
+                          key={h}
+                          className="px-4 py-3 text-left text-xs font-semibold text-gray-600 whitespace-nowrap"
+                        >
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {groupedRowsWithAmount.length === 0 && (
+                      <tr>
+                        <td colSpan={9} className="px-6 py-10 text-center text-sm text-gray-500">
+                          표시할 계약이 없습니다.
+                        </td>
+                      </tr>
+                    )}
+                    {groupedRowsWithAmount.map((r) => (
+                      <tr key={`${r.customer_name}__${r.join_ymd}`} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-mono text-xs text-gray-700">
+                          {r.contract_codes.join(', ')}
+                        </td>
+                        <td className="px-4 py-3">{r.customer_name}</td>
+                        <td className="px-4 py-3 tabular-nums text-gray-600">{r.join_ymd}</td>
+                        <td className="px-4 py-3 text-xs text-gray-700 whitespace-nowrap">
+                          {r.item_name ?? '-'}
+                        </td>
+                        <td className="px-4 py-3">{r.display_status}</td>
+                        <td className="px-4 py-3 tabular-nums text-right">
+                          {Number(r.unit_count ?? 0).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-gray-600">
+                          {(membersRaw.find((m: any) => m.id === r.origin)?.name ?? r.origin) as string}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-gray-500">
+                          {
+                            (membersRaw.find((m: any) => m.id === r.raw_sales_member_id)?.name ??
+                              r.raw_sales_member_id) as string
+                          }
+                        </td>
+                        <td className="px-4 py-3 tabular-nums text-right font-semibold">
+                          ₩{r.amount.toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  {groupedRowsWithAmount.length > 0 && (
+                    <tfoot className="bg-gray-50 border-t border-gray-200">
+                      <tr>
+                        <td colSpan={5} className="px-4 py-3 text-right text-xs text-gray-500">
+                          합계
+                        </td>
+                        <td className="px-4 py-3 tabular-nums text-right">
+                          {totalUnits.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3" />
+                        <td className="px-4 py-3" />
+                        <td className="px-4 py-3 tabular-nums text-right font-semibold">
+                          ₩{totalAmount.toLocaleString()}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 }
