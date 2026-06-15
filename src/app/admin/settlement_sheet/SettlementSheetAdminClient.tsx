@@ -70,6 +70,9 @@ export default function SettlementSheetAdminClient({
 }: Props) {
   const router = useRouter();
   const [editing, setEditing] = useState<SheetRowVM | null>(null);
+  // 입력 중인 값(searchInput)과 실제 적용된 검색어(filter)를 분리.
+  // 사용자가 엔터를 누르거나 "검색" 버튼을 눌렀을 때만 filter 가 갱신되어 표가 재필터된다.
+  const [searchInput, setSearchInput] = useState('');
   const [filter, setFilter] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,6 +89,16 @@ export default function SettlementSheetAdminClient({
         r.phone.replace(/\D+/g, '').includes(f.replace(/\D+/g, '')),
     );
   }, [rows, filter]);
+
+  function onSubmitSearch(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setFilter(searchInput);
+  }
+
+  function onClearSearch() {
+    setSearchInput('');
+    setFilter('');
+  }
 
   async function onExport() {
     setError(null);
@@ -117,13 +130,34 @@ export default function SettlementSheetAdminClient({
       ) : null}
 
       <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <input
-          type="text"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="이름·TY코드·전화번호로 검색"
-          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-200 sm:w-72"
-        />
+        <form
+          onSubmit={onSubmitSearch}
+          className="flex w-full items-center gap-2 sm:w-auto"
+          role="search"
+        >
+          <input
+            type="search"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="이름·전화번호로 검색 (엔터)"
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-200 sm:w-72"
+          />
+          <button
+            type="submit"
+            className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 sm:text-sm"
+          >
+            검색
+          </button>
+          {filter ? (
+            <button
+              type="button"
+              onClick={onClearSearch}
+              className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-500 shadow-sm transition hover:bg-slate-50 sm:text-sm"
+            >
+              초기화
+            </button>
+          ) : null}
+        </form>
         <button
           type="button"
           onClick={onExport}
@@ -134,12 +168,11 @@ export default function SettlementSheetAdminClient({
       </div>
 
       <div className="overflow-auto rounded-xl border border-slate-200">
-        <table className="min-w-[1100px] w-full text-xs sm:text-sm">
+        <table className="min-w-[1000px] w-full text-xs sm:text-sm">
           <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600">
             <tr className="text-left">
               <th className="px-3 py-2 font-medium">영업자</th>
               <th className="px-3 py-2 font-medium">직책</th>
-              <th className="px-3 py-2 font-medium">TY코드</th>
               <th className="px-3 py-2 font-medium">전화번호</th>
               <th className="px-3 py-2 text-right font-medium">개인구좌</th>
               <th className="px-3 py-2 text-right font-medium">산하구좌</th>
@@ -152,7 +185,7 @@ export default function SettlementSheetAdminClient({
           <tbody>
             {filteredRows.length === 0 ? (
               <tr>
-                <td colSpan={10} className="px-3 py-6 text-center text-slate-500">
+                <td colSpan={9} className="px-3 py-6 text-center text-slate-500">
                   표시할 영업자가 없습니다.
                 </td>
               </tr>
@@ -182,7 +215,6 @@ export default function SettlementSheetAdminClient({
                       ) : null}
                     </td>
                     <td className="px-3 py-2 text-slate-700">{r.rank}</td>
-                    <td className="px-3 py-2 font-mono text-[11px] text-slate-700">{r.tyCode || '—'}</td>
                     <td className="px-3 py-2 font-mono text-[11px] text-slate-600">{r.phone || '—'}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-900">{fmtUnits(pu)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-900">{fmtUnits(du)}</td>

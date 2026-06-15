@@ -114,8 +114,8 @@ export default function StatementSheetGateClient({
         지급 명세서 확인
       </h1>
       <p className="mt-2 text-xs leading-relaxed text-slate-500 sm:text-sm">
-        본인 확인을 위해 TY 전산코드를 입력해주세요. 입력하신 코드가 일치하는 경우에만 지급
-        명세서가 표시됩니다.
+        본인 확인을 위해 TY 전산코드(영업자 페이지 로그인 ID)를 입력해주세요. 입력하신 코드가
+        일치하는 경우에만 지급 명세서가 표시됩니다.
       </p>
       <form className="mt-4 space-y-3" onSubmit={onSubmit}>
         <div>
@@ -130,7 +130,7 @@ export default function StatementSheetGateClient({
             spellCheck={false}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="예) TY12345"
+            placeholder="영업자 로그인 ID (예: 12345678)"
             className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm tracking-wide text-slate-900 placeholder:text-slate-400 focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-200"
             disabled={submitting}
           />

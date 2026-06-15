@@ -90,6 +90,28 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
   }
   const memberById = new Map(members.map((m) => [m.id, m]));
 
+  // 영업자 로그인 ID (= TY 전산코드로 사용) 매핑.
+  // user_profiles.login_code 가 영업자가 본인 인증용으로 입력하는 코드이다.
+  const loginCodeByMemberId = new Map<string, string>();
+  if (memberIds.length > 0) {
+    const { data: profileRows } = await db
+      .from('user_profiles')
+      .select('member_id, login_code, is_active, updated_at')
+      .in('member_id', memberIds)
+      .not('login_code', 'is', null)
+      .order('is_active', { ascending: false })
+      .order('updated_at', { ascending: false });
+    for (const p of ((profileRows ?? []) as Array<{
+      member_id: string | null;
+      login_code: string | null;
+    }>)) {
+      if (!p.member_id || !p.login_code) continue;
+      if (!loginCodeByMemberId.has(p.member_id)) {
+        loginCodeByMemberId.set(p.member_id, p.login_code);
+      }
+    }
+  }
+
   const { data: overrideRows } = await db
     .from('settlement_statement_overrides')
     .select('id, year_month, member_id, personal_unit_count, downline_unit_count, personal_commission, override_amount, bonus_amount, memo, updated_at')
@@ -175,7 +197,8 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
         name: (member.name ?? '').replace(/^\[고객\]\s*/, '') || '—',
         rank: member.rank,
         phone: member.phone ?? '',
-        tyCode: member.external_id ?? '',
+        // TY 전산코드(공유 URL/명세서 인증) = 영업자 로그인 ID = user_profiles.login_code
+        tyCode: loginCodeByMemberId.get(member.id) ?? '',
         base: {
           personalUnitCount: directBase,
           downlineUnitCount: downlineBase,

@@ -85,21 +85,40 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const { data: members, error: mErr } = await db
     .from('organization_members')
-    .select('id, name, rank, phone, external_id')
+    .select('id, name, rank, phone')
     .in('id', memberIds);
   if (mErr) return NextResponse.json({ error: mErr.message }, { status: 500 });
+
+  // 영업자 로그인 ID(=공유 URL 의 tyCode) 매핑 — user_profiles.login_code 기준.
+  const { data: profileRows, error: pErr } = await db
+    .from('user_profiles')
+    .select('member_id, login_code, is_active, updated_at')
+    .in('member_id', memberIds)
+    .not('login_code', 'is', null)
+    .order('is_active', { ascending: false })
+    .order('updated_at', { ascending: false });
+  if (pErr) return NextResponse.json({ error: pErr.message }, { status: 500 });
+  const loginCodeByMemberId = new Map<string, string>();
+  for (const p of ((profileRows ?? []) as Array<{
+    member_id: string | null;
+    login_code: string | null;
+  }>)) {
+    if (!p.member_id || !p.login_code) continue;
+    if (!loginCodeByMemberId.has(p.member_id)) {
+      loginCodeByMemberId.set(p.member_id, p.login_code);
+    }
+  }
 
   const rows = ((members ?? []) as Array<{
     id: string;
     name: string;
     rank: RankType;
     phone: string | null;
-    external_id: string | null;
   }>)
     .map((m) => {
       const name = (m.name ?? '').replace(/^\[고객\]\s*/, '') || '';
       const phoneDigits = digitsOnlyPhone(m.phone);
-      const tyCode = (m.external_id ?? '').trim();
+      const tyCode = (loginCodeByMemberId.get(m.id) ?? '').trim();
       const link =
         tyCode && baseUrl
           ? `${baseUrl}/organization/statement/${encodeURIComponent(tyCode)}?year_month=${encodeURIComponent(yearMonth)}`

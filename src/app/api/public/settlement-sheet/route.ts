@@ -2,8 +2,9 @@
  * 영업자별 공유 지급명세서 데이터 응답 API.
  *
  * - POST { tyCode, year_month, code }
- *   tyCode 와 사용자가 입력한 code 가 모두 일치하고, organization_members.external_id == tyCode
- *   인 멤버가 있을 때만 명세서 데이터를 응답한다.
+ *   tyCode 와 사용자가 입력한 code 가 모두 일치하고,
+ *   user_profiles.login_code == tyCode (영업자 페이지 로그인 ID) 인 활성 프로필이
+ *   있을 때 그 member_id 에 해당하는 명세서 데이터를 응답한다.
  *
  * - 정산 계산 로직은 본 API 에서 변경/실행하지 않는다. monthly_settlements 와
  *   settlement_statement_overrides 의 값을 합쳐 표시용 페이로드만 만든다.
@@ -58,12 +59,31 @@ export async function POST(req: Request) {
   }
 
   const db = createAdminSupabaseClient();
+
+  // 1) tyCode (= 영업자 로그인 ID = user_profiles.login_code) 로 활성 영업자 프로필 조회
+  const { data: profileRow, error: profileErr } = await db
+    .from('user_profiles')
+    .select('member_id, is_active, role')
+    .eq('login_code', tyCodeRaw)
+    .maybeSingle();
+  if (profileErr) {
+    return NextResponse.json({ error: 'db_error' }, { status: 500 });
+  }
+  if (!profileRow) {
+    return NextResponse.json({ error: 'member_not_found' }, { status: 404 });
+  }
+  const memberId = (profileRow as { member_id: string | null }).member_id;
+  const isActive = (profileRow as { is_active: boolean | null }).is_active !== false;
+  if (!memberId || !isActive) {
+    return NextResponse.json({ error: 'member_not_found' }, { status: 404 });
+  }
+
+  // 2) 매핑된 organization_members 조회
   const { data: memberRow, error: memberErr } = await db
     .from('organization_members')
     .select('id,name,rank,phone,external_id,leader_rank_effective_at')
-    .eq('external_id', tyCodeRaw)
+    .eq('id', memberId)
     .maybeSingle();
-
   if (memberErr) {
     return NextResponse.json({ error: 'db_error' }, { status: 500 });
   }
