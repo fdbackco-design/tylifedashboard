@@ -637,7 +637,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
           <>
             <h3 className="text-base font-semibold text-gray-800 mb-2">직접 정산 계약 목록</h3>
             <p className="text-xs text-gray-500 mb-2">
-              직접 계약 + 정산 담단자 보정 계약
+              직접 계약 + 정산 담당자 보정 계약
             </p>
             <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
               <div className="overflow-x-auto">
