@@ -1,0 +1,220 @@
+/**
+ * 지급명세서(영업자별 공유용 / 관리자 settlement_sheet) 표시 전용 도메인 헬퍼.
+ *
+ * - 정산 계산 로직은 변경하지 않는다.
+ * - `monthly_settlements` 의 원본값을 기본으로 하고, `settlement_statement_overrides`
+ *   에 보정값이 있으면 표시 단계에서만 덮어쓴다.
+ *
+ * 본 모듈은 server-only.
+ */
+
+import 'server-only';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { getSettlementWindowForYearMonth, getSettlementWindowDisplayForYearMonth } from './settlement-window';
+import { sumDownlineAttributedUnitsInSettlementWindow } from '@/lib/organization/statement-downline-units';
+import type { RankType } from '@/lib/types';
+
+export interface StatementOverrideRow {
+  id: string;
+  year_month: string;
+  member_id: string;
+  personal_unit_count: number | null;
+  downline_unit_count: number | null;
+  personal_commission: number | null;
+  override_amount: number | null;
+  bonus_amount: number | null;
+  memo: string | null;
+  updated_at: string;
+}
+
+export interface StatementSheetMember {
+  id: string;
+  name: string;
+  rank: RankType;
+  external_id: string | null;
+  phone: string | null;
+  leader_rank_effective_at: string | null;
+}
+
+export interface StatementSheetData {
+  yearMonth: string;
+  labelYearMonth: string;
+  /** 데이터 필터·계산용 윈도우(전월26~당월25, 보정 없음) */
+  dataWindow: { start_date: string; end_date: string };
+  /** 화면 표시용 윈도우(공휴일/주말 보정) */
+  displayWindow: { start_date: string; end_date: string };
+  member: StatementSheetMember;
+
+  /** 화면에 표시할 최종값(보정 반영) */
+  personalUnitCount: number;
+  downlineUnitCount: number;
+  totalUnitCount: number;
+  personalCommission: number;
+  overrideAmount: number;
+  bonusAmount: number;
+  /** = personalCommission + overrideAmount + bonusAmount */
+  grossTotal: number;
+  /** = floor(grossTotal * 0.033) */
+  withholdingTax: number;
+  /** = grossTotal - withholdingTax */
+  netPayment: number;
+
+  /** monthly_settlements 원본값 (override 적용 전) — 보정 화면 default 표시에 사용 */
+  base: {
+    direct_unit_count: number;
+    downline_unit_count: number;
+    base_commission: number;
+    rollup_commission: number;
+    incentive_amount: number;
+    total_amount: number;
+  };
+  override: StatementOverrideRow | null;
+}
+
+interface MonthlySettlementsRow {
+  year_month: string;
+  member_id: string;
+  rank: RankType;
+  direct_unit_count: number | null;
+  base_commission: number | null;
+  rollup_commission: number | null;
+  incentive_amount: number | null;
+  total_amount: number | null;
+}
+
+const TAX_RATE = 0.033;
+
+function floorNonNegative(n: number): number {
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.floor(n);
+}
+
+/** override 행에서 NULL 이 아닌 값만 적용. NULL 이면 default. */
+function pickOverride<T extends number>(override: T | null | undefined, fallback: number): number {
+  if (override == null) return fallback;
+  if (!Number.isFinite(override)) return fallback;
+  return override;
+}
+
+/**
+ * 단일 영업자(member)의 지급명세서 표시값을 만든다.
+ *
+ * - member: 표시할 영업자 (id, name, rank, external_id, phone, leader_rank_effective_at)
+ * - downlineUnitCount: 사전 계산된 산하 실적 (없으면 함수 내부에서 계산)
+ */
+export async function buildStatementSheetData(
+  db: SupabaseClient,
+  yearMonth: string,
+  member: StatementSheetMember,
+  options?: {
+    /** 미리 계산된 산하 실적값 (대량 처리시 외부에서 계산해 전달) */
+    precomputedDownlineUnitCount?: number;
+    /** 외부에서 monthly_settlements 행을 이미 가져왔다면 전달. 미전달시 내부 조회. */
+    precomputedSettlement?: MonthlySettlementsRow | null;
+    /** 외부에서 override 행을 이미 가져왔다면 전달. 미전달시 내부 조회. */
+    precomputedOverride?: StatementOverrideRow | null;
+  },
+): Promise<StatementSheetData> {
+  const { start_date, end_date, label_year_month } = getSettlementWindowForYearMonth(yearMonth);
+  const displayWindow = getSettlementWindowDisplayForYearMonth(yearMonth);
+
+  let settlementRow: MonthlySettlementsRow | null;
+  if (options?.precomputedSettlement !== undefined) {
+    settlementRow = options.precomputedSettlement;
+  } else {
+    const r = await db
+      .from('monthly_settlements')
+      .select('year_month, member_id, rank, direct_unit_count, base_commission, rollup_commission, incentive_amount, total_amount')
+      .eq('year_month', label_year_month)
+      .eq('member_id', member.id)
+      .maybeSingle();
+    settlementRow = (r.data ?? null) as MonthlySettlementsRow | null;
+  }
+
+  let override: StatementOverrideRow | null;
+  if (options?.precomputedOverride !== undefined) {
+    override = options.precomputedOverride;
+  } else {
+    const r = await db
+      .from('settlement_statement_overrides')
+      .select('id, year_month, member_id, personal_unit_count, downline_unit_count, personal_commission, override_amount, bonus_amount, memo, updated_at')
+      .eq('year_month', label_year_month)
+      .eq('member_id', member.id)
+      .maybeSingle();
+    override = (r.data ?? null) as StatementOverrideRow | null;
+  }
+
+  // 기본값 산출
+  const baseDirectUnits = settlementRow?.direct_unit_count ?? 0;
+  let baseDownlineUnits = options?.precomputedDownlineUnitCount;
+  if (baseDownlineUnits == null) {
+    const downlineRes = await sumDownlineAttributedUnitsInSettlementWindow(
+      db,
+      member.id,
+      { start_date, end_date },
+      baseDirectUnits,
+      member.leader_rank_effective_at ?? null,
+    );
+    baseDownlineUnits = typeof downlineRes === 'number' ? downlineRes : downlineRes.downline_units;
+  }
+  const baseBaseCommission = settlementRow?.base_commission ?? 0;
+  const baseRollupCommission = settlementRow?.rollup_commission ?? 0;
+  const baseIncentive = settlementRow?.incentive_amount ?? 0;
+  const baseTotal = settlementRow?.total_amount ?? 0;
+
+  // override 적용된 표시값
+  const personalUnitCount = pickOverride(override?.personal_unit_count, baseDirectUnits);
+  const downlineUnitCount = pickOverride(override?.downline_unit_count, baseDownlineUnits);
+  const personalCommission = pickOverride(override?.personal_commission, baseBaseCommission);
+  const overrideAmount = pickOverride(override?.override_amount, baseRollupCommission);
+  const bonusAmount = pickOverride(override?.bonus_amount, baseIncentive);
+
+  const grossTotal = personalCommission + overrideAmount + bonusAmount;
+  const withholdingTax = floorNonNegative(grossTotal * TAX_RATE);
+  const netPayment = grossTotal - withholdingTax;
+
+  return {
+    yearMonth,
+    labelYearMonth: label_year_month,
+    dataWindow: { start_date, end_date },
+    displayWindow,
+    member,
+    personalUnitCount,
+    downlineUnitCount,
+    totalUnitCount: personalUnitCount + downlineUnitCount,
+    personalCommission,
+    overrideAmount,
+    bonusAmount,
+    grossTotal,
+    withholdingTax,
+    netPayment,
+    base: {
+      direct_unit_count: baseDirectUnits,
+      downline_unit_count: baseDownlineUnits,
+      base_commission: baseBaseCommission,
+      rollup_commission: baseRollupCommission,
+      incentive_amount: baseIncentive,
+      total_amount: baseTotal,
+    },
+    override,
+  };
+}
+
+/** YYYY-MM → "YYYY년 M월" */
+export function formatYearMonthKo(yearMonth: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(yearMonth);
+  if (!m) return yearMonth;
+  return `${m[1]}년 ${parseInt(m[2], 10)}월`;
+}
+
+/** 'YYYY-MM-DD' → 'YYYY.MM.DD' */
+export function formatYmdDot(ymd: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return ymd;
+  return ymd.replace(/-/g, '.');
+}
+
+/** "010-1234-5678" 또는 "01012345678" → 숫자만 ("01012345678") */
+export function digitsOnlyPhone(phone: string | null | undefined): string {
+  if (!phone) return '';
+  return phone.replace(/\D+/g, '');
+}
