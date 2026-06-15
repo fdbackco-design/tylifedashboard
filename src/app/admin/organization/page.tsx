@@ -8,6 +8,7 @@ import {
   contractJoinYmdInInclusiveWindow,
   getSettlementWindowForYearMonth,
   getSettlementWindowSeoul,
+  getSettlementWindowDisplayForYearMonth,
   normalizeYearMonthLabel,
 } from '@/lib/settlement/settlement-window';
 import { calculateOrgNodeMetrics } from '@/lib/settlement/org-node-metrics';
@@ -75,6 +76,8 @@ export default async function OrganizationPage({
     coalesceYearMonthSearchParam(sp.year_month as string | string[] | undefined) ?? defaultYearMonth;
   const yearMonth = normalizeYearMonthLabel(requestedYearMonthRaw) ?? defaultYearMonth;
   const { start_date, end_date, label_year_month } = getSettlementWindowForYearMonth(yearMonth);
+  // 표시 전용: 공휴일/주말 보정된 정산 구간 (데이터 필터/계산에는 영향 없음).
+  const displayWindow = getSettlementWindowDisplayForYearMonth(yearMonth);
 
   const yearsForPicker = (() => {
     const base = parseInt(label_year_month.slice(0, 4), 10);
@@ -711,7 +714,7 @@ export default async function OrganizationPage({
                 <span className="font-medium text-orange-900/90">{basisMonth}월</span>
                 <span className="text-slate-400"> · </span>
                 <span className="tabular-nums text-slate-500">
-                  {start_date} ~ {end_date}
+                  {displayWindow.start_date} ~ {displayWindow.end_date}
                 </span>
               </p>
             </div>
@@ -813,7 +816,7 @@ export default async function OrganizationPage({
         <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 sm:gap-2">
           <div
             className="flex min-h-0 flex-col rounded-xl border border-slate-200/85 bg-gradient-to-b from-white to-slate-50/80 px-2 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)] sm:px-2.5 sm:py-2.5"
-            title={`기준 ${label_year_month} (${start_date}~${end_date})`}
+            title={`기준 ${label_year_month} (${displayWindow.start_date}~${displayWindow.end_date})`}
           >
             <p className="text-[10px] font-medium leading-tight text-slate-500 sm:text-[11px]">이번달 준비</p>
             <p className="mt-1 text-lg font-semibold tabular-nums tracking-tight text-slate-900 sm:text-xl">
@@ -823,7 +826,7 @@ export default async function OrganizationPage({
           </div>
           <div
             className="flex min-h-0 flex-col rounded-xl border border-slate-200/85 bg-gradient-to-b from-white to-slate-50/80 px-2 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)] sm:px-2.5 sm:py-2.5"
-            title={`기준 ${label_year_month} (${start_date}~${end_date})`}
+            title={`기준 ${label_year_month} (${displayWindow.start_date}~${displayWindow.end_date})`}
           >
             <p className="text-[10px] font-medium leading-tight text-slate-500 sm:text-[11px]">이번달 가입</p>
             <p className="mt-1 text-lg font-semibold tabular-nums tracking-tight text-slate-900 sm:text-xl">

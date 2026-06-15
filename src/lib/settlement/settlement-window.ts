@@ -10,6 +10,8 @@
  * - label_year_month: 기준 월(예: 2026-04-15 -> 2026-04, 2026-04-26 -> 2026-05)
  */
 
+import { getHappycallWindowForYearMonth } from './settlement-eligibility-v2';
+
 function formatYmd(y: number, m: number, d: number): string {
   return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
@@ -70,6 +72,25 @@ export function getSettlementWindowForYearMonth(
   const start_date = formatYmd(prev.y, prev.m, 26);
   const end_date = formatYmd(base.y, base.m, 25);
   return { start_date, end_date, label_year_month };
+}
+
+/**
+ * **표시 전용** 정산 구간 (공휴일/주말 보정 반영).
+ *
+ * - 정산월 마감일 = 매월 25일, 단 25일이 주말/공휴일이면 다음 영업일.
+ * - 정산월 시작일 = 이전 정산월 마감일의 다음 날(이전월 종료일과 절대 겹치지 않게 +1일).
+ *
+ * 데이터 필터링/계산은 그대로 `getSettlementWindowForYearMonth`(전월26~당월25, 보정 없음) 또는
+ * `getHappycallWindowForYearMonth`(해피콜 윈도우) 를 사용한다. 이 함수는 **화면에 보여줄 텍스트**
+ * (예: "정산 구간 2026-05-27 ~ 2026-06-25") 에만 쓴다.
+ *
+ * 구현은 해피콜 정산 윈도우와 동일한 규칙을 따른다 (의존성: settlement-eligibility-v2).
+ */
+export function getSettlementWindowDisplayForYearMonth(
+  yearMonth: string,
+): { start_date: string; end_date: string; label_year_month: string } {
+  const w = getHappycallWindowForYearMonth(yearMonth);
+  return { start_date: w.start_date, end_date: w.end_date, label_year_month: yearMonth };
 }
 
 /** Next.js searchParams 등에서 `year_month` 단일 값만 안전히 꺼낸다. */

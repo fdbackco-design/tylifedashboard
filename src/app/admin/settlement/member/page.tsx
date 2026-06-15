@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
-import { getSettlementWindowForYearMonth } from '@/lib/settlement/settlement-window';
+import { getSettlementWindowDisplayForYearMonth } from '@/lib/settlement/settlement-window';
 import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
 import { isOrgDisplayHiddenMemberName } from '@/lib/organization/org-display-hidden';
 import {
@@ -73,7 +73,8 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
 
   const db = createAdminSupabaseClient();
   // 가입 정산월 윈도우(참고용 표시) — 필터에는 사용하지 않는다.
-  const { start_date, end_date } = getSettlementWindowForYearMonth(yearMonth);
+  // 표시 전용: 공휴일/주말 보정된 정산 구간 (데이터 필터/계산에는 영향 없음).
+  const { start_date, end_date } = getSettlementWindowDisplayForYearMonth(yearMonth);
   // 해피콜 완료 일자 기준 정산월 윈도우(공휴일/주말 보정 반영) — 본 페이지의 표시 필터 기준.
   const hcWindow = getHappycallWindowForYearMonth(yearMonth);
   const hcFromIso = kstYmdToUtcIso(hcWindow.start_date); // KST 자정 (inclusive)

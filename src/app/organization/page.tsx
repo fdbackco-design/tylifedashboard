@@ -6,6 +6,7 @@ import { createAdminSupabaseClient, createServerSupabaseClient } from '@/lib/sup
 import {
   coalesceYearMonthSearchParam,
   getSettlementWindowSeoul,
+  getSettlementWindowDisplayForYearMonth,
   normalizeYearMonthLabel,
 } from '@/lib/settlement/settlement-window';
 import TyLifePartnersLogo from '@/components/TyLifePartnersLogo';
@@ -86,8 +87,6 @@ export default async function OrganizationMyTreePage({
   }
   const {
     label_year_month,
-    start_date,
-    end_date,
     yearsForPicker,
     greetingDisplayName,
     greetingDisplayRank,
@@ -99,6 +98,9 @@ export default async function OrganizationMyTreePage({
     basisYear,
     basisMonth,
   } = vm;
+
+  // 표시 전용: 공휴일/주말 보정된 정산 구간 (데이터 필터/계산에는 영향 없음).
+  const { start_date, end_date } = getSettlementWindowDisplayForYearMonth(yearMonth);
 
   return (
     <>

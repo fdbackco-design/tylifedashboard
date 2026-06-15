@@ -7,6 +7,7 @@ import { createAdminSupabaseClient, createServerSupabaseClient } from '@/lib/sup
 import {
   coalesceYearMonthSearchParam,
   getSettlementWindowSeoul,
+  getSettlementWindowDisplayForYearMonth,
   normalizeYearMonthLabel,
 } from '@/lib/settlement/settlement-window';
 import TyLifePartnersLogo from '@/components/TyLifePartnersLogo';
@@ -63,8 +64,6 @@ export default async function OrganizationTreePage({
     ? buildEmptyMyOrganizationTreeViewModel({ yearMonth, displayName })
     : await buildMyOrganizationTreeViewModel(adminDb, { memberId: memberId as string, yearMonth });
   const {
-    start_date,
-    end_date,
     yearsForPicker,
     treeForDisplay,
     contractsByMember,
@@ -72,6 +71,8 @@ export default async function OrganizationTreePage({
     basisYear,
     basisMonth,
   } = vm;
+  // 표시 전용: 공휴일/주말 보정된 정산 구간 (데이터 필터/계산에는 영향 없음).
+  const { start_date, end_date } = getSettlementWindowDisplayForYearMonth(yearMonth);
 
   // 노드 카드의 "목표까지 남은 구좌" / 게이지 계산용 — 각 멤버 본인이 설정한 monthly_target_units.
   // NULL 이면 OrgTreeNode 내부에서 20 으로 폴백한다. 정산·누적 로직과는 무관.

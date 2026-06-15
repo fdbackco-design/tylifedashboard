@@ -4,7 +4,11 @@ import { redirect } from 'next/navigation';
 import YearMonthSelector from '@/components/YearMonthSelector';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { buildOrgTree, formatKRW } from '@/lib/settlement/calculator';
-import { getSettlementWindowForYearMonth, getSettlementWindowSeoul } from '@/lib/settlement/settlement-window';
+import {
+  getSettlementWindowForYearMonth,
+  getSettlementWindowSeoul,
+  getSettlementWindowDisplayForYearMonth,
+} from '@/lib/settlement/settlement-window';
 import { BASE_AMOUNT_PER_UNIT } from '@/lib/settlement/constants';
 import type { RankType } from '@/lib/types';
 import type { SettlementCalculationDetail } from '@/lib/types/settlement';
@@ -61,6 +65,8 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   // 목록 전체를 내려받지 말고 count만 조회 (빠름)
   const { start_date, end_date } = getSettlementWindowForYearMonth(yearMonth);
   const endExclusive = nextDay(end_date);
+  // 표시 전용: 공휴일/주말 보정된 정산 구간 (데이터 필터는 위 start_date/end_date 그대로 사용).
+  const displayWindow = getSettlementWindowDisplayForYearMonth(yearMonth);
 
   const [allCountRes, eligibleCountRes, kpiRes] = await Promise.all([
     db
@@ -665,7 +671,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
             <span className="text-orange-800">{basisYear}년</span>{' '}
             <span className="text-orange-800">{basisMonth}월</span> 기준
           </p>
-          <p className="text-[10px] text-slate-500 sm:text-xs">정산 구간 {start_date} ~ {end_date}</p>
+          <p className="text-[10px] text-slate-500 sm:text-xs">정산 구간 {displayWindow.start_date} ~ {displayWindow.end_date}</p>
         </div>
         <YearMonthSelector
           layout="compact-toolbar"

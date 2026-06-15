@@ -9,6 +9,7 @@ import {
   coalesceYearMonthSearchParam,
   getSettlementWindowForYearMonth,
   getSettlementWindowSeoul,
+  getSettlementWindowDisplayForYearMonth,
   normalizeYearMonthLabel,
 } from '@/lib/settlement/settlement-window';
 import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
@@ -39,6 +40,8 @@ export default async function OrganizationStatementPage({
     coalesceYearMonthSearchParam(sp.year_month as string | string[] | undefined) ?? defaultYearMonth;
   const yearMonth = normalizeYearMonthLabel(requestedYearMonthRaw) ?? defaultYearMonth;
   const { start_date, end_date, label_year_month } = getSettlementWindowForYearMonth(yearMonth);
+  // 표시 전용: 공휴일/주말 보정된 정산 구간 (데이터 필터/계산에는 영향 없음).
+  const displayWindow = getSettlementWindowDisplayForYearMonth(yearMonth);
 
   // 기준월 선택 UI에 표시할 연도 목록 (현재 기준월 연도부터 4년 전까지, /organization 등과 동일)
   const yearsForPicker = (() => {
@@ -144,7 +147,7 @@ export default async function OrganizationStatementPage({
             </div>
             <h2 className="text-2xl font-bold text-gray-800 mt-2">지급 명세서</h2>
             <p className="text-sm text-gray-500 mt-1">
-              기준 {label_year_month} · {start_date}~{end_date}
+              기준 {label_year_month} · {displayWindow.start_date}~{displayWindow.end_date}
             </p>
           </div>
         </div>
@@ -572,7 +575,7 @@ export default async function OrganizationStatementPage({
               {basisYear}년 {basisMonth}월
             </p>
             <p className="mt-0.5 text-[11px] tabular-nums text-slate-400 sm:text-xs">
-              {start_date} ~ {end_date}
+              {displayWindow.start_date} ~ {displayWindow.end_date}
             </p>
           </div>
 
