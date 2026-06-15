@@ -190,7 +190,7 @@ export default function StatementSheetView(props: StatementSheetViewProps) {
       {/* 7. 하단 안내문 */}
       <div className="mt-10 border-t border-slate-200 pt-5 text-center">
         <p className="text-[11px] leading-relaxed text-slate-400 sm:text-xs">
-          본 명세서는 TY Life Partners와의 파트너십 계약에 근거하여 작성되었습니다.
+          본 명세서는 TY Life Partners와의 계약에 근거해 작성되었습니다.
           <br />
           내역에 대한 문의는 관리팀으로 연락 바랍니다.
         </p>

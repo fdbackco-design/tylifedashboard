@@ -41,6 +41,16 @@ function csvEscape(value: string): string {
   return v;
 }
 
+/**
+ * 전화번호 같은 "앞자리 0이 있는 숫자 문자열" 셀을 엑셀이 숫자로 자동 변환하지 않도록
+ * `="01012345678"` 형태로 감싼다. (Excel/한컴오피스에서 텍스트 셀로 인식)
+ * 빈 값은 빈 셀로 그대로 두어 정렬·필터에 영향이 없도록 한다.
+ */
+function csvTextCell(digits: string): string {
+  if (!digits) return '';
+  return `="${digits.replace(/"/g, '""')}"`;
+}
+
 function getAppBaseUrl(req: NextRequest): string {
   const envUrl = (process.env.NEXT_PUBLIC_APP_URL ?? '').trim();
   if (envUrl) return envUrl.replace(/\/+$/, '');
@@ -135,7 +145,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const header = ['전화번호', '고객명', '직책', '정산월', '정산기간', '링크'].map(csvEscape).join(',');
   const body = rows
     .map((r) =>
-      [r.phoneDigits, r.name, r.rank, yearMonthKo, periodKo, r.link].map(csvEscape).join(','),
+      [
+        // 전화번호는 앞자리 0 보존을 위해 ="..." 형식의 텍스트 셀로 출력.
+        csvTextCell(r.phoneDigits),
+        csvEscape(r.name),
+        csvEscape(r.rank),
+        csvEscape(yearMonthKo),
+        csvEscape(periodKo),
+        csvEscape(r.link),
+      ].join(','),
     )
     .join('\n');
   const csv = `${UTF8_BOM}${header}\n${body}${body ? '\n' : ''}`;
