@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { AdminShell } from './AdminShell';
 import { redirect } from 'next/navigation';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { getVapidPublicKey } from '@/lib/push/vapid';
 
 export const metadata: Metadata = {
   title: { template: '%s | TY Life Dashboard', default: 'TY Life Dashboard' },
@@ -49,5 +50,9 @@ async function AdminLayoutGuard(props: { children: React.ReactNode }) {
   if (!isActive) redirect('/login');
   if (role !== 'admin') redirect('/organization');
 
-  return <AdminShell navItems={[...NAV_ITEMS]}>{props.children}</AdminShell>;
+  return (
+    <AdminShell navItems={[...NAV_ITEMS]} vapidPublicKey={getVapidPublicKey()}>
+      {props.children}
+    </AdminShell>
+  );
 }

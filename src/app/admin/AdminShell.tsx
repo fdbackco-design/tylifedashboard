@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import PushSubscribeButton from '@/components/push/PushSubscribeButton';
 
 function ShieldMini(props: { className?: string }) {
   return (
@@ -95,6 +96,8 @@ function SidebarContents(props: {
   onNavigate?: () => void;
   /** 데스크톱 사이드바: TY Life 텍스트 대신 파트너 로고 */
   brandAsLogo?: boolean;
+  /** 푸시 구독 토글에 사용할 VAPID public key (서버에서 layout 으로 전달) */
+  vapidPublicKey?: string;
 }) {
   const pathname = usePathname();
 
@@ -153,7 +156,12 @@ function SidebarContents(props: {
           );
         })}
       </nav>
-      <div className="mt-auto space-y-2 border-t border-slate-700 px-4 py-3">
+      <div className="mt-auto space-y-3 border-t border-slate-700 px-4 py-3">
+        {props.vapidPublicKey ? (
+          <div className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-slate-200">
+            <PushSubscribeButton vapidPublicKey={props.vapidPublicKey} />
+          </div>
+        ) : null}
         <AdminLogoutButton />
         <p className="text-xs text-slate-500">관리자 전용</p>
       </div>
@@ -164,6 +172,8 @@ function SidebarContents(props: {
 export function AdminShell(props: {
   navItems: NavItem[];
   children: React.ReactNode;
+  /** 푸시 구독에 사용할 VAPID public key. server layout 에서 전달. */
+  vapidPublicKey?: string;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -216,6 +226,9 @@ export function AdminShell(props: {
                 <ShieldMini />
                 Admin
               </span>
+              {props.vapidPublicKey ? (
+                <PushSubscribeButton vapidPublicKey={props.vapidPublicKey} compact />
+              ) : null}
               <AdminLogoutButton compact />
             </div>
           </div>
@@ -225,7 +238,7 @@ export function AdminShell(props: {
       {/* 데스크톱 고정 사이드바 */}
       <div className="hidden md:block md:w-56 md:shrink-0">
         <div className="h-full w-56">
-          <SidebarContents navItems={props.navItems} brandAsLogo />
+          <SidebarContents navItems={props.navItems} brandAsLogo vapidPublicKey={props.vapidPublicKey} />
         </div>
       </div>
 
@@ -256,6 +269,7 @@ export function AdminShell(props: {
           <SidebarContents
             navItems={props.navItems}
             onNavigate={() => setOpen(false)}
+            vapidPublicKey={props.vapidPublicKey}
           />
         </div>
       </div>
