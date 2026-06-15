@@ -332,19 +332,81 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     Math.abs(rollupContractItemsTotal - rollupCommission) <= 1 &&
     Math.abs(rollupItemsTotal - rollupCommission) <= 1;
 
-  // 정렬: 가입일(있으면) 내림차순 → 산하 멤버명
-  const rollupContractItems = [...rollupContractItemsRaw].sort((a, b) => {
-    const ma = rollupContractMetaById.get(a.contract_id);
-    const mb = rollupContractMetaById.get(b.contract_id);
-    const ja = ma?.join_ymd ?? '';
-    const jb = mb?.join_ymd ?? '';
-    if (ja !== jb) return jb.localeCompare(ja);
-    return (a.from_member_name ?? '').localeCompare(b.from_member_name ?? '');
-  });
-
   const memberNameById = new Map<string, string>(
     (membersRaw as any[]).map((m) => [m.id as string, String(m.name ?? '').replace(/^\[고객\]\s*/, '')]),
   );
+
+  // 그룹화: (고객명, 가입일, 상품명, 계약상태, 산하멤버) 가 동일한 계약은 한 줄로 묶어
+  // 구좌수/롤업 소계를 합산하고, 구좌당 롤업은 가중평균(= sum(subtotal)/sum(units)) 으로 표시.
+  // (계약 단위 합계 자체는 변경되지 않으므로 정합성 영향 없음)
+  type GroupedRollupRow = {
+    key: string;
+    contract_codes: string[];
+    customer_name: string;
+    join_ymd: string;
+    item_name: string | null;
+    display_status: string;
+    from_member_id: string;
+    from_member_name: string;
+    from_rank: RankType;
+    effective_sales_member_id: string;
+    effective_sales_member_name: string;
+    unit_count: number;
+    subtotal: number;
+    // 표시용 정렬키
+    sort_join_ymd: string;
+  };
+  const groupedRollupMap = new Map<string, GroupedRollupRow>();
+  for (const r of rollupContractItemsRaw) {
+    const meta = rollupContractMetaById.get(r.contract_id);
+    const customer_name = meta?.customer_name ?? '-';
+    const join_ymd = meta?.join_ymd ?? '';
+    const item_name = meta?.item_name ?? null;
+    const display_status = meta?.display_status ?? '-';
+    const key = [
+      customer_name,
+      join_ymd,
+      item_name ?? '',
+      display_status,
+      r.from_member_id,
+    ].join('||');
+    const fromName =
+      memberNameById.get(r.from_member_id) ?? r.from_member_name ?? r.from_member_id;
+    const effName =
+      memberNameById.get(r.effective_sales_member_id) ??
+      r.effective_sales_member_name ??
+      r.effective_sales_member_id;
+    const units = Number(r.unit_count ?? 0);
+    const sub = Number(r.subtotal ?? 0);
+    const existing = groupedRollupMap.get(key);
+    if (!existing) {
+      groupedRollupMap.set(key, {
+        key,
+        contract_codes: [r.contract_code],
+        customer_name,
+        join_ymd,
+        item_name,
+        display_status,
+        from_member_id: r.from_member_id,
+        from_member_name: fromName,
+        from_rank: r.from_rank,
+        effective_sales_member_id: r.effective_sales_member_id,
+        effective_sales_member_name: effName,
+        unit_count: units,
+        subtotal: sub,
+        sort_join_ymd: join_ymd,
+      });
+      continue;
+    }
+    existing.contract_codes.push(r.contract_code);
+    existing.unit_count += units;
+    existing.subtotal += sub;
+    if (!existing.item_name && item_name) existing.item_name = item_name;
+  }
+  const groupedRollupRows = [...groupedRollupMap.values()].sort((a, b) => {
+    if (a.sort_join_ymd !== b.sort_join_ymd) return b.sort_join_ymd.localeCompare(a.sort_join_ymd);
+    return (a.from_member_name ?? '').localeCompare(b.from_member_name ?? '');
+  });
 
   return (
     <div className="p-6">
@@ -423,41 +485,38 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {rollupContractItems.map((r, idx) => {
-                    const meta = rollupContractMetaById.get(r.contract_id);
-                    const fromName =
-                      memberNameById.get(r.from_member_id) ?? r.from_member_name ?? r.from_member_id;
-                    const effName =
-                      memberNameById.get(r.effective_sales_member_id) ??
-                      r.effective_sales_member_name ??
-                      r.effective_sales_member_id;
-                    const perUnit = Number(r.rollup_amount_per_unit ?? 0);
-                    const sub = Number(r.subtotal ?? 0);
-                    const units = Number(r.unit_count ?? 0);
+                  {groupedRollupRows.map((r) => {
+                    const perUnitAvg = r.unit_count > 0 ? r.subtotal / r.unit_count : 0;
                     return (
-                      <tr key={`${r.contract_id}__${idx}`} className="hover:bg-gray-50">
+                      <tr key={r.key} className="hover:bg-gray-50">
                         <td className="px-3 py-2 font-mono text-xs text-gray-700 whitespace-nowrap">
-                          {r.contract_code}
+                          {r.contract_codes.join(', ')}
                         </td>
-                        <td className="px-3 py-2 whitespace-nowrap">{meta?.customer_name ?? '-'}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">{r.customer_name}</td>
                         <td className="px-3 py-2 tabular-nums text-gray-600 whitespace-nowrap">
-                          {meta?.join_ymd ?? '-'}
+                          {r.join_ymd || '-'}
                         </td>
                         <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">
-                          {meta?.item_name ?? '-'}
+                          {r.item_name ?? '-'}
                         </td>
-                        <td className="px-3 py-2 text-xs whitespace-nowrap">{meta?.display_status ?? '-'}</td>
-                        <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">{fromName}</td>
+                        <td className="px-3 py-2 text-xs whitespace-nowrap">{r.display_status}</td>
+                        <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">
+                          {r.from_member_name}
+                        </td>
                         <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">
-                          {(r.from_rank as RankType) ?? '-'}
+                          {r.from_rank ?? '-'}
                         </td>
-                        <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{effName}</td>
-                        <td className="px-3 py-2 tabular-nums text-right">{units.toLocaleString()}</td>
+                        <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">
+                          {r.effective_sales_member_name}
+                        </td>
+                        <td className="px-3 py-2 tabular-nums text-right">
+                          {r.unit_count.toLocaleString()}
+                        </td>
                         <td className="px-3 py-2 tabular-nums text-right text-gray-700">
-                          ₩{perUnit.toLocaleString()}
+                          ₩{Math.round(perUnitAvg).toLocaleString()}
                         </td>
                         <td className="px-3 py-2 tabular-nums text-right font-semibold">
-                          ₩{sub.toLocaleString()}
+                          ₩{r.subtotal.toLocaleString()}
                         </td>
                       </tr>
                     );
@@ -469,7 +528,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                       합계
                     </td>
                     <td className="px-3 py-2 tabular-nums text-right">
-                      {rollupContractItems.reduce((s, x) => s + Number(x.unit_count ?? 0), 0).toLocaleString()}
+                      {groupedRollupRows.reduce((s, x) => s + x.unit_count, 0).toLocaleString()}
                     </td>
                     <td className="px-3 py-2" />
                     <td className="px-3 py-2 tabular-nums text-right font-semibold">
