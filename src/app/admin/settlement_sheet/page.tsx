@@ -27,7 +27,7 @@ import {
   computeStatementDownlineUnitsWithSharedContext,
   loadGlobalStatementWindowContractPool,
 } from '@/lib/organization/statement-downline-units';
-import { isSuppressedStatementSheetMember } from '@/lib/settlement/statement-sheet';
+import { isSuppressedStatementSheetMember, resolveLoginCodesForMembers } from '@/lib/settlement/statement-sheet';
 import type { RankType } from '@/lib/types';
 import SettlementSheetAdminClient, {
   type SheetRowVM,
@@ -80,38 +80,24 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
     rank: RankType;
     phone: string | null;
     external_id: string | null;
+    source_customer_id: string | null;
     leader_rank_effective_at: string | null;
   }> = [];
   if (memberIds.length > 0) {
     const { data } = await db
       .from('organization_members')
-      .select('id, name, rank, phone, external_id, leader_rank_effective_at')
+      .select('id, name, rank, phone, external_id, source_customer_id, leader_rank_effective_at')
       .in('id', memberIds);
     members = (data ?? []) as typeof members;
   }
   const memberById = new Map(members.map((m) => [m.id, m]));
 
-  // 영업자 로그인 ID (= TY 전산코드로 사용) 매핑.
-  // user_profiles.login_code 가 영업자가 본인 인증용으로 입력하는 코드이다.
-  const loginCodeByMemberId = new Map<string, string>();
-  if (memberIds.length > 0) {
-    const { data: profileRows } = await db
-      .from('user_profiles')
-      .select('member_id, login_code, is_active, updated_at')
-      .in('member_id', memberIds)
-      .not('login_code', 'is', null)
-      .order('is_active', { ascending: false })
-      .order('updated_at', { ascending: false });
-    for (const p of ((profileRows ?? []) as Array<{
-      member_id: string | null;
-      login_code: string | null;
-    }>)) {
-      if (!p.member_id || !p.login_code) continue;
-      if (!loginCodeByMemberId.has(p.member_id)) {
-        loginCodeByMemberId.set(p.member_id, p.login_code);
-      }
-    }
-  }
+  // 영업자 로그인 ID(=TY 전산코드) 매핑 — primary(member_id)/fallback(customer_id, phone8) 다단계 시도.
+  // 후보가 2건 이상이면 ambiguous 로 분류해 진단 UI 에 경고로 노출한다.
+  const { loginCodeByMemberId, ambiguousMemberIds } =
+    memberIds.length > 0
+      ? await resolveLoginCodesForMembers(db, members)
+      : { loginCodeByMemberId: new Map<string, string>(), ambiguousMemberIds: new Set<string>() };
 
   const { data: overrideRows } = await db
     .from('settlement_statement_overrides')

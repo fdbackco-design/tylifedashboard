@@ -27,6 +27,7 @@ import {
   formatYearMonthKo,
   formatYmdDot,
   isSuppressedStatementSheetMember,
+  resolveLoginCodesForMembers,
 } from '@/lib/settlement/statement-sheet';
 import {
   loadStatementDownlineSharedData,
@@ -107,18 +108,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const { data: members, error: mErr } = await db
     .from('organization_members')
-    .select('id, name, rank, phone, leader_rank_effective_at')
+    .select('id, name, rank, phone, source_customer_id, leader_rank_effective_at')
     .in('id', memberIds);
   if (mErr) return NextResponse.json({ error: mErr.message }, { status: 500 });
-  const memberById = new Map(
-    ((members ?? []) as Array<{
-      id: string;
-      name: string;
-      rank: RankType;
-      phone: string | null;
-      leader_rank_effective_at: string | null;
-    }>).map((m) => [m.id, m]),
-  );
+  const memberList = ((members ?? []) as Array<{
+    id: string;
+    name: string;
+    rank: RankType;
+    phone: string | null;
+    source_customer_id: string | null;
+    leader_rank_effective_at: string | null;
+  }>);
+  const memberById = new Map(memberList.map((m) => [m.id, m]));
 
   // 관리자 보정값 (settlement_statement_overrides) — 표시값 우선
   const { data: overrideRows, error: oErr } = await db
@@ -154,25 +155,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  // 영업자 로그인 ID(=공유 URL 의 tyCode) 매핑 — user_profiles.login_code 기준.
-  const { data: profileRows, error: pErr } = await db
-    .from('user_profiles')
-    .select('member_id, login_code, is_active, updated_at')
-    .in('member_id', memberIds)
-    .not('login_code', 'is', null)
-    .order('is_active', { ascending: false })
-    .order('updated_at', { ascending: false });
-  if (pErr) return NextResponse.json({ error: pErr.message }, { status: 500 });
-  const loginCodeByMemberId = new Map<string, string>();
-  for (const p of ((profileRows ?? []) as Array<{
-    member_id: string | null;
-    login_code: string | null;
-  }>)) {
-    if (!p.member_id || !p.login_code) continue;
-    if (!loginCodeByMemberId.has(p.member_id)) {
-      loginCodeByMemberId.set(p.member_id, p.login_code);
-    }
-  }
+  // 영업자 로그인 ID(=공유 URL 의 tyCode) 매핑 — primary(member_id) → fallback(customer_id, phone 끝8자리).
+  // ambiguous(후보 다수) 케이스는 export 에서는 링크가 비어 행이 제외된다.
+  const { loginCodeByMemberId } = await resolveLoginCodesForMembers(db, memberList);
 
   // 산하 실적 구좌 — admin/settlement_sheet 페이지와 동일한 방식으로 일괄 계산.
   const { start_date, end_date } = getSettlementWindowForYearMonth(yearMonth);

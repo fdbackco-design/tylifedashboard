@@ -18,6 +18,7 @@
 
 import { createAdminSupabaseClient } from '../supabase/server';
 import { runPreIssuedAccountAutoMapping } from '@/lib/account-issue/auto-mapping';
+import { repairMemberProfileIntegrity } from '@/lib/account-issue/member-profile-repair';
 import { fetchContractList, fetchContractDetailHtml } from './client';
 import { normalizeDate, parseContractListHtml, parseContractDetailHtml } from './html-parser';
 import {
@@ -443,6 +444,8 @@ async function upsertSalesMember(
       const matchedId = (byExt as { id: string }).id;
       // 영업자 정보로 update (기존 onConflict upsert 와 동등한 효과)
       await db.from('organization_members').update(memberData).eq('id', matchedId);
+      // 옛 customer 노드/어긋난 user_profiles 가 있으면 자동 재매핑 (best-effort).
+      await repairMemberProfileIntegrity(db, matchedId);
       if (isDev) {
         // eslint-disable-next-line no-console
         console.log('[member-dedupe-sales]', {
@@ -475,6 +478,8 @@ async function upsertSalesMember(
     // 자동 병합 위험 → 일반 insert 흐름으로 떨어트림 (동명이인은 수동 검토 대상)
   } else if (lookup && lookup.kind === 'matched') {
     await reconcileExistingMemberForSales(db, lookup.id, memberData);
+    // 옛 customer 노드/어긋난 user_profiles 가 있으면 자동 재매핑 (best-effort).
+    await repairMemberProfileIntegrity(db, lookup.id);
     if (isDev) {
       // eslint-disable-next-line no-console
       console.log('[member-dedupe-sales]', {
@@ -615,10 +620,17 @@ async function attachCustomerIdentityToMember(
   const next: Record<string, unknown> = {};
   if ((cur as any).source_customer_id == null) next.source_customer_id = customer.id;
   if (((cur as any).phone == null || String((cur as any).phone).trim() === '') && customer.phone) next.phone = customer.phone;
-  if (Object.keys(next).length === 0) return;
+  if (Object.keys(next).length === 0) {
+    // 변경 없음. 단, user_profiles 매핑이 어긋난 채로 남아있을 수 있으므로 후처리는 한 번 돌린다.
+    await repairMemberProfileIntegrity(db, memberId);
+    return;
+  }
 
   const { error: upErr } = await db.from('organization_members').update(next).eq('id', memberId);
-  if (!upErr) return;
+  if (!upErr) {
+    await repairMemberProfileIntegrity(db, memberId);
+    return;
+  }
 
   // 병렬 동기화 레이스 등으로 unique 충돌이 남아있을 수 있다. 이 경우 한번 더 병합을 시도한다.
   if (upErr.message.includes('uniq_org_members_source_customer_id')) {
@@ -642,6 +654,7 @@ async function attachCustomerIdentityToMember(
 
       const { error: retryErr } = await db.from('organization_members').update(next).eq('id', memberId);
       if (retryErr) throw new Error(`organization_members 업데이트 실패: ${retryErr.message}`);
+      await repairMemberProfileIntegrity(db, memberId);
       return;
     }
   }

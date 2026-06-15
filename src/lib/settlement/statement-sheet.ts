@@ -241,3 +241,131 @@ export function isSuppressedStatementSheetMember(
     (rule) => rule.name === cleanName && rule.phoneDigits === phoneDigits,
   );
 }
+
+/**
+ * `/admin/settlement_sheet` 페이지/엑셀에서 영업자별 login_code 를 찾기 위한 다단계 매칭.
+ *
+ * 우선순위:
+ *   1) user_profiles.member_id = monthly_settlements.member_id
+ *   2) user_profiles.customer_id = organization_members.source_customer_id
+ *   3) user_profiles.login_code  = organization_members.phone 의 끝 8자리
+ *
+ * 후보가 2건 이상이면 자동 매칭하지 않고 ambiguous 집합에 추가한다.
+ *
+ * @returns 멤버 ID → login_code (없으면 미포함) / 후보 다수 멤버 ID 집합
+ */
+export async function resolveLoginCodesForMembers(
+  db: import('@supabase/supabase-js').SupabaseClient,
+  members: Array<{ id: string; phone: string | null; source_customer_id?: string | null }>,
+): Promise<{
+  loginCodeByMemberId: Map<string, string>;
+  ambiguousMemberIds: Set<string>;
+}> {
+  const loginCodeByMemberId = new Map<string, string>();
+  const ambiguousMemberIds = new Set<string>();
+  if (members.length === 0) return { loginCodeByMemberId, ambiguousMemberIds };
+  const memberIds = members.map((m) => m.id);
+  const memberById = new Map(members.map((m) => [m.id, m]));
+
+  // 1차) member_id 매칭
+  const { data: primaryRows } = await db
+    .from('user_profiles')
+    .select('member_id, login_code, is_active, updated_at')
+    .in('member_id', memberIds)
+    .not('login_code', 'is', null)
+    .order('is_active', { ascending: false })
+    .order('updated_at', { ascending: false });
+  for (const p of ((primaryRows ?? []) as Array<{
+    member_id: string | null;
+    login_code: string | null;
+  }>)) {
+    if (!p.member_id || !p.login_code) continue;
+    if (!loginCodeByMemberId.has(p.member_id)) {
+      loginCodeByMemberId.set(p.member_id, p.login_code);
+    }
+  }
+
+  // 2차) customer_id fallback
+  const unresolved1 = memberIds.filter((mid) => !loginCodeByMemberId.has(mid));
+  const memberIdsByCustomerId = new Map<string, string[]>();
+  for (const mid of unresolved1) {
+    const m = memberById.get(mid);
+    const cid = m?.source_customer_id ?? null;
+    if (!cid) continue;
+    const arr = memberIdsByCustomerId.get(cid) ?? [];
+    arr.push(mid);
+    memberIdsByCustomerId.set(cid, arr);
+  }
+  if (memberIdsByCustomerId.size > 0) {
+    const { data: byCustomer } = await db
+      .from('user_profiles')
+      .select('customer_id, login_code, is_active, updated_at')
+      .in('customer_id', Array.from(memberIdsByCustomerId.keys()))
+      .not('login_code', 'is', null)
+      .order('is_active', { ascending: false })
+      .order('updated_at', { ascending: false });
+    const codesByCustomerId = new Map<string, Set<string>>();
+    for (const p of ((byCustomer ?? []) as Array<{
+      customer_id: string | null;
+      login_code: string | null;
+    }>)) {
+      if (!p.customer_id || !p.login_code) continue;
+      const set = codesByCustomerId.get(p.customer_id) ?? new Set<string>();
+      set.add(p.login_code);
+      codesByCustomerId.set(p.customer_id, set);
+    }
+    for (const [cid, mids] of memberIdsByCustomerId.entries()) {
+      const codes = codesByCustomerId.get(cid);
+      if (!codes || codes.size === 0) continue;
+      if (codes.size > 1) {
+        for (const mid of mids) ambiguousMemberIds.add(mid);
+        continue;
+      }
+      const onlyCode = Array.from(codes)[0];
+      for (const mid of mids) {
+        if (!loginCodeByMemberId.has(mid)) loginCodeByMemberId.set(mid, onlyCode);
+      }
+    }
+  }
+
+  // 3차) login_code = phone 끝 8자리 fallback
+  const unresolved2 = memberIds.filter(
+    (mid) => !loginCodeByMemberId.has(mid) && !ambiguousMemberIds.has(mid),
+  );
+  const memberIdsByDigits = new Map<string, string[]>();
+  for (const mid of unresolved2) {
+    const m = memberById.get(mid);
+    const d = digitsOnlyPhone(m?.phone);
+    if (d.length < 8) continue;
+    const d8 = d.slice(-8);
+    const arr = memberIdsByDigits.get(d8) ?? [];
+    arr.push(mid);
+    memberIdsByDigits.set(d8, arr);
+  }
+  if (memberIdsByDigits.size > 0) {
+    const { data: byLoginCode } = await db
+      .from('user_profiles')
+      .select('login_code, is_active, updated_at')
+      .in('login_code', Array.from(memberIdsByDigits.keys()))
+      .order('is_active', { ascending: false })
+      .order('updated_at', { ascending: false });
+    const countsByDigits = new Map<string, number>();
+    for (const p of ((byLoginCode ?? []) as Array<{ login_code: string | null }>)) {
+      if (!p.login_code) continue;
+      countsByDigits.set(p.login_code, (countsByDigits.get(p.login_code) ?? 0) + 1);
+    }
+    for (const [d8, mids] of memberIdsByDigits.entries()) {
+      const cnt = countsByDigits.get(d8) ?? 0;
+      if (cnt === 0) continue;
+      if (cnt > 1) {
+        for (const mid of mids) ambiguousMemberIds.add(mid);
+        continue;
+      }
+      for (const mid of mids) {
+        if (!loginCodeByMemberId.has(mid)) loginCodeByMemberId.set(mid, d8);
+      }
+    }
+  }
+
+  return { loginCodeByMemberId, ambiguousMemberIds };
+}

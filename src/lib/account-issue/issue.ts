@@ -8,6 +8,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { normalizePhone } from './normalize';
+import { repairMemberProfileIntegrity } from './member-profile-repair';
 
 const EMAIL_DOMAIN = 'tylifedashboard.local';
 
@@ -100,6 +101,8 @@ export async function issueMappedAccount(
     }
     if (existingProfile?.id) {
       await adminDb.from('user_profiles').update({ is_active: isActive }).eq('id', existingProfile.id);
+      // 매핑이 이미 있어도 옛 customer 노드가 함께 남아 있을 수 있으니 정합성 회복 시도.
+      await repairMemberProfileIntegrity(adminDb, memberId);
       return { ok: true, user_id: existingProfile.id as string, existed: true };
     }
 
@@ -163,6 +166,9 @@ export async function issueMappedAccount(
       }
       return { ok: false, code: 'PROFILE_INSERT_FAILED', message: ins.error.message };
     }
+
+    // 발급 직후 정합성 회복(옛 customer 노드/어긋난 user_profiles) 시도 — best-effort.
+    await repairMemberProfileIntegrity(adminDb, memberId);
 
     return { ok: true, user_id: userId, existed: false };
   } catch (e) {
