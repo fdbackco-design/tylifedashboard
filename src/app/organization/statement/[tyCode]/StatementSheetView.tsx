@@ -163,7 +163,7 @@ export default function StatementSheetView(props: StatementSheetViewProps) {
                 <td className="px-4 py-3 text-right text-slate-400" />
               </tr>
               <tr className="border-t border-slate-200">
-                <td className="px-4 py-3">성과 장려금/보너스</td>
+                <td className="px-4 py-3">보너스</td>
                 <td className="px-4 py-3 text-right tabular-nums">{formatWon(bonusAmount)}</td>
                 <td className="px-4 py-3 text-right text-slate-400" />
               </tr>
