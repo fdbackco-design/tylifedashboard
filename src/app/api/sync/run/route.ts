@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { syncContractPage } from '@/lib/tylife/sync-service';
 import type { SyncRun } from '@/lib/types/sync';
+import { notifyAdminsOfNewContracts } from '@/lib/push/admin-event-notify';
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!process.env.TYLIFE_COOKIE) {
@@ -63,7 +64,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       })
       .eq('id', body.runId);
 
-    return NextResponse.json({ success: true, runId: body.runId, finished: true });
+    // 신규 계약이 1건 이상이면 관리자 다수에게 푸시 알림 발송 (best-effort).
+    let adminNotify: Awaited<ReturnType<typeof notifyAdminsOfNewContracts>> | null = null;
+    if (!allFailed && totals && Number(totals.total_created ?? 0) > 0) {
+      try {
+        adminNotify = await notifyAdminsOfNewContracts(db, body.runId);
+      } catch (e) {
+        console.error('[api/sync/run] admin notify failed', e instanceof Error ? e.message : String(e));
+      }
+    }
+
+    return NextResponse.json({ success: true, runId: body.runId, finished: true, adminNotify });
   }
 
   // ── 새 run 생성 또는 기존 run 이어서 ──────────────────

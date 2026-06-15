@@ -11,6 +11,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabaseClient, createServerSupabaseClient } from '@/lib/supabase/server';
+import { notifyAdminsOfSalesCodeRequest } from '@/lib/push/admin-event-notify';
 
 type MeContext = {
   userId: string;
@@ -143,5 +144,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  // 신청 저장이 성공했으면 관리자에게 푸시 알림 발송 (best-effort, 신청 자체 저장은 이미 성공).
+  // 중복 발송 방지는 sales_code_requests.admin_notified_at 컬럼으로 처리한다.
+  const createdId = ((data as { id?: string } | null)?.id ?? '').trim();
+  if (createdId) {
+    try {
+      await notifyAdminsOfSalesCodeRequest(adminDb, createdId);
+    } catch (e) {
+      console.error('[api/me/sales-code-requests] admin notify failed', e instanceof Error ? e.message : String(e));
+    }
+  }
+
   return NextResponse.json({ item: data });
 }

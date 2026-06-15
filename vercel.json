@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/tylife-sync",
-      "schedule": "0 1 * * *"
+      "schedule": "*/10 * * * *"
     },
     {
       "path": "/api/cron/notice-push",
