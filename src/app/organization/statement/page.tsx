@@ -688,9 +688,11 @@ export default async function OrganizationStatementPage({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="bg-orange-400 rounded-lg p-4">
-              <div className="text-xs text-orange-950/80 mb-1">총 지급액</div>
-              <div className="text-xl font-semibold text-orange-950 tabular-nums">{formatWon(ss.total_amount ?? 0)}</div>
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+              <div className="text-xs text-orange-800 mb-1">총 지급액</div>
+              <div className="text-xl font-semibold text-orange-950 tabular-nums">
+                {formatWon(ss.total_amount ?? 0)}
+              </div>
             </div>
             <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
               <div className="text-xs text-orange-800 mb-1">총 합계 구좌</div>
@@ -699,6 +701,35 @@ export default async function OrganizationStatementPage({
               </div>
             </div>
           </div>
+
+          {(() => {
+            // 화면 표시용 계산만 (정산 계산 로직/금액에 영향 없음).
+            // 원 단위 절사 기준: Math.floor.
+            const totalAmount = Number(ss.total_amount ?? 0);
+            const deductionAmount = Math.floor(totalAmount * 0.033);
+            const netPaymentAmount = totalAmount - deductionAmount;
+            return (
+              <div className="mt-3 space-y-2">
+                <div className="rounded-lg border border-gray-200 overflow-hidden">
+                  <div className="grid grid-cols-2 px-4 py-3">
+                    <div className="text-sm text-gray-600">공제액 (3.3%)</div>
+                    <div className="text-sm text-right tabular-nums text-gray-800">
+                      −{formatWon(deductionAmount)}
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-orange-500 rounded-xl p-5 shadow-sm ring-1 ring-orange-600/10">
+                  <div className="text-xs font-semibold text-orange-50/90 mb-1">실지급액</div>
+                  <div className="text-3xl font-extrabold tracking-tight text-white tabular-nums">
+                    {formatWon(netPaymentAmount)}
+                  </div>
+                  <div className="mt-1 text-[11px] text-orange-50/80">
+                    총 지급액 {formatWon(totalAmount)} − 공제액 {formatWon(deductionAmount)}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           <div className="mt-6">
             <Link
@@ -717,7 +748,7 @@ export default async function OrganizationStatementPage({
           <section className="mt-6">
             <h3 className="text-base font-semibold text-gray-800 mb-2">직접 정산 계약 목록</h3>
             <p className="text-xs text-gray-500 mb-2">
-              본인이 정산 담당자로 직접 정산받는 계약만 표시합니다. (정산 담당자 보정 계약 포함)
+          
             </p>
             <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
               <div className="overflow-x-auto">
