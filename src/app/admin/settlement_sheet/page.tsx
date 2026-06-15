@@ -27,6 +27,7 @@ import {
   computeStatementDownlineUnitsWithSharedContext,
   loadGlobalStatementWindowContractPool,
 } from '@/lib/organization/statement-downline-units';
+import { isSuppressedStatementSheetMember } from '@/lib/settlement/statement-sheet';
 import type { RankType } from '@/lib/types';
 import SettlementSheetAdminClient, {
   type SheetRowVM,
@@ -229,6 +230,10 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
       const bn = r.override?.bonusAmount ?? r.base.bonusAmount;
       return pu !== 0 || du !== 0 || pc !== 0 || ov !== 0 || bn !== 0;
     })
+    // 공유 링크(=login_code) 가 없으면 명세서 공유가 불가능하므로 표·엑셀에서 제외한다.
+    .filter((r) => Boolean(r.tyCode))
+    // 운영팀 요청으로 노출 차단된 멤버는 표·엑셀에서 제외.
+    .filter((r) => !isSuppressedStatementSheetMember(r.name, r.phone))
     .sort((a, b) => a.name.localeCompare(b.name, 'ko-KR'));
 
   return (

@@ -26,6 +26,7 @@ import {
   digitsOnlyPhone,
   formatYearMonthKo,
   formatYmdDot,
+  isSuppressedStatementSheetMember,
 } from '@/lib/settlement/statement-sheet';
 import {
   loadStatementDownlineSharedData,
@@ -230,10 +231,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const name = (m.name ?? '').replace(/^\[고객\]\s*/, '') || '';
       const phoneDigits = digitsOnlyPhone(m.phone);
       const tyCode = (loginCodeByMemberId.get(m.id) ?? '').trim();
-      const link =
-        tyCode && baseUrl
-          ? `${baseUrl}/organization/statement/${encodeURIComponent(tyCode)}?year_month=${encodeURIComponent(yearMonth)}`
-          : '';
+      // 공유 링크(login_code) 가 없으면 명세서 공유가 불가능하므로 export 에서 제외.
+      if (!tyCode) return null;
+      // 운영팀 요청으로 노출 차단된 멤버는 export 에서도 제외.
+      if (isSuppressedStatementSheetMember(name, phoneDigits)) return null;
+      const link = baseUrl
+        ? `${baseUrl}/organization/statement/${encodeURIComponent(tyCode)}?year_month=${encodeURIComponent(yearMonth)}`
+        : '';
       return {
         phoneDigits,
         name,

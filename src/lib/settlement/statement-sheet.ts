@@ -218,3 +218,26 @@ export function digitsOnlyPhone(phone: string | null | undefined): string {
   if (!phone) return '';
   return phone.replace(/\D+/g, '');
 }
+
+/**
+ * 명세서 관리 페이지/엑셀에서 표시 자체를 차단하는 멤버 룰.
+ *
+ * 운영팀 요청으로 추가된 노출 차단 룰이며, 정산 계산 자체에는 영향을 주지 않는다.
+ * 이름은 "[고객] " 접두어를 제거한 표시 이름 기준이고,
+ * 전화번호는 하이픈 등을 제거한 11자리 숫자(`digitsOnlyPhone`) 기준이다.
+ */
+const SUPPRESSED_STATEMENT_SHEET_MEMBERS: Array<{ name: string; phoneDigits: string }> = [
+  { name: '안성준', phoneDigits: '01079798739' },
+];
+
+export function isSuppressedStatementSheetMember(
+  name: string | null | undefined,
+  phone: string | null | undefined,
+): boolean {
+  const cleanName = (name ?? '').replace(/^\[고객\]\s*/, '').trim();
+  const phoneDigits = digitsOnlyPhone(phone);
+  if (!cleanName && !phoneDigits) return false;
+  return SUPPRESSED_STATEMENT_SHEET_MEMBERS.some(
+    (rule) => rule.name === cleanName && rule.phoneDigits === phoneDigits,
+  );
+}
