@@ -173,7 +173,7 @@ export default function StatementSheetView(props: StatementSheetViewProps) {
                 <td className="px-4 py-3 text-right font-semibold tabular-nums">
                   - {formatWon(withholdingTax)}
                 </td>
-                <td className="px-4 py-3 text-right text-[12px] font-medium">공제액</td>
+                <td className="px-4 py-3 text-right text-[12px] font-medium">공제</td>
               </tr>
               <tr className="border-t-2 border-slate-300 font-bold text-slate-900">
                 <td className="px-4 py-3">실지급액</td>
