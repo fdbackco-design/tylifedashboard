@@ -35,6 +35,37 @@ export interface RollupItem {
   subtotal: number;
 }
 
+/**
+ * 롤업수당의 계약 단위 근거(정산 계산 시점에 그대로 캡처해 저장).
+ *
+ * 주의:
+ * - 이 배열은 정산 계산 로직의 결정을 바꾸지 않고, 결정된 결과를 계약 단위로 기록만 한다.
+ * - subtotal 합계는 monthly_settlements.rollup_commission 및 sum(calculation_detail.rollup_items[].subtotal)와 일치한다.
+ *   (구좌당 평균 단가의 표시용 반올림 외에는 동일해야 한다)
+ */
+export interface RollupContractItem {
+  contract_id: string;
+  contract_code: string;
+  /** 롤업이 귀속된 "직속 자식 노드" (조직도에서 자기 다음 단계). 멤버 단위 rollup_items.from_member_id와 동일 의미. */
+  from_member_id: string;
+  from_member_name: string;
+  from_rank: RankType;
+  /**
+   * 실제로 그 계약이 매달려 있던 멤버(subtree leaf). attributed origin / settlement_sales_member 등으로 결정된 결과.
+   * 화면에서 "실제 계약 담당자" 컬럼으로 표시한다.
+   */
+  effective_sales_member_id: string;
+  effective_sales_member_name?: string;
+  effective_sales_member_rank?: RankType;
+  unit_count: number;
+  /** 해당 계약의 (상위 단가 - 하위 단가) — 계약 단위 정확값(평균 아님) */
+  rollup_amount_per_unit: number;
+  /** rollup_amount_per_unit * unit_count */
+  subtotal: number;
+  /** 디버그/분류용 라벨: 'direct_child' | 'previous_leader_pre_promotion' 등 */
+  included_reason?: string;
+}
+
 /** 리더 승격(영업사원 → 산하 가입 20구좌) 및 유지 장려금 UI용 */
 export interface LeaderPromotionSettlementDetail {
   /** DB 저장 직급 */
@@ -66,6 +97,13 @@ export interface SettlementCalculationDetail {
   rule_id: string;
   direct_contracts: ContractSettlementItem[];
   rollup_items: RollupItem[];
+  /**
+   * 롤업수당을 발생시킨 계약 단위 근거.
+   * 기존 정산 데이터에는 없을 수 있으므로 옵션 필드로 둔다.
+   * 합계 검증:
+   *   sum(rollup_contract_items[].subtotal) === sum(rollup_items[].subtotal) === MonthlySettlement.rollup_commission
+   */
+  rollup_contract_items?: RollupContractItem[];
   incentive_applied: boolean;
   incentive_threshold: number | null;
   /** 보너스 합계 = 리더 유지장려금 + 그룹 보너스(아래 group_bonus_amount) */

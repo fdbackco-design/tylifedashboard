@@ -30,6 +30,7 @@ export type {
   SettlementCalculationDetail,
   ContractSettlementItem,
   RollupItem,
+  RollupContractItem,
   SettlementFilter,
 } from './settlement';
 

@@ -5,7 +5,7 @@ import { getSettlementWindowForYearMonth } from '@/lib/settlement/settlement-win
 import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
 import { isOrgDisplayHiddenMemberName } from '@/lib/organization/org-display-hidden';
 import { isV2EligibleStatic } from '@/lib/settlement/settlement-eligibility-v2';
-import type { RankType } from '@/lib/types';
+import type { RankType, SettlementCalculationDetail, RollupContractItem, RollupItem } from '@/lib/types';
 
 export const metadata: Metadata = { title: '정산 현황 · 산하 내역' };
 export const dynamic = 'force-dynamic';
@@ -61,7 +61,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
   const { start_date, end_date } = getSettlementWindowForYearMonth(yearMonth);
   const endExclusive = nextDay(end_date);
 
-  const [memberRes, membersRes, edgesRes, contractRowsRes] = await Promise.all([
+  const [memberRes, membersRes, edgesRes, contractRowsRes, settlementRes] = await Promise.all([
     db
       .from('organization_members')
       .select('id, name, rank, external_id, phone, source_customer_id')
@@ -79,6 +79,12 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
       )
       .gte('join_date', start_date)
       .lt('join_date', endExclusive),
+    db
+      .from('monthly_settlements')
+      .select('rollup_commission, calculation_detail')
+      .eq('year_month', yearMonth)
+      .eq('member_id', memberId)
+      .maybeSingle(),
   ]);
 
   const member = memberRes.data as any;
@@ -272,6 +278,74 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
 
   const displayName = String(member.name ?? '').replace(/^\[고객\]\s*/, '');
 
+  // ── 롤업수당 상세(계약 단위 근거) 준비 ─────────────────────────────────────
+  // 1) calculation_detail.rollup_contract_items 가 있으면 우선 사용.
+  // 2) 없으면 legacy 표시(멤버 단위 rollup_items 요약).
+  const settlement = settlementRes.data as
+    | { rollup_commission: number | null; calculation_detail: SettlementCalculationDetail | null }
+    | null;
+  const rollupCommission = Number(settlement?.rollup_commission ?? 0);
+  const calcDetail = (settlement?.calculation_detail ?? null) as SettlementCalculationDetail | null;
+  const rollupContractItemsRaw: RollupContractItem[] =
+    Array.isArray(calcDetail?.rollup_contract_items) ? calcDetail!.rollup_contract_items! : [];
+  const rollupItems: RollupItem[] = Array.isArray(calcDetail?.rollup_items)
+    ? (calcDetail!.rollup_items as RollupItem[])
+    : [];
+
+  // 표시용 계약 메타 join (rollup_contract_items 의 contract_id 가 윈도우 밖일 수 있으므로 별도 조회)
+  const rollupContractIds = Array.from(
+    new Set(rollupContractItemsRaw.map((r) => r.contract_id).filter(Boolean)),
+  );
+  type RollupContractMeta = {
+    customer_name: string;
+    join_ymd: string;
+    item_name: string | null;
+    display_status: string;
+  };
+  const rollupContractMetaById = new Map<string, RollupContractMeta>();
+  if (rollupContractIds.length > 0) {
+    const { data: metaRows } = await db
+      .from('contracts')
+      .select(
+        'id, status, join_date, item_name, rental_request_no, invoice_no, memo, customers(name)',
+      )
+      .in('id', rollupContractIds);
+    for (const c of (metaRows ?? []) as any[]) {
+      rollupContractMetaById.set(c.id as string, {
+        customer_name: ((c.customers as any)?.name as string | undefined) ?? '-',
+        join_ymd: String(c.join_date ?? '').slice(0, 10),
+        item_name: (c.item_name as string | null | undefined) ?? null,
+        display_status: getContractDisplayStatus({
+          status: String(c.status ?? ''),
+          rental_request_no: (c.rental_request_no ?? null) as string | null,
+          invoice_no: (c.invoice_no ?? null) as string | null,
+          memo: (c.memo ?? null) as string | null,
+        }),
+      });
+    }
+  }
+
+  // 정합성 검증: 합계 일치 여부 표시(소수점 평균 단가로 인한 1원 이내 오차는 허용)
+  const rollupContractItemsTotal = rollupContractItemsRaw.reduce((s, x) => s + Number(x.subtotal ?? 0), 0);
+  const rollupItemsTotal = rollupItems.reduce((s, x) => s + Number(x.subtotal ?? 0), 0);
+  const rollupTotalsMatch =
+    Math.abs(rollupContractItemsTotal - rollupCommission) <= 1 &&
+    Math.abs(rollupItemsTotal - rollupCommission) <= 1;
+
+  // 정렬: 가입일(있으면) 내림차순 → 산하 멤버명
+  const rollupContractItems = [...rollupContractItemsRaw].sort((a, b) => {
+    const ma = rollupContractMetaById.get(a.contract_id);
+    const mb = rollupContractMetaById.get(b.contract_id);
+    const ja = ma?.join_ymd ?? '';
+    const jb = mb?.join_ymd ?? '';
+    if (ja !== jb) return jb.localeCompare(ja);
+    return (a.from_member_name ?? '').localeCompare(b.from_member_name ?? '');
+  });
+
+  const memberNameById = new Map<string, string>(
+    (membersRaw as any[]).map((m) => [m.id as string, String(m.name ?? '').replace(/^\[고객\]\s*/, '')]),
+  );
+
   return (
     <div className="p-6">
       <div className="mb-6 flex items-start justify-between gap-4">
@@ -296,6 +370,169 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         </div>
       </div>
 
+      {/* ── 롤업수당 상세 (계약 단위 근거) ────────────────────────────────────── */}
+      <section className="mb-6">
+        <div className="mb-2 flex items-end justify-between gap-3">
+          <h3 className="text-base font-semibold text-gray-800">롤업수당 상세 (계약 단위)</h3>
+          <div className="text-xs text-gray-500">
+            롤업수당 합계{' '}
+            <span className="font-semibold text-gray-700">
+              ₩{rollupCommission.toLocaleString()}
+            </span>
+            {rollupContractItemsRaw.length > 0 && (
+              <>
+                {' '}
+                · 계약단위 합계{' '}
+                <span className={rollupTotalsMatch ? 'text-gray-700' : 'text-red-600 font-semibold'}>
+                  ₩{rollupContractItemsTotal.toLocaleString()}
+                </span>
+                {!rollupTotalsMatch && (
+                  <span className="ml-2 text-red-600">⚠ 합계 불일치</span>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
+        {rollupContractItemsRaw.length > 0 ? (
+          <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    {[
+                      '계약코드',
+                      '고객명',
+                      '가입일',
+                      '상품명',
+                      '계약 상태',
+                      '산하 멤버',
+                      '산하 직급',
+                      '실제 계약 담당자',
+                      '구좌',
+                      '구좌당 롤업',
+                      '롤업 소계',
+                    ].map((h) => (
+                      <th
+                        key={h}
+                        className="px-3 py-2 text-left text-xs font-semibold text-gray-600 whitespace-nowrap"
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {rollupContractItems.map((r, idx) => {
+                    const meta = rollupContractMetaById.get(r.contract_id);
+                    const fromName =
+                      memberNameById.get(r.from_member_id) ?? r.from_member_name ?? r.from_member_id;
+                    const effName =
+                      memberNameById.get(r.effective_sales_member_id) ??
+                      r.effective_sales_member_name ??
+                      r.effective_sales_member_id;
+                    const perUnit = Number(r.rollup_amount_per_unit ?? 0);
+                    const sub = Number(r.subtotal ?? 0);
+                    const units = Number(r.unit_count ?? 0);
+                    return (
+                      <tr key={`${r.contract_id}__${idx}`} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-mono text-xs text-gray-700 whitespace-nowrap">
+                          {r.contract_code}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">{meta?.customer_name ?? '-'}</td>
+                        <td className="px-3 py-2 tabular-nums text-gray-600 whitespace-nowrap">
+                          {meta?.join_ymd ?? '-'}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">
+                          {meta?.item_name ?? '-'}
+                        </td>
+                        <td className="px-3 py-2 text-xs whitespace-nowrap">{meta?.display_status ?? '-'}</td>
+                        <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">{fromName}</td>
+                        <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">
+                          {(r.from_rank as RankType) ?? '-'}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{effName}</td>
+                        <td className="px-3 py-2 tabular-nums text-right">{units.toLocaleString()}</td>
+                        <td className="px-3 py-2 tabular-nums text-right text-gray-700">
+                          ₩{perUnit.toLocaleString()}
+                        </td>
+                        <td className="px-3 py-2 tabular-nums text-right font-semibold">
+                          ₩{sub.toLocaleString()}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot className="bg-gray-50 border-t border-gray-200">
+                  <tr>
+                    <td colSpan={8} className="px-3 py-2 text-right text-xs text-gray-500">
+                      합계
+                    </td>
+                    <td className="px-3 py-2 tabular-nums text-right">
+                      {rollupContractItems.reduce((s, x) => s + Number(x.unit_count ?? 0), 0).toLocaleString()}
+                    </td>
+                    <td className="px-3 py-2" />
+                    <td className="px-3 py-2 tabular-nums text-right font-semibold">
+                      ₩{rollupContractItemsTotal.toLocaleString()}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        ) : rollupItems.length > 0 ? (
+          <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+            <div className="px-4 py-3 text-xs text-amber-700 bg-amber-50 border-b border-amber-100">
+              이 정산은 계약 단위 근거가 저장되기 전 데이터입니다. 멤버 단위 요약만 표시합니다.
+              <span className="ml-1 text-gray-500">(정산 재계산 시 계약 단위 상세가 채워집니다)</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    {['산하 멤버', '직급', '구좌', '구좌당 롤업(평균)', '롤업 소계'].map((h) => (
+                      <th
+                        key={h}
+                        className="px-3 py-2 text-left text-xs font-semibold text-gray-600 whitespace-nowrap"
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {rollupItems.map((r, idx) => {
+                    const nm =
+                      memberNameById.get(r.from_member_id) ?? r.from_member_name ?? r.from_member_id;
+                    return (
+                      <tr key={`${r.from_member_id}__${idx}`} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 text-xs text-gray-700">{nm}</td>
+                        <td className="px-3 py-2 text-xs text-gray-500">{r.from_rank}</td>
+                        <td className="px-3 py-2 tabular-nums text-right">
+                          {Number(r.unit_count ?? 0).toLocaleString()}
+                        </td>
+                        <td className="px-3 py-2 tabular-nums text-right text-gray-700">
+                          ₩{Math.round(Number(r.rollup_amount_per_unit ?? 0)).toLocaleString()}
+                        </td>
+                        <td className="px-3 py-2 tabular-nums text-right font-semibold">
+                          ₩{Number(r.subtotal ?? 0).toLocaleString()}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-white rounded-lg border border-gray-200 px-4 py-6 text-center text-sm text-gray-500">
+            이 멤버의 해당 월 롤업수당 내역이 없습니다.
+          </div>
+        )}
+      </section>
+
+      {/* ── 산하 계약 목록 ─────────────────────────────────────────────────── */}
+      <h3 className="text-base font-semibold text-gray-800 mb-2">산하 계약 목록</h3>
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">

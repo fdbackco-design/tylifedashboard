@@ -3,6 +3,7 @@ import type {
   SettlementRule,
   ContractSettlementItem,
   RollupItem,
+  RollupContractItem,
   SettlementCalculationDetail,
   LeaderPromotionSettlementDetail,
 } from '../types/settlement';
@@ -185,21 +186,31 @@ function collectSubordinateUnits(
  * - 하위 직급 계약이 완료될 때마다 (상위 수당 - 하위 수당) 차액을 받음
  * - 직접 하위 자녀의 계약만 처리 (손자는 자녀가 처리)
  */
+type SubtreeContractWithOwner = {
+  contract: Contract;
+  ownerMemberId: string;
+  ownerName: string;
+  ownerRank: RankType;
+};
+
 function calcRollupItems(
   node: OrgTreeNode,
   contractsByMember: Map<string, Contract[]>,
   rules: SettlementRule[],
   yearMonth: string,
-): { items: RollupItem[]; total: number } {
+): { items: RollupItem[]; total: number; contractItems: RollupContractItem[] } {
   const refDate = monthEndDate(yearMonth);
   const items: RollupItem[] = [];
+  const contractItems: RollupContractItem[] = [];
 
-  const collectSubtreeContracts = (n: OrgTreeNode): Contract[] => {
-    const out: Contract[] = [];
+  const collectSubtreeContractsWithOwner = (n: OrgTreeNode): SubtreeContractWithOwner[] => {
+    const out: SubtreeContractWithOwner[] = [];
     const stack: OrgTreeNode[] = [n];
     while (stack.length) {
       const cur = stack.pop()!;
-      out.push(...(contractsByMember.get(cur.id) ?? []));
+      for (const c of contractsByMember.get(cur.id) ?? []) {
+        out.push({ contract: c, ownerMemberId: cur.id, ownerName: cur.name, ownerRank: cur.rank });
+      }
       for (const ch of cur.children ?? []) stack.push(ch);
     }
     return out;
@@ -207,8 +218,8 @@ function calcRollupItems(
 
   for (const child of node.children) {
     // 롤업은 하위 라인 전체(subtree) 계약에 대해 발생한다.
-    const childContracts = collectSubtreeContracts(child);
-    const childUnits = childContracts.reduce((s, c) => s + c.unit_count, 0);
+    const childContractsWithOwner = collectSubtreeContractsWithOwner(child);
+    const childUnits = childContractsWithOwner.reduce((s, x) => s + x.contract.unit_count, 0);
 
     if (childUnits === 0) continue;
 
@@ -228,11 +239,29 @@ function calcRollupItems(
         rollup_amount_per_unit: rollupPerUnit,
         subtotal: childUnits * rollupPerUnit,
       });
+
+      // 계약 단위 근거 캡처. 산식/총합 변경 없이 동일 계산을 계약별로 분해해 저장만 한다.
+      for (const { contract: c, ownerMemberId, ownerName, ownerRank } of childContractsWithOwner) {
+        contractItems.push({
+          contract_id: c.id,
+          contract_code: c.contract_code,
+          from_member_id: child.id,
+          from_member_name: child.name,
+          from_rank: child.rank,
+          effective_sales_member_id: ownerMemberId,
+          effective_sales_member_name: ownerName,
+          effective_sales_member_rank: ownerRank,
+          unit_count: c.unit_count,
+          rollup_amount_per_unit: rollupPerUnit,
+          subtotal: rollupPerUnit * c.unit_count,
+          included_reason: 'direct_child',
+        });
+      }
     }
   }
 
   const total = items.reduce((s, i) => s + i.subtotal, 0);
-  return { items, total };
+  return { items, total, contractItems };
 }
 
 // ─────────────────────────────────────────────
@@ -359,16 +388,19 @@ function calcRollupItemsWithLeaderPromotion(
   promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>,
   previousLeaderByPromotedMemberId?: Map<string, string | null>,
   leaderRankEffectiveAtByMemberId?: Map<string, string | null>,
-): { items: RollupItem[]; total: number } {
+): { items: RollupItem[]; total: number; contractItems: RollupContractItem[] } {
   const refDate = monthEndDate(yearMonth);
   const items: RollupItem[] = [];
+  const contractItems: RollupContractItem[] = [];
 
-  const collectSubtreeContracts = (n: OrgTreeNode): Contract[] => {
-    const out: Contract[] = [];
+  const collectSubtreeContractsWithOwner = (n: OrgTreeNode): SubtreeContractWithOwner[] => {
+    const out: SubtreeContractWithOwner[] = [];
     const stack: OrgTreeNode[] = [n];
     while (stack.length) {
       const cur = stack.pop()!;
-      out.push(...(contractsByMember.get(cur.id) ?? []));
+      for (const c of contractsByMember.get(cur.id) ?? []) {
+        out.push({ contract: c, ownerMemberId: cur.id, ownerName: cur.name, ownerRank: cur.rank });
+      }
       for (const ch of cur.children ?? []) stack.push(ch);
     }
     return out;
@@ -383,10 +415,10 @@ function calcRollupItemsWithLeaderPromotion(
     // 월 중 정책 승격: "승격 전(누적 20 이하)"까지는 기존 상위(부모)가 롤업 귀속,
     // "승격 후(21구좌부터)"는 부모가 더 이상 롤업을 받지 않는다.
     // 따라서 부모(node)의 롤업 계산에서는 child가 승격한 이후 계약은 제외한다.
-    const childContractsAll = collectSubtreeContracts(child);
-    const childContracts = childThreshold
-      ? childContractsAll.filter(
-          (c) =>
+    const childContractsAllWithOwner = collectSubtreeContractsWithOwner(child);
+    const childContractsWithOwner = childThreshold
+      ? childContractsAllWithOwner.filter(
+          ({ contract: c }) =>
             !isContractStrictlyAfterPromotionThreshold(
               c.join_date,
               c.id,
@@ -394,13 +426,14 @@ function calcRollupItemsWithLeaderPromotion(
               (c as { created_at?: string | null }).created_at,
             ),
         )
-      : childContractsAll;
+      : childContractsAllWithOwner;
 
-    const childUnits = childContracts.reduce((s, c) => s + c.unit_count, 0);
+    const childUnits = childContractsWithOwner.reduce((s, x) => s + x.contract.unit_count, 0);
     if (childUnits === 0) continue;
 
     let subtotal = 0;
-    for (const c of childContracts) {
+    const localContractItems: RollupContractItem[] = [];
+    for (const { contract: c, ownerMemberId, ownerName, ownerRank } of childContractsWithOwner) {
       const upper = commissionPerUnitForDirectContract(
         node.id,
         node.rank,
@@ -410,6 +443,8 @@ function calcRollupItemsWithLeaderPromotion(
         promotionThresholdByMemberId,
         leaderRankEffectiveAtByMemberId,
       );
+      // 산식 변경 금지: lower 는 직속 자식(child.id / child.rank) 기준 그대로 계산한다.
+      // (ownerMemberId/ownerRank 는 표시용 메타로만 사용)
       const lower = commissionPerUnitForDirectContract(
         child.id,
         child.rank,
@@ -419,7 +454,25 @@ function calcRollupItemsWithLeaderPromotion(
         promotionThresholdByMemberId,
         leaderRankEffectiveAtByMemberId,
       );
-      subtotal += Math.max(0, upper - lower) * c.unit_count;
+      const diff = Math.max(0, upper - lower);
+      const sub = diff * c.unit_count;
+      subtotal += sub;
+      if (sub > 0) {
+        localContractItems.push({
+          contract_id: c.id,
+          contract_code: c.contract_code,
+          from_member_id: child.id,
+          from_member_name: child.name,
+          from_rank: child.rank,
+          effective_sales_member_id: ownerMemberId,
+          effective_sales_member_name: ownerName,
+          effective_sales_member_rank: ownerRank,
+          unit_count: c.unit_count,
+          rollup_amount_per_unit: diff,
+          subtotal: sub,
+          included_reason: childThreshold ? 'direct_child_pre_promotion' : 'direct_child',
+        });
+      }
     }
 
     if (subtotal > 0) {
@@ -432,6 +485,7 @@ function calcRollupItemsWithLeaderPromotion(
         rollup_amount_per_unit: avg,
         subtotal,
       });
+      contractItems.push(...localContractItems);
     }
   }
 
@@ -461,6 +515,7 @@ function calcRollupItemsWithLeaderPromotion(
       if (units === 0) continue;
 
       let subtotal = 0;
+      const localContractItems: RollupContractItem[] = [];
       for (const c of pre) {
         const upper = commissionPerUnitForDirectContract(
           node.id,
@@ -481,7 +536,25 @@ function calcRollupItemsWithLeaderPromotion(
           promotionThresholdByMemberId,
           leaderRankEffectiveAtByMemberId,
         );
-        subtotal += Math.max(0, upper - lower) * c.unit_count;
+        const diff = Math.max(0, upper - lower);
+        const sub = diff * c.unit_count;
+        subtotal += sub;
+        if (sub > 0) {
+          localContractItems.push({
+            contract_id: c.id,
+            contract_code: c.contract_code,
+            from_member_id: promotedId,
+            from_member_name: '(승격자)',
+            from_rank: '영업사원',
+            effective_sales_member_id: promotedId,
+            effective_sales_member_name: '(승격자)',
+            effective_sales_member_rank: '영업사원',
+            unit_count: c.unit_count,
+            rollup_amount_per_unit: diff,
+            subtotal: sub,
+            included_reason: 'previous_leader_pre_promotion',
+          });
+        }
       }
       if (subtotal > 0) {
         items.push({
@@ -492,12 +565,13 @@ function calcRollupItemsWithLeaderPromotion(
           rollup_amount_per_unit: units ? subtotal / units : 0,
           subtotal,
         });
+        contractItems.push(...localContractItems);
       }
     }
   }
 
   const total = items.reduce((s, i) => s + i.subtotal, 0);
-  return { items, total };
+  return { items, total, contractItems };
 }
 
 // ─────────────────────────────────────────────
@@ -537,6 +611,7 @@ export function calculateMemberSettlement(
   let baseCommission: number;
   let rollupItems: RollupItem[];
   let rollupCommission: number;
+  let rollupContractItems: RollupContractItem[];
 
   const thresholdMap =
     leaderOpts?.promotionThresholdByMemberId ?? new Map<string, SalesMemberPromotionThreshold | null>();
@@ -559,7 +634,11 @@ export function calculateMemberSettlement(
       thresholdMap,
       leaderEffectiveMap,
     ));
-    ({ items: rollupItems, total: rollupCommission } = calcRollupItemsWithLeaderPromotion(
+    ({
+      items: rollupItems,
+      total: rollupCommission,
+      contractItems: rollupContractItems,
+    } = calcRollupItemsWithLeaderPromotion(
       orgNode,
       contractsByMember,
       rules,
@@ -570,12 +649,11 @@ export function calculateMemberSettlement(
     ));
   } else {
     ({ items: directItems, total: baseCommission } = calcDirectContracts(eligible, rule));
-    ({ items: rollupItems, total: rollupCommission } = calcRollupItems(
-      orgNode,
-      contractsByMember,
-      rules,
-      yearMonth,
-    ));
+    ({
+      items: rollupItems,
+      total: rollupCommission,
+      contractItems: rollupContractItems,
+    } = calcRollupItems(orgNode, contractsByMember, rules, yearMonth));
   }
 
   const subordinateUnitCount = collectSubordinateUnits(orgNode, contractsByMember);
@@ -697,6 +775,20 @@ export function calculateMemberSettlement(
     };
   }
 
+  // 정합성 검증(소수점/반올림 외 오차 0원이 정상). 운영 환경 노이즈를 막기 위해 1원 허용.
+  // 오차 발생 시 콘솔에 경고만 남기고 계산 결과는 절대 변경하지 않는다.
+  const rollupContractItemsTotal = rollupContractItems.reduce((s, x) => s + x.subtotal, 0);
+  if (Math.abs(rollupContractItemsTotal - rollupCommission) > 1) {
+    console.warn('[rollup-contract-items][mismatch]', {
+      member_id: member.id,
+      year_month: yearMonth,
+      rollup_commission: rollupCommission,
+      rollup_contract_items_total: rollupContractItemsTotal,
+      rollup_items_total: rollupItems.reduce((s, i) => s + i.subtotal, 0),
+      delta: rollupContractItemsTotal - rollupCommission,
+    });
+  }
+
   const detail: SettlementCalculationDetail = {
     year_month: yearMonth,
     member_id: member.id,
@@ -705,6 +797,7 @@ export function calculateMemberSettlement(
     rule_id: rule.id,
     direct_contracts: directItems,
     rollup_items: rollupItems,
+    rollup_contract_items: rollupContractItems,
     incentive_applied: bonusAmountCombined > 0,
     incentive_threshold: null,
     incentive_amount: bonusAmountCombined,
