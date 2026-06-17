@@ -23,7 +23,7 @@ type AdminItem = {
   completed_at: string | null;
 };
 
-type StatusFilter = 'ALL' | 'PENDING' | 'COMPLETED';
+type StatusFilter = 'ALL' | 'PENDING' | 'RECEIVED' | 'COMPLETED';
 
 function DetailCard({ item }: { item: AdminItem }) {
   const codesLine = formatManagerChangeCodesLine(item.contract_codes, item.item_name);
@@ -132,25 +132,25 @@ export default function ManagerChangeAdminClient() {
     setChecked(next);
   };
 
-  async function completeSelected() {
+  async function receiveSelected() {
     const ids = pendingIds.filter((id) => checked[id]);
     if (ids.length === 0) {
-      setError('완료 처리할 신청중 항목을 선택하세요.');
+      setError('접수완료 처리할 신청중 항목을 선택하세요.');
       return;
     }
     setCompleting(true);
     setError('');
     setMessage('');
     try {
-      const res = await fetch('/api/admin/manager-change-requests/complete', {
+      const res = await fetch('/api/admin/manager-change-requests/receive', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ?? '완료 처리 실패');
-      setMessage(`${(json?.completedIds ?? []).length}건 완료 처리했습니다.`);
+      if (!res.ok) throw new Error(json?.error ?? '접수완료 처리 실패');
+      setMessage(`${(json?.receivedIds ?? []).length}건 접수완료 처리했습니다.`);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -159,20 +159,20 @@ export default function ManagerChangeAdminClient() {
     }
   }
 
-  async function completeOne(id: string) {
+  async function receiveOne(id: string) {
     setCompleting(true);
     setError('');
     setMessage('');
     try {
-      const res = await fetch('/api/admin/manager-change-requests/complete', {
+      const res = await fetch('/api/admin/manager-change-requests/receive', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids: [id] }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ?? '완료 처리 실패');
-      setMessage('완료 처리했습니다.');
+      if (!res.ok) throw new Error(json?.error ?? '접수완료 처리 실패');
+      setMessage('접수완료 처리했습니다.');
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -184,7 +184,7 @@ export default function ManagerChangeAdminClient() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        {(['ALL', 'PENDING', 'COMPLETED'] as const).map((s) => (
+        {(['ALL', 'PENDING', 'RECEIVED', 'COMPLETED'] as const).map((s) => (
           <button
             key={s}
             type="button"
@@ -227,10 +227,10 @@ export default function ManagerChangeAdminClient() {
                 <button
                   type="button"
                   disabled={completing || selectedPendingCount === 0}
-                  onClick={() => void completeSelected()}
+                  onClick={() => void receiveSelected()}
                   className="ml-auto rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
                 >
-                  {completing ? '처리 중…' : `완료 처리 (${selectedPendingCount})`}
+                  {completing ? '처리 중…' : `접수완료 처리 (${selectedPendingCount})`}
                 </button>
               </>
             ) : null}
@@ -289,10 +289,10 @@ export default function ManagerChangeAdminClient() {
                           <button
                             type="button"
                             disabled={completing}
-                            onClick={() => void completeOne(row.id)}
+                            onClick={() => void receiveOne(row.id)}
                             className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800 disabled:opacity-50"
                           >
-                            완료 처리
+                            접수완료
                           </button>
                         ) : null}
                       </td>

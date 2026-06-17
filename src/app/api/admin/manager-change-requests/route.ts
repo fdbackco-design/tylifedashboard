@@ -2,7 +2,7 @@
  * GET /api/admin/manager-change-requests
  * 관리자: 담당자 변경 신청 전체 목록
  *
- * Query: status=PENDING|COMPLETED| (전체는 생략)
+ * Query: status=PENDING|RECEIVED|COMPLETED| (전체는 생략)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const db = createAdminSupabaseClient();
   let q = db.from('manager_change_requests').select(SELECT_FIELDS).order('created_at', { ascending: false }).limit(500);
 
-  if (status === 'PENDING' || status === 'COMPLETED') {
+  if (status === 'PENDING' || status === 'RECEIVED' || status === 'COMPLETED') {
     q = q.eq('status', status);
   }
 

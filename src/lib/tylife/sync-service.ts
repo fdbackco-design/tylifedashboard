@@ -19,6 +19,7 @@
 import { createAdminSupabaseClient } from '../supabase/server';
 import { runPreIssuedAccountAutoMapping } from '@/lib/account-issue/auto-mapping';
 import { enrichMemberDataPhoneFromUserProfile, repairMemberProfileIntegrity } from '@/lib/account-issue/member-profile-repair';
+import { autoCompleteReceivedManagerChangeRequests } from '@/lib/manager-change/auto-complete';
 import { fetchContractList, fetchContractDetailHtml } from './client';
 import { normalizeDate, parseContractListHtml, parseContractDetailHtml } from './html-parser';
 import {
@@ -1747,6 +1748,19 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         await log(db, runId, 'warn', `사전 발급 계정 자동 매핑 실패(동기화는 완료 처리): ${message}`);
+      }
+    }
+
+    // 담당자 변경 신청 자동 완료 처리
+    // - 관리자가 "접수완료(RECEIVED)" 처리한 건 중, TY 동기화로 계약 담당자가 실제 변경되면 자동으로 COMPLETED 처리 + 영업자 알림
+    // - 실패해도 동기화 전체는 완료 처리
+    if (!dryRun) {
+      try {
+        const r = await autoCompleteReceivedManagerChangeRequests(db);
+        await log(db, runId, 'info', '담당자 변경 신청 자동 완료 확인', r);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        await log(db, runId, 'warn', `담당자 변경 신청 자동 완료 확인 실패(동기화는 완료 처리): ${message}`);
       }
     }
 
