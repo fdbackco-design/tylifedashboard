@@ -97,7 +97,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }>;
   const memberIds = settlementRows.map((r) => r.member_id).filter(Boolean);
   if (memberIds.length === 0) {
-    return new NextResponse(`${UTF8_BOM}전화번호,고객명,직책,정산월,정산기간,링크\n`, {
+    return new NextResponse(`${UTF8_BOM}전화번호,#{고객명},#{직책},#{정산월},#{정산기간},#{링크}\n`, {
       status: 200,
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
@@ -233,7 +233,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     .filter((x): x is { phoneDigits: string; name: string; rank: string; link: string } => x !== null)
     .sort((a, b) => a.name.localeCompare(b.name, 'ko-KR'));
 
-  const header = ['전화번호', '고객명', '직책', '정산월', '정산기간', '링크'].map(csvEscape).join(',');
+  const header = ['전화번호', '#{고객명}', '#{직책}', '#{정산월}', '#{정산기간}', '#{링크}'].map(csvEscape).join(',');
   const body = rows
     .map((r) =>
       [
