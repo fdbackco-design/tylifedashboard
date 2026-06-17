@@ -1,15 +1,35 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 
-function hasSupabaseSessionCookie(req: NextRequest): boolean {
-  // supabase/ssr 쿠키 이름은 프로젝트마다 prefix가 달라질 수 있어 패턴으로 탐지한다.
-  // 예: sb-<project-ref>-auth-token
-  for (const c of req.cookies.getAll()) {
-    const name = c.name ?? '';
-    if (name.endsWith('-auth-token') && name.startsWith('sb-')) return true;
-    if (name === 'sb-access-token' || name === 'sb-refresh-token') return true;
-  }
-  return false;
+async function getAuthedUserIdAndRefreshSession(req: NextRequest): Promise<{
+  userId: string | null;
+  res: NextResponse;
+}> {
+  // 중요: Next.js App Router + SSR 환경에서 세션이 자주 풀리는 가장 흔한 원인은
+  // 요청마다 Supabase가 refresh token을 사용해 쿠키를 갱신할 기회가 없어서다.
+  // middleware에서 getUser()를 호출해 토큰 갱신(set-cookie)을 response에 반영한다.
+  const res = NextResponse.next();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return req.cookies.getAll();
+        },
+        setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
+          cookiesToSet.forEach(({ name, value, options }) => res.cookies.set(name, value, options));
+        },
+      },
+    },
+  );
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  return { userId: user?.id ?? null, res };
 }
 
 export function middleware(req: NextRequest) {
@@ -29,12 +49,15 @@ export function middleware(req: NextRequest) {
   if (pathname.startsWith('/icons') || pathname === '/manifest.json' || pathname === '/sw.js') return NextResponse.next();
 
   // 로그인 필요: /privacy, /login 외 전부
-  if (hasSupabaseSessionCookie(req)) return NextResponse.next();
+  return (async () => {
+    const { userId, res } = await getAuthedUserIdAndRefreshSession(req);
+    if (userId) return res;
 
-  const redirectTo = `${pathname}${search}`;
-  const loginUrl = new URL('/login', req.url);
-  loginUrl.searchParams.set('redirect', redirectTo);
-  return NextResponse.redirect(loginUrl);
+    const redirectTo = `${pathname}${search}`;
+    const loginUrl = new URL('/login', req.url);
+    loginUrl.searchParams.set('redirect', redirectTo);
+    return NextResponse.redirect(loginUrl);
+  })();
 }
 
 export const config = {
