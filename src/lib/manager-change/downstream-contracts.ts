@@ -11,6 +11,7 @@ import {
   collectSubtreeMemberIdsDownstream,
 } from '@/lib/settlement/settlement-org-tree';
 import type { OrgTreeRow, RankType } from '@/lib/types';
+import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
 
 export type DownstreamContractRow = {
   id: string;
@@ -21,6 +22,7 @@ export type DownstreamContractRow = {
   resident_number: string;
   unit_count: number;
   item_name: string;
+  status: string;
   current_manager_id: string | null;
   current_manager_name: string;
 };
@@ -103,7 +105,7 @@ export async function loadDownstreamContractsForMember(
   );
 
   const contractSelect =
-    'id, contract_code, item_name, unit_count, sales_member_id, settlement_sales_member_id, customer_id, customers(name, phone, ssn_masked)';
+    'id, contract_code, item_name, unit_count, status, rental_request_no, invoice_no, memo, sales_member_id, settlement_sales_member_id, customer_id, customers(name, phone, ssn_masked)';
 
   const contractChunks = chunk(subtreeMemberIds, 400);
   const contractResList = await Promise.all(
@@ -128,6 +130,10 @@ export async function loadDownstreamContractsForMember(
         contract_code: string | null;
         item_name: string | null;
         unit_count: number | null;
+        status: string | null;
+        rental_request_no: string | null;
+        invoice_no: string | null;
+        memo: string | null;
         sales_member_id: string | null;
         settlement_sales_member_id: string | null;
         customer_id: string;
@@ -149,6 +155,12 @@ export async function loadDownstreamContractsForMember(
         resident_number: String(customer?.ssn_masked ?? ''),
         unit_count: Math.max(1, Number(row.unit_count ?? 1) || 1),
         item_name: String(row.item_name ?? ''),
+        status: getContractDisplayStatus({
+          status: String(row.status ?? ''),
+          rental_request_no: row.rental_request_no,
+          invoice_no: row.invoice_no,
+          memo: row.memo,
+        }),
         current_manager_id: managerId,
         current_manager_name: managerId ? memberNameById.get(managerId) ?? '-' : '-',
       });

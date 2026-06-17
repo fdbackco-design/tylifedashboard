@@ -12,8 +12,36 @@ type ContractRow = {
   resident_number: string;
   unit_count: number;
   item_name: string;
+  status: string;
   current_manager_name: string;
 };
+
+function contractStatusClass(status: string): string {
+  switch (status) {
+    case '가입':
+    case '정산완료':
+      return 'bg-emerald-50 text-emerald-700 ring-emerald-200';
+    case '해약':
+    case '취소':
+      return 'bg-red-50 text-red-700 ring-red-200';
+    case '렌탈 미충족':
+      return 'bg-orange-50 text-orange-700 ring-orange-200';
+    case '해피콜완료':
+      return 'bg-cyan-50 text-cyan-700 ring-cyan-200';
+    default:
+      return 'bg-slate-100 text-slate-600 ring-slate-200';
+  }
+}
+
+function ContractStatusBadge({ status }: { status: string }) {
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${contractStatusClass(status)}`}
+    >
+      {status}
+    </span>
+  );
+}
 
 type RequestItem = {
   id: string;
@@ -170,45 +198,112 @@ export default function ManagerChangeClient(props: {
         ) : contracts.length === 0 ? (
           <p className="mt-4 text-sm text-slate-500">표시할 계약이 없습니다.</p>
         ) : (
-          <div className="mt-3 max-h-[320px] overflow-auto rounded-lg border border-slate-200">
-            <table className="min-w-full text-xs sm:text-sm">
-              <thead className="sticky top-0 bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-3 py-2">선택</th>
-                  <th className="px-3 py-2">고객명</th>
-                  <th className="px-3 py-2">연락처</th>
-                  <th className="px-3 py-2 text-right">구좌</th>
-                  <th className="px-3 py-2">코드</th>
-                  <th className="px-3 py-2">상품명</th>
-                  <th className="px-3 py-2">현재 담당자</th>
-                </tr>
-              </thead>
-              <tbody>
-                {contracts.map((c) => (
-                  <tr
+          <>
+            {/* 모바일: 카드 목록 (긴 상품명·코드 줄바꿈 깨짐 방지) */}
+            <div className="mt-3 max-h-[420px] space-y-2 overflow-y-auto sm:hidden">
+              {contracts.map((c) => {
+                const selected = selectedContractId === c.id;
+                return (
+                  <label
                     key={c.id}
-                    className={`border-t border-slate-100 ${selectedContractId === c.id ? 'bg-orange-50' : ''}`}
+                    className={`block cursor-pointer rounded-xl border p-3 transition ${
+                      selected
+                        ? 'border-orange-300 bg-orange-50 ring-1 ring-orange-200/60'
+                        : 'border-slate-200 bg-white hover:border-slate-300'
+                    }`}
                   >
-                    <td className="px-3 py-2">
+                    <div className="flex items-start gap-3">
                       <input
                         type="radio"
                         name="contract"
-                        checked={selectedContractId === c.id}
+                        checked={selected}
                         onChange={() => setSelectedContractId(c.id)}
                         disabled={submitting}
+                        className="mt-1 shrink-0"
                       />
-                    </td>
-                    <td className="px-3 py-2 font-medium text-slate-900">{c.customer_name}</td>
-                    <td className="px-3 py-2 text-slate-600">{c.customer_phone ?? '-'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{c.unit_count}</td>
-                    <td className="px-3 py-2 font-mono text-[11px] text-slate-700">{c.contract_code}</td>
-                    <td className="px-3 py-2 text-slate-600">{c.item_name}</td>
-                    <td className="px-3 py-2 text-slate-700">{c.current_manager_name}</td>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold text-slate-900 break-keep">{c.customer_name}</p>
+                          <ContractStatusBadge status={c.status} />
+                        </div>
+                        <p className="mt-1 font-mono text-[11px] leading-snug text-slate-700 break-all">
+                          {c.contract_code}
+                        </p>
+                        <p className="mt-1.5 text-xs leading-relaxed text-slate-600 break-keep">{c.item_name}</p>
+                        <dl className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+                          <div className="min-w-0">
+                            <dt className="text-slate-400">연락처</dt>
+                            <dd className="mt-0.5 whitespace-nowrap tabular-nums text-slate-700">
+                              {c.customer_phone ?? '-'}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-slate-400">구좌</dt>
+                            <dd className="mt-0.5 tabular-nums text-slate-700">{c.unit_count}구좌</dd>
+                          </div>
+                          <div className="col-span-2 min-w-0">
+                            <dt className="text-slate-400">현재 담당자</dt>
+                            <dd className="mt-0.5 break-keep text-slate-700">{c.current_manager_name}</dd>
+                          </div>
+                        </dl>
+                      </div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+
+            {/* 데스크톱: 가로 스크롤 테이블 */}
+            <div className="mt-3 hidden max-h-[320px] overflow-auto rounded-lg border border-slate-200 sm:block">
+              <table className="min-w-[720px] w-full text-sm">
+                <thead className="sticky top-0 z-10 bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="w-12 px-3 py-2">선택</th>
+                    <th className="whitespace-nowrap px-3 py-2">고객명</th>
+                    <th className="whitespace-nowrap px-3 py-2">연락처</th>
+                    <th className="whitespace-nowrap px-3 py-2 text-right">구좌</th>
+                    <th className="whitespace-nowrap px-3 py-2">상태</th>
+                    <th className="whitespace-nowrap px-3 py-2">코드</th>
+                    <th className="min-w-[12rem] px-3 py-2">상품명</th>
+                    <th className="whitespace-nowrap px-3 py-2">현재 담당자</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {contracts.map((c) => (
+                    <tr
+                      key={c.id}
+                      className={`border-t border-slate-100 ${selectedContractId === c.id ? 'bg-orange-50' : ''}`}
+                    >
+                      <td className="px-3 py-2">
+                        <input
+                          type="radio"
+                          name="contract"
+                          checked={selectedContractId === c.id}
+                          onChange={() => setSelectedContractId(c.id)}
+                          disabled={submitting}
+                        />
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900">{c.customer_name}</td>
+                      <td className="whitespace-nowrap px-3 py-2 tabular-nums text-slate-600">
+                        {c.customer_phone ?? '-'}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{c.unit_count}</td>
+                      <td className="whitespace-nowrap px-3 py-2">
+                        <ContractStatusBadge status={c.status} />
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 font-mono text-[11px] text-slate-700">
+                        {c.contract_code}
+                      </td>
+                      <td className="max-w-[14rem] px-3 py-2 text-slate-600 break-keep leading-snug">
+                        {c.item_name}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-slate-700">{c.current_manager_name}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </section>
 
