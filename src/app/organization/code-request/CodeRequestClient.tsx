@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 
 type Item = {
@@ -481,6 +482,17 @@ export default function CodeRequestClient({
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm ring-1 ring-slate-900/[0.035] sm:p-5">
+        <h2 className="text-sm font-semibold text-slate-900 sm:text-base">담당자 변경</h2>
+        <p className="mt-1 text-xs text-slate-500">본인 산하 계약의 담당자 변경을 신청할 수 있습니다.</p>
+        <Link
+          href="/organization/manager-change"
+          className="mt-3 inline-flex min-h-9 items-center justify-center rounded-lg border border-orange-200 bg-orange-50 px-4 text-sm font-semibold text-orange-800 transition hover:bg-orange-100"
+        >
+          담당자 변경 신청
+        </Link>
       </section>
     </>
   );
