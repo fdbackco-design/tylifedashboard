@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { isAdminAuthed } from '@/lib/admin-auth';
+import { backfillMemberPhoneFromUserProfile } from '@/lib/account-issue/member-profile-repair';
 
 /**
  * 관리자 수동 매핑 / 매핑 해제 API
@@ -103,6 +104,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         .update(updates)
         .eq('id', user_profile_id);
       if (uErr) throw new Error(uErr.message);
+
+      await backfillMemberPhoneFromUserProfile(db, member_id);
 
       // 4) 감사 로그
       await db.from('account_mapping_logs').insert({

@@ -18,7 +18,7 @@
 
 import { createAdminSupabaseClient } from '../supabase/server';
 import { runPreIssuedAccountAutoMapping } from '@/lib/account-issue/auto-mapping';
-import { repairMemberProfileIntegrity } from '@/lib/account-issue/member-profile-repair';
+import { enrichMemberDataPhoneFromUserProfile, repairMemberProfileIntegrity } from '@/lib/account-issue/member-profile-repair';
 import { fetchContractList, fetchContractDetailHtml } from './client';
 import { normalizeDate, parseContractListHtml, parseContractDetailHtml } from './html-parser';
 import {
@@ -443,6 +443,7 @@ async function upsertSalesMember(
     if (byExt) {
       const matchedId = (byExt as { id: string }).id;
       // 영업자 정보로 update (기존 onConflict upsert 와 동등한 효과)
+      await enrichMemberDataPhoneFromUserProfile(db, memberData, matchedId);
       await db.from('organization_members').update(memberData).eq('id', matchedId);
       // 옛 customer 노드/어긋난 user_profiles 가 있으면 자동 재매핑 (best-effort).
       await repairMemberProfileIntegrity(db, matchedId);
@@ -521,6 +522,8 @@ async function upsertSalesMember(
     }
   }
 
+  await enrichMemberDataPhoneFromUserProfile(db, memberData);
+
   const { data: inserted, error: insErr } = await db
     .from('organization_members')
     .insert({ ...memberData, name: salesName })
@@ -529,6 +532,7 @@ async function upsertSalesMember(
 
   if (!insErr && inserted) {
     const newId = (inserted as { id: string }).id;
+    await repairMemberProfileIntegrity(db, newId);
     if (isDev) {
       // eslint-disable-next-line no-console
       console.log('[member-dedupe-sales]', {

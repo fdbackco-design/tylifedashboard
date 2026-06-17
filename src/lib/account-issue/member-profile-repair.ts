@@ -31,6 +31,132 @@ export function loginDigitsFromPhone(phone: string | null | undefined): string {
   return d.slice(-8);
 }
 
+/** user_profiles.login_code 에서 8자리 숫자만 추출한다. */
+export function extractLoginCodeDigits(loginCode: string | null | undefined): string | null {
+  const raw = String(loginCode ?? '').trim();
+  if (!raw) return null;
+  const local = raw.includes('@') ? raw.split('@')[0] : raw;
+  const digits = local.replace(/\D/g, '');
+  return /^\d{8}$/.test(digits) ? digits : null;
+}
+
+/**
+ * login_code(8자리) → `010` + login_code 전화번호.
+ * 기본 저장 형식: `010-1234-5678` (hyphenated=false 이면 `01012345678`).
+ */
+export function phoneFromLoginCode(
+  loginCode: string | null | undefined,
+  opts?: { hyphenated?: boolean },
+): string | null {
+  const code8 = extractLoginCodeDigits(loginCode);
+  if (!code8) return null;
+  const full = `010${code8}`;
+  if (opts?.hyphenated === false) return full;
+  return `010-${code8.slice(0, 4)}-${code8.slice(4)}`;
+}
+
+export function isMemberPhoneEmpty(phone: string | null | undefined): boolean {
+  return phone == null || String(phone).trim() === '';
+}
+
+async function findLoginCodeForMemberContext(
+  db: SupabaseClient,
+  params: { memberId?: string | null; customerId?: string | null },
+): Promise<string | null> {
+  const memberId = (params.memberId ?? '').trim();
+  const customerId = (params.customerId ?? '').trim();
+
+  if (memberId) {
+    const { data } = await db
+      .from('user_profiles')
+      .select('login_code, is_active, updated_at')
+      .eq('member_id', memberId)
+      .not('login_code', 'is', null)
+      .order('is_active', { ascending: false })
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (data?.login_code) return String((data as { login_code: string }).login_code);
+  }
+
+  if (customerId) {
+    const { data } = await db
+      .from('user_profiles')
+      .select('login_code, is_active, updated_at')
+      .eq('customer_id', customerId)
+      .not('login_code', 'is', null)
+      .order('is_active', { ascending: false })
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (data?.login_code) return String((data as { login_code: string }).login_code);
+  }
+
+  return null;
+}
+
+/**
+ * organization_members.phone 이 비어 있을 때 user_profiles.login_code 로 전화번호를 채운다.
+ * (이미 phone 이 있으면 덮어쓰지 않는다.)
+ */
+export async function backfillMemberPhoneFromUserProfile(
+  db: SupabaseClient,
+  memberId: string,
+): Promise<{ updated: boolean; phone: string | null }> {
+  const id = (memberId ?? '').trim();
+  if (!id) return { updated: false, phone: null };
+
+  const { data: member, error: mErr } = await db
+    .from('organization_members')
+    .select('id, phone, source_customer_id')
+    .eq('id', id)
+    .maybeSingle();
+  if (mErr || !member) return { updated: false, phone: null };
+
+  const row = member as { id: string; phone: string | null; source_customer_id: string | null };
+  if (!isMemberPhoneEmpty(row.phone)) return { updated: false, phone: row.phone };
+
+  const loginCode = await findLoginCodeForMemberContext(db, {
+    memberId: id,
+    customerId: row.source_customer_id,
+  });
+  const phone = phoneFromLoginCode(loginCode);
+  if (!phone) return { updated: false, phone: null };
+
+  const { error: upErr } = await db.from('organization_members').update({ phone }).eq('id', id);
+  if (upErr) {
+    // eslint-disable-next-line no-console
+    console.warn('[backfillMemberPhoneFromUserProfile] update failed', { memberId: id, error: upErr.message });
+    return { updated: false, phone: null };
+  }
+  return { updated: true, phone };
+}
+
+/**
+ * insert/update 직전 memberData.phone 이 비어 있으면 user_profiles.login_code 로 보강한다.
+ */
+export async function enrichMemberDataPhoneFromUserProfile(
+  db: SupabaseClient,
+  memberData: {
+    phone?: string | null;
+    source_customer_id?: string | null;
+    external_id?: string | null;
+  },
+  memberId?: string | null,
+): Promise<void> {
+  if (!isMemberPhoneEmpty(memberData.phone)) return;
+  const customerId =
+    (memberData.source_customer_id ?? '').trim() ||
+    customerIdFromExternalId(memberData.external_id) ||
+    '';
+  const loginCode = await findLoginCodeForMemberContext(db, {
+    memberId: memberId ?? null,
+    customerId: customerId || null,
+  });
+  const phone = phoneFromLoginCode(loginCode);
+  if (phone) memberData.phone = phone;
+}
+
 /** 표시명 정규화: "[고객] X" → "X", 좌우 공백 제거 */
 export function stripCustomerNamePrefix(name: string | null | undefined): string {
   return (name ?? '').replace(/^\[고객\]\s*/, '').trim();
@@ -185,6 +311,7 @@ export async function repairUserProfileMembership(
     })
     .eq('id', profileId);
   if (upErr) return { ok: false, message: upErr.message };
+  await backfillMemberPhoneFromUserProfile(db, newMemberId);
   return { ok: true };
 }
 
@@ -414,6 +541,8 @@ export async function repairMemberProfileIntegrity(
         keepMemberId: member.id,
       });
     }
+
+    await backfillMemberPhoneFromUserProfile(db, memberId);
   } catch (e) {
     // eslint-disable-next-line no-console
     console.warn('[repairMemberProfileIntegrity] best-effort 실패', {
