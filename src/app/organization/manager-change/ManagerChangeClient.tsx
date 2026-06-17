@@ -415,52 +415,97 @@ export default function ManagerChangeClient(props: {
         <div className="border-b border-slate-100 px-4 py-3">
           <h2 className="text-sm font-semibold text-slate-900">내 신청 이력</h2>
         </div>
-        <div className="overflow-auto">
-          <table className="min-w-full text-xs sm:text-sm">
-            <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-3 py-2">고객명</th>
-                <th className="px-3 py-2">회원 코드 및 제품명</th>
-                <th className="px-3 py-2">변경 후 담당자</th>
-                <th className="px-3 py-2">연락처</th>
-                <th className="px-3 py-2">상태</th>
-                <th className="px-3 py-2">신청일</th>
-                <th className="px-3 py-2">완료일</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-slate-400">
-                    신청 이력이 없습니다.
-                  </td>
-                </tr>
-              ) : (
-                items.map((row) => (
-                  <tr key={row.id} className="border-t border-slate-100">
-                    <td className="px-3 py-2 font-medium">{row.customer_name}</td>
-                    <td className="px-3 py-2 break-words text-slate-600">
-                      {formatManagerChangeCodesLine(row.contract_codes, row.item_name)}
-                    </td>
-                    <td className="px-3 py-2">{row.after_manager_name}</td>
-                    <td className="px-3 py-2">{row.after_manager_phone}</td>
-                    <td className="px-3 py-2">
-                      <span
-                        className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                          row.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-                        }`}
-                      >
-                        {managerChangeStatusLabel(row.status)}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-slate-600">{fmtDateTimeSeoul(row.created_at)}</td>
-                    <td className="px-3 py-2 whitespace-nowrap text-slate-600">{fmtDateTimeSeoul(row.completed_at)}</td>
+
+        {items.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-slate-400">신청 이력이 없습니다.</p>
+        ) : (
+          <>
+            {/* 모바일: 카드 목록 */}
+            <div className="divide-y divide-slate-100 sm:hidden">
+              {items.map((row) => (
+                <div key={row.id} className="px-4 py-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold text-slate-900 break-keep">{row.customer_name}</p>
+                    <span
+                      className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                        row.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                      }`}
+                    >
+                      {managerChangeStatusLabel(row.status)}
+                    </span>
+                  </div>
+                  <div className="mt-2 space-y-1.5 text-xs">
+                    <div>
+                      <p className="text-slate-400">회원 코드</p>
+                      <p className="mt-0.5 font-mono leading-snug text-slate-700 break-all">{row.contract_codes}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-400">제품명</p>
+                      <p className="mt-0.5 leading-snug text-slate-700 break-keep">{row.item_name}</p>
+                    </div>
+                  </div>
+                  <dl className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+                    <div className="col-span-2 min-w-0">
+                      <dt className="text-slate-400">변경 후 담당자</dt>
+                      <dd className="mt-0.5 break-keep text-slate-700">
+                        {row.after_manager_name} / {row.after_manager_phone}
+                      </dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-slate-400">신청일</dt>
+                      <dd className="mt-0.5 tabular-nums text-slate-600">{fmtDateTimeSeoul(row.created_at)}</dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-slate-400">완료일</dt>
+                      <dd className="mt-0.5 tabular-nums text-slate-600">{fmtDateTimeSeoul(row.completed_at)}</dd>
+                    </div>
+                  </dl>
+                </div>
+              ))}
+            </div>
+
+            {/* 데스크톱: 테이블 */}
+            <div className="hidden overflow-auto sm:block">
+              <table className="min-w-full text-sm">
+                <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2">고객명</th>
+                    <th className="px-3 py-2">회원 코드 및 제품명</th>
+                    <th className="px-3 py-2">변경 후 담당자</th>
+                    <th className="px-3 py-2">연락처</th>
+                    <th className="px-3 py-2">상태</th>
+                    <th className="px-3 py-2">신청일</th>
+                    <th className="px-3 py-2">완료일</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody>
+                  {items.map((row) => (
+                    <tr key={row.id} className="border-t border-slate-100">
+                      <td className="px-3 py-2 font-medium">{row.customer_name}</td>
+                      <td className="max-w-[18rem] px-3 py-2 text-slate-600">
+                        <p className="font-mono text-[11px] leading-snug break-all">{row.contract_codes}</p>
+                        <p className="mt-1 leading-snug break-keep">{row.item_name}</p>
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2">{row.after_manager_name}</td>
+                      <td className="whitespace-nowrap px-3 py-2 tabular-nums">{row.after_manager_phone}</td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                            row.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                          }`}
+                        >
+                          {managerChangeStatusLabel(row.status)}
+                        </span>
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-slate-600">{fmtDateTimeSeoul(row.created_at)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-slate-600">{fmtDateTimeSeoul(row.completed_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </section>
     </div>
   );
