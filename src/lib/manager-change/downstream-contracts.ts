@@ -20,12 +20,89 @@ export type DownstreamContractRow = {
   customer_name: string;
   customer_phone: string | null;
   resident_number: string;
+  join_date: string;
   unit_count: number;
   item_name: string;
   status: string;
   current_manager_id: string | null;
   current_manager_name: string;
 };
+
+export type DownstreamContractGroup = {
+  group_key: string;
+  contract_ids: string[];
+  customer_id: string;
+  customer_name: string;
+  customer_phone: string | null;
+  resident_number: string;
+  join_date: string;
+  item_name: string;
+  contract_codes: string;
+  account_count: number;
+  current_manager_id: string | null;
+  current_manager_name: string;
+  statuses: string[];
+};
+
+function phoneDigitsOnly(phone: string | null | undefined): string {
+  return String(phone ?? '').replace(/\D/g, '');
+}
+
+/** 고객·연락처·가입일·담당자·상품명이 동일한 계약 묶음 키 */
+export function buildContractGroupKey(
+  c: Pick<
+    DownstreamContractRow,
+    'customer_id' | 'customer_phone' | 'join_date' | 'current_manager_id' | 'item_name'
+  >,
+): string {
+  return [
+    c.customer_id,
+    phoneDigitsOnly(c.customer_phone),
+    c.join_date,
+    c.current_manager_id ?? '',
+    c.item_name,
+  ].join('|');
+}
+
+export function groupDownstreamContracts(contracts: DownstreamContractRow[]): DownstreamContractGroup[] {
+  const map = new Map<string, DownstreamContractRow[]>();
+  for (const c of contracts) {
+    const key = buildContractGroupKey(c);
+    const list = map.get(key) ?? [];
+    list.push(c);
+    map.set(key, list);
+  }
+
+  const groups: DownstreamContractGroup[] = [];
+  for (const [group_key, rows] of map) {
+    const first = rows[0];
+    const codes = [...rows].map((r) => r.contract_code).filter(Boolean).sort();
+    const statuses = [...new Set(rows.map((r) => r.status))];
+    groups.push({
+      group_key,
+      contract_ids: rows.map((r) => r.id),
+      customer_id: first.customer_id,
+      customer_name: first.customer_name,
+      customer_phone: first.customer_phone,
+      resident_number: first.resident_number,
+      join_date: first.join_date,
+      item_name: first.item_name,
+      contract_codes: codes.join(' / '),
+      account_count: rows.reduce((sum, r) => sum + r.unit_count, 0),
+      current_manager_id: first.current_manager_id,
+      current_manager_name: first.current_manager_name,
+      statuses,
+    });
+  }
+
+  groups.sort(
+    (a, b) =>
+      a.customer_name.localeCompare(b.customer_name, 'ko-KR') ||
+      b.join_date.localeCompare(a.join_date) ||
+      a.contract_codes.localeCompare(b.contract_codes),
+  );
+  return groups;
+}
 
 function stripCustomerPrefix(name: string | null | undefined): string {
   return (name ?? '').replace(/^\[고객\]\s*/, '').trim();
@@ -105,7 +182,7 @@ export async function loadDownstreamContractsForMember(
   );
 
   const contractSelect =
-    'id, contract_code, item_name, unit_count, status, rental_request_no, invoice_no, memo, sales_member_id, settlement_sales_member_id, customer_id, customers(name, phone, ssn_masked)';
+    'id, contract_code, join_date, item_name, unit_count, status, rental_request_no, invoice_no, memo, sales_member_id, settlement_sales_member_id, customer_id, customers(name, phone, ssn_masked)';
 
   const contractChunks = chunk(subtreeMemberIds, 400);
   const contractResList = await Promise.all(
@@ -128,6 +205,7 @@ export async function loadDownstreamContractsForMember(
       const row = raw as unknown as {
         id: string;
         contract_code: string | null;
+        join_date: string | null;
         item_name: string | null;
         unit_count: number | null;
         status: string | null;
@@ -153,6 +231,7 @@ export async function loadDownstreamContractsForMember(
         customer_name: stripCustomerPrefix(customer?.name) || '-',
         customer_phone: customer?.phone ?? null,
         resident_number: String(customer?.ssn_masked ?? ''),
+        join_date: String(row.join_date ?? '').slice(0, 10),
         unit_count: Math.max(1, Number(row.unit_count ?? 1) || 1),
         item_name: String(row.item_name ?? ''),
         status: getContractDisplayStatus({
@@ -171,47 +250,80 @@ export async function loadDownstreamContractsForMember(
   return rows;
 }
 
-/** 선택 계약과 동일 고객·동일 상품명 계약을 묶어 신청 payload 를 만든다. */
-export function buildManagerChangeSelection(
+/** contract_ids 로 그룹 신청 payload 생성 (모두 동일 그룹이어야 함). */
+export function buildManagerChangeSelectionFromContractIds(
   contracts: DownstreamContractRow[],
-  selectedContractId: string,
+  contractIds: string[],
 ): {
   contract_id: string;
+  contract_ids: string[];
+  selection_group_key: string;
   customer_id: string;
   customer_name: string;
   resident_number: string;
   customer_phone: string | null;
+  join_date: string;
   account_count: number;
   contract_codes: string;
   item_name: string;
 } | null {
-  const selected = contracts.find((c) => c.id === selectedContractId);
-  if (!selected) return null;
+  const ids = [...new Set(contractIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) return null;
 
-  const siblings = contracts.filter(
-    (c) => c.customer_id === selected.customer_id && c.item_name === selected.item_name,
-  );
-  const codes = siblings.map((c) => c.contract_code).filter(Boolean);
-  const account_count = siblings.reduce((sum, c) => sum + c.unit_count, 0);
+  const selected = contracts.filter((c) => ids.includes(c.id));
+  if (selected.length !== ids.length) return null;
 
+  const groupKey = buildContractGroupKey(selected[0]);
+  if (!selected.every((c) => buildContractGroupKey(c) === groupKey)) return null;
+
+  const codes = [...selected].map((c) => c.contract_code).filter(Boolean).sort();
+  const first = selected[0];
   return {
-    contract_id: selected.id,
-    customer_id: selected.customer_id,
-    customer_name: selected.customer_name,
-    resident_number: selected.resident_number,
-    customer_phone: selected.customer_phone,
-    account_count,
+    contract_id: first.id,
+    contract_ids: ids,
+    selection_group_key: groupKey,
+    customer_id: first.customer_id,
+    customer_name: first.customer_name,
+    resident_number: first.resident_number,
+    customer_phone: first.customer_phone,
+    join_date: first.join_date,
+    account_count: selected.reduce((sum, c) => sum + c.unit_count, 0),
     contract_codes: codes.join(' / '),
-    item_name: selected.item_name,
+    item_name: first.item_name,
   };
 }
 
-/** 계약이 member 산하에 속하는지 검증 */
+/** @deprecated 단일 id — 내부적으로 그룹 전체를 포함 */
+export function buildManagerChangeSelection(
+  contracts: DownstreamContractRow[],
+  selectedContractId: string,
+) {
+  const selected = contracts.find((c) => c.id === selectedContractId);
+  if (!selected) return null;
+  const groupKey = buildContractGroupKey(selected);
+  const siblings = contracts.filter((c) => buildContractGroupKey(c) === groupKey);
+  return buildManagerChangeSelectionFromContractIds(
+    contracts,
+    siblings.map((c) => c.id),
+  );
+}
+
+/** 계약 id 목록이 member 산하에 모두 속하는지 검증 */
+export async function assertContractsInMemberDownstream(
+  db: SupabaseClient,
+  memberId: string,
+  contractIds: string[],
+): Promise<boolean> {
+  const contracts = await loadDownstreamContractsForMember(db, memberId);
+  const idSet = new Set(contracts.map((c) => c.id));
+  return contractIds.every((id) => idSet.has(id));
+}
+
+/** @deprecated 단일 id */
 export async function assertContractInMemberDownstream(
   db: SupabaseClient,
   memberId: string,
   contractId: string,
 ): Promise<boolean> {
-  const contracts = await loadDownstreamContractsForMember(db, memberId);
-  return contracts.some((c) => c.id === contractId);
+  return assertContractsInMemberDownstream(db, memberId, [contractId]);
 }

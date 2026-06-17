@@ -1,11 +1,14 @@
 /**
  * GET /api/me/manager-change-requests/contracts
- * 로그인 영업자 산하 계약 목록
+ * 로그인 영업자 산하 계약 목록 (동일 조건 그룹)
  */
 
 import { NextResponse } from 'next/server';
 import { createAdminSupabaseClient, createServerSupabaseClient } from '@/lib/supabase/server';
-import { loadDownstreamContractsForMember } from '@/lib/manager-change/downstream-contracts';
+import {
+  groupDownstreamContracts,
+  loadDownstreamContractsForMember,
+} from '@/lib/manager-change/downstream-contracts';
 
 async function getMeMemberId(): Promise<{ memberId: string } | { error: 'unauthorized' } | { error: string }> {
   const db = await createServerSupabaseClient();
@@ -37,7 +40,8 @@ export async function GET(): Promise<NextResponse> {
   try {
     const adminDb = createAdminSupabaseClient();
     const contracts = await loadDownstreamContractsForMember(adminDb, me.memberId);
-    return NextResponse.json({ contracts });
+    const groups = groupDownstreamContracts(contracts);
+    return NextResponse.json({ groups });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
