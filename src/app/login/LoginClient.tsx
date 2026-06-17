@@ -1,8 +1,11 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import TyLifePartnersLogo from '@/components/TyLifePartnersLogo';
 import { createClient } from '@/lib/supabase/client';
+
+const REMEMBER_LOGIN_CODE_KEY = 'auth.remember_login_code';
+const SAVED_LOGIN_CODE_KEY = 'auth.saved_login_code';
 
 export default function LoginClient(props: { redirect: string }) {
   const redirect = useMemo(() => props.redirect, [props.redirect]);
@@ -10,8 +13,24 @@ export default function LoginClient(props: { redirect: string }) {
 
   const [loginCode, setLoginCode] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberLoginCode, setRememberLoginCode] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    try {
+      const remember = localStorage.getItem(REMEMBER_LOGIN_CODE_KEY);
+      const rememberOn = remember == null ? true : remember === '1';
+      setRememberLoginCode(rememberOn);
+      if (rememberOn) {
+        const saved = localStorage.getItem(SAVED_LOGIN_CODE_KEY);
+        if (saved && !loginCode) setLoginCode(saved);
+      }
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -27,6 +46,15 @@ export default function LoginClient(props: { redirect: string }) {
         password: password,
       });
       if (signErr) throw signErr;
+
+      try {
+        localStorage.setItem(REMEMBER_LOGIN_CODE_KEY, rememberLoginCode ? '1' : '0');
+        if (rememberLoginCode) localStorage.setItem(SAVED_LOGIN_CODE_KEY, loginCode.trim());
+        else localStorage.removeItem(SAVED_LOGIN_CODE_KEY);
+      } catch {
+        // ignore
+      }
+
       // SSR이 세션 쿠키를 즉시 인식하도록, 클라이언트 라우팅 대신 full navigation 사용
       navigated = true;
       // 로그인 진입점은 /login 하나로 통일하고, 로그인 성공 후에는 권한에 따라 서버에서 분기한다.
@@ -67,6 +95,8 @@ export default function LoginClient(props: { redirect: string }) {
           <label className="block">
             <div className="text-sm font-medium text-gray-700">ID</div>
             <input
+              id="loginCode"
+              name="username"
               value={loginCode}
               onChange={(e) => setLoginCode(e.target.value)}
               disabled={loading}
@@ -78,6 +108,8 @@ export default function LoginClient(props: { redirect: string }) {
           <label className="block">
             <div className="text-sm font-medium text-gray-700">비밀번호</div>
             <input
+              id="password"
+              name="password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -87,6 +119,17 @@ export default function LoginClient(props: { redirect: string }) {
               autoComplete="current-password"
             />
           </label>
+
+          <label className="flex items-center gap-2 text-xs text-gray-600">
+            <input
+              type="checkbox"
+              checked={rememberLoginCode}
+              onChange={(e) => setRememberLoginCode(e.target.checked)}
+              disabled={loading}
+            />
+            ID 기억하기 (이 기기)
+          </label>
+
           <button
             type="submit"
             disabled={loading || !loginCode.trim() || !password}
