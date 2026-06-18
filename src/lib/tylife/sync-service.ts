@@ -44,6 +44,7 @@ import { resolveContractorByNameOnly } from './contractor-resolution';
 import { buildSettlementTreeRows } from '../settlement/settlement-org-tree';
 import {
   computeSalesMemberPromotionThreshold,
+  computeCenterChiefPromotionMemberIds,
   type AttributedJoinContractRow,
 } from '../settlement/leader-promotion';
 import type { RankType } from '../types/organization';
@@ -1712,6 +1713,22 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
             .in('id', toPromote)
             .eq('rank', '영업사원'); // 안전장치: 상위직급 덮어쓰기 방지
           if (upErr) throw new Error(`승격 반영 실패: ${upErr.message}`);
+          for (const id of toPromote) rankById.set(id, '리더');
+        }
+
+        // 센터장 승격: 산하 리더 5명 이상인 리더 → 센터장
+        const toCenterChief = computeCenterChiefPromotionMemberIds(treeRows, rankById);
+        if (toCenterChief.length > 0) {
+          const { error: ccErr } = await db
+            .from('organization_members')
+            .update({ rank: '센터장' })
+            .in('id', toCenterChief)
+            .eq('rank', '리더');
+          if (ccErr) throw new Error(`센터장 승격 반영 실패: ${ccErr.message}`);
+          await log(db, runId, 'info', '센터장 승격 반영', {
+            count: toCenterChief.length,
+            member_ids: toCenterChief,
+          });
         }
 
         // 본사 직속 재배치 (추가 규칙)

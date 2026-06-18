@@ -23,8 +23,10 @@ import {
 import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
 import type { ContractItem } from '@/components/org-tree/OrgTreeNode';
 import type { OrgTreeRow, OrganizationMember } from '@/lib/types';
+import type { RankType } from '@/lib/types/organization';
 import {
   computeSalesMemberPromotionThreshold,
+  computeCenterChiefPromotionMemberIds,
   type AttributedJoinContractRow,
 } from '@/lib/settlement/leader-promotion';
 import SyncButton from './SyncButton';
@@ -428,6 +430,20 @@ export default async function OrganizationPage({
       return { ...r, rank: '리더' as any };
     });
 
+    // 센터장 승격(표시): 산하 리더 5명 이상인 리더
+    let toCenterChiefIds: string[] = [];
+    {
+      const rankByIdForCenterChief = new Map<string, RankType>();
+      for (const r of treeRows) rankByIdForCenterChief.set(r.id, r.rank as RankType);
+      toCenterChiefIds = computeCenterChiefPromotionMemberIds(treeRows, rankByIdForCenterChief);
+      if (toCenterChiefIds.length > 0) {
+        const centerChiefSet = new Set(toCenterChiefIds);
+        treeRows = treeRows.map((r) =>
+          centerChiefSet.has(r.id) ? { ...r, rank: '센터장' as any } : r,
+        );
+      }
+    }
+
     // UI에서 '리더'로 보이게 되는 경우, DB의 organization_members.rank도 함께 승격 반영한다.
     // - 안전을 위해 "승격(영업사원 → 리더)"만 수행하고, 조건이 풀렸다고 해서 강등은 하지 않는다.
     // - 본사/특정 예외(안성준 본사 취급)는 DB에 쓰지 않는다.
@@ -509,6 +525,23 @@ export default async function OrganizationPage({
         const { error: promoErr } = await db.from('leader_promotion_events').insert(promoRows as any);
         if (promoErr) {
           console.error('leader_promotion_events 삽입 실패:', promoErr.message);
+        }
+      }
+
+      // 센터장 승격(DB): 산하 리더 5명 이상인 리더
+      if (!rankUpdateErr && toCenterChiefIds.length > 0) {
+        const centerChiefDbIds = ahnId
+          ? toCenterChiefIds.filter((id) => id !== ahnId)
+          : toCenterChiefIds;
+        if (centerChiefDbIds.length > 0) {
+          const { error: ccErr } = await db
+            .from('organization_members')
+            .update({ rank: '센터장' as any } as any)
+            .in('id', centerChiefDbIds)
+            .eq('rank', '리더');
+          if (ccErr) {
+            console.error('organization_members 센터장 승격 실패:', ccErr.message);
+          }
         }
       }
     } catch (e) {

@@ -299,3 +299,34 @@ export function isLeaderMaintenanceBonusEligible(params: {
   if (!params.promotionThreshold) return false;
   return params.subtreeJoinUnitsAsOf25 >= 20;
 }
+
+/** 센터장 승격: 산하 리더 최소 인원 */
+export const CENTER_CHIEF_PROMOTION_MIN_LEADERS = 5;
+
+/**
+ * 산하(본인 제외)에 rank가 '리더'인 멤버가 CENTER_CHIEF_PROMOTION_MIN_LEADERS 이상이면
+ * 해당 멤버(현재 직급이 리더인 경우)를 센터장으로 승격 대상으로 본다.
+ */
+export function computeCenterChiefPromotionMemberIds(
+  treeRows: OrgTreeRow[],
+  rankById: Map<string, RankType>,
+): string[] {
+  const childrenByParent = buildChildrenByParentFromRows(treeRows);
+  const out: string[] = [];
+
+  for (const [memberId, rank] of rankById) {
+    if (rank !== '리더') continue;
+
+    const subtree = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
+    let leaderCount = 0;
+    for (const sid of subtree) {
+      if (sid === memberId) continue;
+      if (rankById.get(sid) === '리더') leaderCount++;
+    }
+    if (leaderCount >= CENTER_CHIEF_PROMOTION_MIN_LEADERS) {
+      out.push(memberId);
+    }
+  }
+
+  return out;
+}
