@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { href: '/admin/newcode', label: '영업자 코드 발급' },
   { href: '/admin/manager-change', label: '담당자 변경 신청' },
   { href: '/admin/contracts', label: '계약 관리' },
+  { href: '/admin/pending-sales', label: '담당 미확인' },
   { href: '/admin/organization', label: '조직도' },
   { href: '/admin/settlement', label: '정산 현황' },
   { href: '/admin/settlement_sheet', label: '명세서 관리' },

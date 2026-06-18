@@ -4,6 +4,13 @@ import LoadingButton from '@/components/ui/LoadingButton';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 
+type MemberOption = {
+  id: string;
+  name: string;
+  rank: string;
+  phone: string | null;
+};
+
 type PendingRow = {
   id: string;
   contract_code: string;
@@ -12,9 +19,14 @@ type PendingRow = {
   unit_count: number;
   raw_sales_member_name: string | null;
   customers: { name: string } | null;
-  name_candidates_same_name: { id: string; name: string; rank: string }[];
-  all_members_fallback: { id: string; name: string; rank: string }[];
+  name_candidates_same_name: MemberOption[];
+  all_members_fallback: MemberOption[];
 };
+
+function memberOptionLabel(m: MemberOption): string {
+  const phone = (m.phone ?? '').trim() || '-';
+  return `${m.name} / ${phone} (${m.rank})`;
+}
 
 export default function PendingSalesClient() {
   const [rows, setRows] = useState<PendingRow[]>([]);
@@ -133,7 +145,7 @@ export default function PendingSalesClient() {
                       onClick={() => void linkContract(row.id, m.id)}
                       className="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-50"
                     >
-                      {idx + 1}번 {m.name} ({m.rank})
+                      {idx + 1}번 {memberOptionLabel(m)}
                     </LoadingButton>
                   ))}
                 </div>
@@ -156,7 +168,7 @@ export default function PendingSalesClient() {
                   <option value="">담당자 선택…</option>
                   {row.all_members_fallback.map((m) => (
                     <option key={m.id} value={m.id}>
-                      {m.name} · {m.rank}
+                      {memberOptionLabel(m)}
                     </option>
                   ))}
                 </select>

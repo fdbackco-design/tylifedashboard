@@ -32,7 +32,7 @@ export async function GET(): Promise<NextResponse> {
 
   const { data: allMembers, error: mErr } = await db
     .from('organization_members')
-    .select('id, name, rank')
+    .select('id, name, rank, phone')
     .eq('is_active', true)
     .order('name')
     .limit(2000);
@@ -41,7 +41,7 @@ export async function GET(): Promise<NextResponse> {
     return NextResponse.json({ error: mErr.message }, { status: 500 });
   }
 
-  const memberList = (allMembers ?? []) as { id: string; name: string; rank: string }[];
+  const memberList = (allMembers ?? []) as { id: string; name: string; rank: string; phone: string | null }[];
 
   const rows = (contracts ?? []).map((c) => {
     const raw = (c as { raw_sales_member_name: string | null }).raw_sales_member_name?.trim() ?? '';
