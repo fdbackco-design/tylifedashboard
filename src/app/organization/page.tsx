@@ -21,6 +21,7 @@ import {
   buildMyOrganizationTreeViewModel,
 } from './my-org-tree-view-model';
 import MyMonthlyTargetCard from './MyMonthlyTargetCard';
+import PasswordChangeNoticeModal from '@/components/organization/PasswordChangeNoticeModal';
 
 const DEFAULT_MONTHLY_TARGET_UNITS = 20;
 
@@ -56,7 +57,7 @@ export default async function OrganizationMyTreePage({
 
   const { data: profile, error: profileErr } = await userDb
     .from('user_profiles')
-    .select('member_id,is_active,display_name,mapping_status')
+    .select('member_id,is_active,display_name,mapping_status,must_change_password')
     .eq('id', user.id)
     .maybeSingle();
 
@@ -67,6 +68,7 @@ export default async function OrganizationMyTreePage({
   const memberId = (profile?.member_id as string | null) ?? null;
   const displayName = (profile?.display_name as string | null) ?? null;
   const mappingStatus = (profile?.mapping_status as string | null) ?? null;
+  const mustChangePassword = Boolean((profile as { must_change_password?: boolean } | null)?.must_change_password);
   // member_id 가 없는 사전 발급(PENDING) 계정도 로그인/접근은 가능. 영업 데이터는 모두 0/빈 값으로 표시.
   const isUnmapped = !memberId;
 
@@ -247,6 +249,7 @@ export default async function OrganizationMyTreePage({
       />
     </div>
     <KakaoChatbotFab />
+    <PasswordChangeNoticeModal open={mustChangePassword} />
     </>
   );
 }

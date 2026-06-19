@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import SimpleAlertModal from '@/components/ui/SimpleAlertModal';
 import { createClient } from '@/lib/supabase/client';
 
 function formatPasswordChangeError(err: unknown): string {
@@ -35,26 +36,27 @@ export default function PasswordChangeClient(props: { loginId: string }) {
   const [nextPassword, setNextPassword] = useState('');
   const [nextPassword2, setNextPassword2] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [successOpen, setSuccessOpen] = useState(false);
 
   async function changePassword() {
     if (isSaving) return;
-    setMessage(null);
+    setErrorMessage('');
 
     const cur = currentPassword;
     const np = nextPassword.trim();
     const np2 = nextPassword2.trim();
 
     if (!cur || !np || !np2) {
-      setMessage({ ok: false, text: '현재 비밀번호와 새 비밀번호를 모두 입력해주세요.' });
+      setErrorMessage('현재 비밀번호와 새 비밀번호를 모두 입력해주세요.');
       return;
     }
     if (np !== np2) {
-      setMessage({ ok: false, text: '새 비밀번호가 서로 일치하지 않습니다.' });
+      setErrorMessage('새 비밀번호가 서로 일치하지 않습니다.');
       return;
     }
     if (np.length < 6) {
-      setMessage({ ok: false, text: '6자 이상 입력해주세요.' });
+      setErrorMessage('6자 이상 입력해주세요.');
       return;
     }
 
@@ -67,26 +69,43 @@ export default function PasswordChangeClient(props: { loginId: string }) {
 
       const { error: reauthErr } = await supabase.auth.signInWithPassword({ email, password: cur });
       if (reauthErr) {
-        setMessage({ ok: false, text: formatPasswordChangeError(reauthErr) });
+        setErrorMessage(formatPasswordChangeError(reauthErr));
         return;
       }
 
       const { error: updErr } = await supabase.auth.updateUser({ password: np });
       if (updErr) throw updErr;
 
-      setMessage({ ok: true, text: '비밀번호가 변경되었습니다.' });
+      const userId = userRes.user?.id;
+      if (userId) {
+        await supabase
+          .from('user_profiles')
+          .update({ must_change_password: false })
+          .eq('id', userId);
+      }
+
+      setSuccessOpen(true);
       setCurrentPassword('');
       setNextPassword('');
       setNextPassword2('');
     } catch (e) {
-      setMessage({ ok: false, text: formatPasswordChangeError(e) });
+      setErrorMessage(formatPasswordChangeError(e));
     } finally {
       setIsSaving(false);
     }
   }
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm ring-1 ring-slate-900/[0.035] sm:p-5">
+    <>
+      <SimpleAlertModal
+        open={successOpen}
+        variant="success"
+        title="비밀번호 변경 완료"
+        message="비밀번호가 변경되었습니다."
+        onClose={() => setSuccessOpen(false)}
+      />
+
+      <section className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm ring-1 ring-slate-900/[0.035] sm:p-5">
       <h2 className="text-sm font-semibold text-slate-900 sm:text-base">비밀번호 변경</h2>
       <p className="mt-0.5 text-[11px] text-slate-500">아이디는 변경할 수 없으며, 비밀번호만 수정할 수 있습니다.</p>
 
@@ -134,9 +153,7 @@ export default function PasswordChangeClient(props: { loginId: string }) {
         </div>
       </div>
 
-      {message ? (
-        <p className={`mt-3 text-sm ${message.ok ? 'text-emerald-700' : 'text-red-600'}`}>{message.text}</p>
-      ) : null}
+      {errorMessage ? <p className="mt-3 text-sm text-red-600">{errorMessage}</p> : null}
 
       <button
         type="button"
@@ -147,5 +164,6 @@ export default function PasswordChangeClient(props: { loginId: string }) {
         {isSaving ? '변경 중…' : '비밀번호 변경'}
       </button>
     </section>
+    </>
   );
 }
