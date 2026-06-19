@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import OrganizationNavMenu from '@/components/organization/OrganizationNavMenu';
+import { stripCustomerMemberNamePrefix } from '@/lib/dashboard/display-format';
 import { createAdminSupabaseClient, createServerSupabaseClient } from '@/lib/supabase/server';
 import { formatPhoneDisplay } from '@/lib/manager-change/format';
 import ManagerChangeClient from './ManagerChangeClient';
@@ -38,14 +39,14 @@ export default async function ManagerChangePage() {
     requesterPhone = (m as { phone?: string | null } | null)?.phone ?? '';
   }
 
-  let requesterName = displayName.trim();
+  let requesterName = stripCustomerMemberNamePrefix(displayName);
   if (!requesterName && memberId) {
     const { data: m } = await adminDb
       .from('organization_members')
       .select('name')
       .eq('id', memberId)
       .maybeSingle();
-    requesterName = ((m as { name?: string } | null)?.name ?? '').replace(/^\[고객\]\s*/, '').trim();
+    requesterName = stripCustomerMemberNamePrefix((m as { name?: string } | null)?.name ?? '');
   }
 
   const phoneDigits = requesterPhone.replace(/\D/g, '');
