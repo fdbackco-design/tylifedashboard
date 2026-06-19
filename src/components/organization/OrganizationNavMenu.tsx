@@ -11,6 +11,8 @@ const MENU_ITEMS = [
   { href: '/organization/manager-change', label: '담당자 변경' },
 ] as const;
 
+const BOTTOM_MENU_ITEMS = [{ href: '/organization/password', label: '비밀번호 변경' }] as const;
+
 export default function OrganizationNavMenu() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -51,6 +53,22 @@ export default function OrganizationNavMenu() {
               item.href === '/organization'
                 ? pathname === '/organization'
                 : pathname === item.href || pathname.startsWith(`${item.href}/`);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                role="menuitem"
+                className={`block px-4 py-2.5 text-sm font-medium ${
+                  active ? 'bg-orange-50 text-orange-700' : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+          <div className="my-1 border-t border-slate-100" role="separator" />
+          {BOTTOM_MENU_ITEMS.map((item) => {
+            const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (
               <Link
                 key={item.href}
