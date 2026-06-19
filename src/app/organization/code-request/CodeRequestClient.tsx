@@ -2,6 +2,10 @@
 
 import Link from 'next/link';
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import SimpleAlertModal from '@/components/ui/SimpleAlertModal';
+
+const CODE_REQUEST_SUBMIT_NOTICE =
+  '※ 주민등록번호 및 계좌번호는 개인정보 보호를 위해 정성은 팀장에게 카카오톡 개인 메시지로 전달 부탁드립니다.';
 
 type Item = {
   id: string;
@@ -88,6 +92,7 @@ export default function CodeRequestClient({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [ok, setOk] = useState('');
+  const [submitNoticeOpen, setSubmitNoticeOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const formRef = useRef<HTMLDivElement>(null);
@@ -195,7 +200,7 @@ export default function CodeRequestClient({
         setOk('수정되었습니다.');
       } else if (updated) {
         setItems((prev) => [updated, ...prev]);
-        setOk('신청이 접수되었습니다.');
+        setSubmitNoticeOpen(true);
       }
       reset();
     } catch (e) {
@@ -215,6 +220,14 @@ export default function CodeRequestClient({
 
   return (
     <>
+      <SimpleAlertModal
+        open={submitNoticeOpen}
+        variant="success"
+        title="신청이 접수되었습니다"
+        message={CODE_REQUEST_SUBMIT_NOTICE}
+        onClose={() => setSubmitNoticeOpen(false)}
+      />
+
       {/* 신청 폼 (생성/수정 공용) */}
       <section
         ref={formRef}
