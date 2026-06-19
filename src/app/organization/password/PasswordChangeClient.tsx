@@ -17,6 +17,14 @@ function formatPasswordChangeError(err: unknown): string {
     return '현재 비밀번호를 올바르게 입력해주세요.';
   }
 
+  if (
+    code === 'weak_password' ||
+    /password should be at least 6 characters/i.test(message) ||
+    /at least 6 characters/i.test(message)
+  ) {
+    return '6자 이상 입력해주세요.';
+  }
+
   return message;
 }
 
@@ -45,8 +53,8 @@ export default function PasswordChangeClient(props: { loginId: string }) {
       setMessage({ ok: false, text: '새 비밀번호가 서로 일치하지 않습니다.' });
       return;
     }
-    if (np.length < 4) {
-      setMessage({ ok: false, text: '새 비밀번호는 4자리 이상으로 입력해주세요.' });
+    if (np.length < 6) {
+      setMessage({ ok: false, text: '6자 이상 입력해주세요.' });
       return;
     }
 
