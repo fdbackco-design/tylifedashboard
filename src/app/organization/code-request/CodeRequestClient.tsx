@@ -5,7 +5,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import SimpleAlertModal from '@/components/ui/SimpleAlertModal';
 
 const CODE_REQUEST_SUBMIT_NOTICE =
-  '※ 주민등록번호 및 계좌번호는 개인정보 보호를 위해 정성은 팀장에게 카카오톡 개인 메시지로 전달 부탁드립니다.';
+  '※ 주민등록번호 및 계좌번호는 개인정보 보호를 위해 본사 매니저에게 카카오톡 개인 메시지로 전달 부탁드립니다.';
 
 type Item = {
   id: string;
