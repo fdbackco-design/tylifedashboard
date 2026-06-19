@@ -3,6 +3,23 @@
 import { useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
+function formatPasswordChangeError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const code =
+    typeof err === 'object' && err !== null && 'code' in err
+      ? String((err as { code?: string }).code ?? '')
+      : '';
+
+  if (
+    code === 'invalid_credentials' ||
+    /invalid login credentials/i.test(message)
+  ) {
+    return '현재 비밀번호를 올바르게 입력해주세요.';
+  }
+
+  return message;
+}
+
 export default function PasswordChangeClient(props: { loginId: string }) {
   const supabase = useMemo(() => createClient(), []);
 
@@ -41,7 +58,10 @@ export default function PasswordChangeClient(props: { loginId: string }) {
       if (!email) throw new Error('로그인이 필요합니다.');
 
       const { error: reauthErr } = await supabase.auth.signInWithPassword({ email, password: cur });
-      if (reauthErr) throw reauthErr;
+      if (reauthErr) {
+        setMessage({ ok: false, text: formatPasswordChangeError(reauthErr) });
+        return;
+      }
 
       const { error: updErr } = await supabase.auth.updateUser({ password: np });
       if (updErr) throw updErr;
@@ -51,7 +71,7 @@ export default function PasswordChangeClient(props: { loginId: string }) {
       setNextPassword('');
       setNextPassword2('');
     } catch (e) {
-      setMessage({ ok: false, text: e instanceof Error ? e.message : String(e) });
+      setMessage({ ok: false, text: formatPasswordChangeError(e) });
     } finally {
       setIsSaving(false);
     }
