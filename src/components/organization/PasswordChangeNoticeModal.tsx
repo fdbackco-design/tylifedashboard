@@ -39,7 +39,7 @@ export default function PasswordChangeNoticeModal(props: { open: boolean }) {
         <h2 id="password-change-notice-title" className="mt-4 text-center text-lg font-bold text-slate-900">
           비밀번호 변경 안내
         </h2>
-        <p className="mt-3 text-left text-sm leading-relaxed text-slate-600 break-keep whitespace-pre-line sm:text-center">
+        <p className="mt-3 text-center text-sm leading-relaxed text-slate-600 break-keep whitespace-pre-line">
           {NOTICE_MESSAGE}
         </p>
         <button
