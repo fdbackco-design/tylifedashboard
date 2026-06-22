@@ -3,9 +3,10 @@
  *
  * 두 종류의 알림을 다룬다.
  *   1) 반려 알림  : 관리자가 신청을 '반려' 처리 → 신청자에게 반려 사유를 푸시.
- *   2) 완료 알림  : 계정 발급 페이지(/admin/account-issue) Google Sheet 동기화 등으로
+ *   2) 완료 처리  : 계정 발급 페이지(/admin/account-issue) Google Sheet 동기화 등으로
  *                  같은 이름 + 전화번호의 user_profiles 계정이 실제 발급된 직후,
- *                  신청자에게 "코드 발급이 완료되었습니다" 푸시 + status='처리완료' 마킹.
+ *                  매칭된 sales_code_requests 를 status='처리완료' 로 전이.
+ *                  푸시는 구독이 있을 때만 시도하며, completed_notified_at 은 발송 성공 시에만 기록.
  *
  * 모든 발송은 `loadSubscriptionsForSend` + `sendWebPushToSubscriptions` 를 재사용한다.
  * 중복 발송 방지를 위해 발송 직후 `rejected_notified_at` / `completed_notified_at` 컬럼을
@@ -148,14 +149,15 @@ export async function notifySalesCodeRejected(
 }
 
 /**
- * 계정 발급 완료 알림 매칭 & 발송:
+ * 계정 발급 완료 매칭 & 상태 전이:
  *   조건:
  *     - sales_code_requests.name = name (정확 일치)
  *     - phone_digits = normalizePhoneDigits(phone)
- *     - status IN ('시트등록완료')   ← '신청중' 은 아직 시트 단계도 안 거친 상태, 제외
- *     - completed_notified_at IS NULL
+ *     - status IN ('시트등록완료')
+ *     - completed_notified_at IS NULL (아직 완료 처리 루프 미실행)
  *
- *   발송 성공(sent > 0) 시: status='처리완료', completed_notified_at=now() 로 마킹.
+ *   계정 발급 성공 시: status='처리완료' 로 즉시 전이 (푸시 여부와 무관).
+ *   푸시: applicant_user_id + 구독이 있을 때만 시도, sent > 0 이면 completed_notified_at 기록.
  *
  * 호출 시점: account-issue sheet sync 등에서 user_profiles 가 실제로 발급/매핑된 직후.
  * (Google Sheet 동기화 버튼 클릭이 아니라 DB 발급이 확정된 직후가 핵심)
@@ -205,8 +207,13 @@ export async function notifySalesCodeCompletedForAccount(
   const results: Array<{ requestId: string; sent: number; failed: number }> = [];
 
   for (const row of rows) {
-    if (!row.applicant_user_id) {
-      logError({ requestId: row.id, stage: 'select_match_candidates', message: 'applicant_user_id 없음' });
+    const { error: statusErr } = await db
+      .from('sales_code_requests')
+      .update({ status: '처리완료' })
+      .eq('id', row.id)
+      .eq('status', '시트등록완료');
+    if (statusErr) {
+      logError({ requestId: row.id, stage: 'mark_completed_status', message: statusErr.message });
       continue;
     }
 
@@ -217,6 +224,12 @@ export async function notifySalesCodeCompletedForAccount(
       phone: row.phone,
       matchedAccountId: args.matchedAccountId ?? null,
     });
+
+    if (!row.applicant_user_id) {
+      logError({ requestId: row.id, stage: 'push_send_completed', message: 'applicant_user_id 없음 (상태만 처리완료)' });
+      results.push({ requestId: row.id, sent: 0, failed: 0 });
+      continue;
+    }
 
     const title = '코드 발급이 완료되었습니다.';
     const body = trimBody(
@@ -244,14 +257,10 @@ export async function notifySalesCodeCompletedForAccount(
       continue;
     }
 
-    // 발송이 한 건이라도 성공한 경우에만 상태 전이 + timestamp 기록.
     if (sent > 0) {
       const { error: uErr } = await db
         .from('sales_code_requests')
-        .update({
-          status: '처리완료',
-          completed_notified_at: new Date().toISOString(),
-        })
+        .update({ completed_notified_at: new Date().toISOString() })
         .eq('id', row.id)
         .is('completed_notified_at', null);
       if (uErr) {
