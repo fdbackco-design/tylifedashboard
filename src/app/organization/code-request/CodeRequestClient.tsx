@@ -73,6 +73,13 @@ function statusDisplayLabel(status: string): string {
   return status;
 }
 
+function salesCodeFromPhone(phone: string): string | null {
+  const d = (phone ?? '').replace(/\D/g, '');
+  if (d.length < 8) return null;
+  if (d.startsWith('010') && d.length >= 11) return d.slice(3, 11); // 010 + 8자리
+  return d.slice(-8);
+}
+
 export default function CodeRequestClient({
   initialItems,
   canSubmit,
@@ -438,13 +445,20 @@ export default function CodeRequestClient({
                         <td className="whitespace-nowrap px-3 py-2 tabular-nums text-slate-700">{it.phone}</td>
                         <td className="whitespace-nowrap px-3 py-2 text-slate-700">{it.has_own_contract ? '예' : '아니오'}</td>
                         <td className="whitespace-nowrap px-3 py-2">
-                          <span
-                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusBadgeClass(
-                              it.status,
-                            )}`}
-                          >
-                            {statusDisplayLabel(it.status)}
-                          </span>
+                          <div className="inline-flex items-center gap-2">
+                            <span
+                              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusBadgeClass(
+                                it.status,
+                              )}`}
+                            >
+                              {statusDisplayLabel(it.status)}
+                            </span>
+                            {it.status === '처리완료' && salesCodeFromPhone(it.phone) && (
+                              <span className="text-[12px] font-semibold tabular-nums text-slate-700">
+                                {salesCodeFromPhone(it.phone)}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="whitespace-nowrap px-3 py-2 text-right">
                           {editable ? (
