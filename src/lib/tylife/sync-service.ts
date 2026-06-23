@@ -1595,7 +1595,7 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
         const [membersRes, edgesRes, joinContractsRes] = await Promise.all([
           db
             .from('organization_members')
-            .select('id, name, rank, external_id, source_customer_id')
+            .select('id, name, rank, external_id, source_customer_id, lock_center_chief_promotion')
             .eq('is_active', true),
           db.from('organization_edges').select('parent_id, child_id'),
           db
@@ -1617,6 +1617,7 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
           rank: RankType;
           external_id?: string | null;
           source_customer_id?: string | null;
+          lock_center_chief_promotion?: boolean | null;
         }>;
 
         const edgesRaw = (edgesRes.data ?? []) as Array<{ parent_id: string | null; child_id: string }>;
@@ -1717,7 +1718,14 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
         }
 
         // 센터장 승격: 산하 리더 5명 이상인 리더 → 센터장
-        const toCenterChief = computeCenterChiefPromotionMemberIds(treeRows, rankById);
+        const lockedCenterChiefSet = new Set(
+          membersRaw
+            .filter((m) => Boolean(m.lock_center_chief_promotion))
+            .map((m) => String(m.id)),
+        );
+        const toCenterChief = computeCenterChiefPromotionMemberIds(treeRows, rankById).filter(
+          (id) => !lockedCenterChiefSet.has(String(id)),
+        );
         if (toCenterChief.length > 0) {
           const { error: ccErr } = await db
             .from('organization_members')

@@ -30,6 +30,9 @@ export interface OrganizationMember {
    * NULL이면 `leader_promotion` threshold·계약 created_at 보정만 사용한다.
    */
   leader_rank_effective_at?: string | null;
+
+  /** true면 센터장 자동 승격에서 제외 (승격 조건을 만족해도 '리더' 유지) */
+  lock_center_chief_promotion?: boolean;
 }
 
 export interface OrganizationMemberInsert {

@@ -92,7 +92,7 @@ export default async function OrganizationPage({
     await Promise.all([
     db
       .from('organization_members')
-      .select('id, name, rank, external_id, phone, source_customer_id, leader_rank_effective_at, monthly_target_units')
+      .select('id, name, rank, external_id, phone, source_customer_id, leader_rank_effective_at, monthly_target_units, lock_center_chief_promotion')
       .eq('is_active', true)
       .order('name'),
     db.from('organization_edges').select('parent_id, child_id'),
@@ -123,6 +123,11 @@ export default async function OrganizationPage({
   // 안성준은 TY Life 시스템상 영업사원이지만 실제로는 본사(최상위)로 취급
   const membersRaw = ((membersRes.data ?? []) as unknown as OrganizationMember[]).map((m) =>
     m.name === '안성준' ? { ...m, rank: '본사' as const } : m,
+  );
+  const lockedCenterChiefSet = new Set(
+    (membersRaw as any[])
+      .filter((m) => Boolean((m as any).lock_center_chief_promotion))
+      .map((m) => String((m as any).id)),
   );
   const edgesRaw = edgesRes.data ?? [];
   const contractCount = contractCountRes.count ?? 0;
@@ -435,7 +440,9 @@ export default async function OrganizationPage({
     {
       const rankByIdForCenterChief = new Map<string, RankType>();
       for (const r of treeRows) rankByIdForCenterChief.set(r.id, r.rank as RankType);
-      toCenterChiefIds = computeCenterChiefPromotionMemberIds(treeRows, rankByIdForCenterChief);
+      toCenterChiefIds = computeCenterChiefPromotionMemberIds(treeRows, rankByIdForCenterChief).filter(
+        (id) => !lockedCenterChiefSet.has(String(id)),
+      );
       if (toCenterChiefIds.length > 0) {
         const centerChiefSet = new Set(toCenterChiefIds);
         treeRows = treeRows.map((r) =>
