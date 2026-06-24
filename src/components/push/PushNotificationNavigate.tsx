@@ -42,21 +42,25 @@ export default function PushNotificationNavigate() {
     window.addEventListener('message', onMessage);
     navigator.serviceWorker?.addEventListener('message', onMessage);
 
+    const drain = () => {
+      void drainPendingPushNavigation();
+    };
+
     const onVisible = () => {
-      if (document.visibilityState === 'visible') drainPendingPushNavigation();
+      if (document.visibilityState === 'visible') drain();
     };
     document.addEventListener('visibilitychange', onVisible);
-    window.addEventListener('pageshow', drainPendingPushNavigation);
-    window.addEventListener('focus', drainPendingPushNavigation);
+    window.addEventListener('pageshow', drain);
+    window.addEventListener('focus', drain);
 
-    drainPendingPushNavigation();
+    drain();
 
     return () => {
       window.removeEventListener('message', onMessage);
       navigator.serviceWorker?.removeEventListener('message', onMessage);
       document.removeEventListener('visibilitychange', onVisible);
-      window.removeEventListener('pageshow', drainPendingPushNavigation);
-      window.removeEventListener('focus', drainPendingPushNavigation);
+      window.removeEventListener('pageshow', drain);
+      window.removeEventListener('focus', drain);
       bc?.close();
     };
   }, []);

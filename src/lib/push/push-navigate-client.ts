@@ -3,6 +3,9 @@ export const PUSH_NAV_CHANNEL = 'tylife-push-navigate';
 export const PUSH_NAV_MSG_TYPE = 'PUSH_NOTIFICATION_NAVIGATE';
 export const PUSH_NAV_PENDING_KEY = 'tylife_pending_push_nav';
 
+const PUSH_NAV_CACHE = 'tylife-push-nav-v1';
+const PUSH_NAV_CACHE_KEY = 'https://tylife.local/pending-push-nav';
+
 export function normalizePushNavPath(url: string): string {
   try {
     if (url.startsWith('http://') || url.startsWith('https://')) {
@@ -28,9 +31,30 @@ export function applyPushNavigation(url: string): void {
   window.location.assign(path);
 }
 
-export function drainPendingPushNavigation(): void {
+async function readAndClearCachedPushNavigation(): Promise<string | null> {
+  if (typeof window === 'undefined' || !('caches' in window)) return null;
+  try {
+    const cache = await caches.open(PUSH_NAV_CACHE);
+    const res = await cache.match(PUSH_NAV_CACHE_KEY);
+    if (!res) return null;
+    const path = (await res.text()).trim();
+    await cache.delete(PUSH_NAV_CACHE_KEY);
+    return path || null;
+  } catch {
+    return null;
+  }
+}
+
+/** SW가 알림 탭 시 저장한 경로 + sessionStorage 대기 경로를 순서대로 처리 */
+export async function drainPendingPushNavigation(): Promise<void> {
   if (typeof window === 'undefined') return;
+
   const pending = sessionStorage.getItem(PUSH_NAV_PENDING_KEY);
-  if (!pending) return;
-  applyPushNavigation(pending);
+  if (pending) {
+    applyPushNavigation(pending);
+    return;
+  }
+
+  const cached = await readAndClearCachedPushNavigation();
+  if (cached) applyPushNavigation(cached);
 }

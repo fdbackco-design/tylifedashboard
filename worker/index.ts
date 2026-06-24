@@ -15,13 +15,39 @@ export const PUSH_NAV_MSG_TYPE = 'PUSH_NOTIFICATION_NAVIGATE';
 
 declare const self: ServiceWorkerGlobalScope;
 
+const PUSH_NAV_CACHE = 'tylife-push-nav-v1';
+const PUSH_NAV_CACHE_KEY = 'https://tylife.local/pending-push-nav';
+
+function isInternalAppPath(pathname: string): boolean {
+  return (
+    pathname.startsWith('/organization') ||
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/admin')
+  );
+}
+
 function resolveTargetPath(url: string): string {
   try {
     const u = new URL(url, self.location.origin);
+    const path = u.pathname + u.search + u.hash;
+    // NEXT_PUBLIC_APP_URL 과 실제 접속 도메인이 달라도 앱 내부 경로는 그대로 사용
+    if (isInternalAppPath(u.pathname)) return path;
     if (u.origin !== self.location.origin) return '/organization';
-    return u.pathname + u.search + u.hash;
+    return path;
   } catch {
     return '/organization';
+  }
+}
+
+async function stashPendingPushNavigation(path: string): Promise<void> {
+  try {
+    const cache = await caches.open(PUSH_NAV_CACHE);
+    await cache.put(
+      PUSH_NAV_CACHE_KEY,
+      new Response(path, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } }),
+    );
+  } catch {
+    /* Cache API 미지원·quota 등 */
   }
 }
 
@@ -43,6 +69,8 @@ function postNavigateToClient(client: Client, path: string): void {
 async function openNotificationUrl(url: string): Promise<void> {
   const path = resolveTargetPath(url);
   const targetHref = new URL(path, self.location.origin).href;
+
+  await stashPendingPushNavigation(path);
 
   const windowClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
   const sameOrigin = windowClients.filter((c) => {
@@ -120,6 +148,7 @@ self.addEventListener('push', (event: PushEvent) => {
 self.addEventListener('notificationclick', (event: NotificationEvent) => {
   event.notification.close();
   const data = event.notification.data as { url?: string; href?: string } | undefined;
-  const url = data?.href ?? data?.url ?? '/organization';
+  // 상대 경로(url)를 우선 — 절대 URL(href)은 도메인 불일치 시 resolveTargetPath에서 걸러질 수 있음
+  const url = data?.url ?? data?.href ?? '/organization';
   event.waitUntil(openNotificationUrl(url));
 });

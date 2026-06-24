@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { noticeContentSummary } from './content-utils';
 import { getNoticeDisplayStatus } from './status';
 import type { NoticeRow } from './types';
-import { noticeDetailPath, resolvePushNotificationUrl } from '@/lib/push/notification-url';
+import { noticeDetailPath } from '@/lib/push/notification-url';
 import { loadSubscriptionsForSend, sendWebPushToSubscriptions } from '@/lib/push/send';
 import type { PushSendResult } from '@/lib/push/types';
 import { assertVapidConfigured } from '@/lib/push/vapid';
@@ -59,11 +59,13 @@ export async function maybeSendNoticePush(db: SupabaseClient, row: NoticeRow): P
   const summary = noticeContentSummary(row.content, 120);
   const body = summary || '새 공지사항이 등록되었습니다.';
 
+  const noticePath = noticeDetailPath(row.id);
   const result = await sendWebPushToSubscriptions(db, {
     subscriptions,
     title: row.title,
     body,
-    url: resolvePushNotificationUrl(noticeDetailPath(row.id)),
+    // SW가 self.location.origin 기준으로 href를 만들므로 상대 경로가 가장 안전하다.
+    url: noticePath,
   });
 
   if (result.sent > 0) {
