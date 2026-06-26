@@ -30,12 +30,20 @@ function resolveTargetPath(url: string): string {
   try {
     const u = new URL(url, self.location.origin);
     const path = u.pathname + u.search + u.hash;
-    // NEXT_PUBLIC_APP_URL 과 실제 접속 도메인이 달라도 앱 내부 경로는 그대로 사용
     if (isInternalAppPath(u.pathname)) return path;
     if (u.origin !== self.location.origin) return '/organization';
     return path;
   } catch {
     return '/organization';
+  }
+}
+
+function clientPath(client: Client): string | null {
+  try {
+    const u = new URL(client.url);
+    return u.pathname + u.search + u.hash;
+  } catch {
+    return null;
   }
 }
 
@@ -81,7 +89,15 @@ async function openNotificationUrl(url: string): Promise<void> {
     }
   });
 
-  // 1) navigate API (Chrome desktop·일부 Android)
+  // 이미 해당 페이지가 열려 있으면 포커스만
+  for (const client of sameOrigin) {
+    if (clientPath(client) === path && 'focus' in client) {
+      await (client as WindowClient).focus();
+      return;
+    }
+  }
+
+  // navigate API (Chrome·일부 Android)
   for (const client of sameOrigin) {
     const wc = client as WindowClient;
     if ('navigate' in wc && typeof wc.navigate === 'function') {
@@ -98,17 +114,30 @@ async function openNotificationUrl(url: string): Promise<void> {
     }
   }
 
-  // 2) 앱이 이미 열려 있으면 메시지 + 포커스 (페이지에서 location.assign 처리)
+  // 앱이 열려 있음: 메시지 + Cache + 포커스 (페이지·boot 스크립트가 location.assign)
   if (sameOrigin.length > 0) {
     for (const client of sameOrigin) {
       postNavigateToClient(client, path);
     }
-    const first = sameOrigin[0] as WindowClient;
-    await first.focus();
+    try {
+      await (sameOrigin[0] as WindowClient).focus();
+    } catch {
+      /* ignore */
+    }
+
+    // Android TWA/PWA: 기존 태스크에 URL을 열어주는 경우가 있음
+    if (self.clients.openWindow) {
+      try {
+        const opened = await self.clients.openWindow(targetHref);
+        if (opened) return;
+      } catch {
+        /* ignore */
+      }
+    }
     return;
   }
 
-  // 3) 앱이 닫혀 있으면 URL로 새 창/앱 실행 (TWA·PWA cold start)
+  // 앱이 닫혀 있음: cold start
   if (self.clients.openWindow) {
     await self.clients.openWindow(targetHref);
   }
@@ -148,7 +177,6 @@ self.addEventListener('push', (event: PushEvent) => {
 self.addEventListener('notificationclick', (event: NotificationEvent) => {
   event.notification.close();
   const data = event.notification.data as { url?: string; href?: string } | undefined;
-  // 상대 경로(url)를 우선 — 절대 URL(href)은 도메인 불일치 시 resolveTargetPath에서 걸러질 수 있음
   const url = data?.url ?? data?.href ?? '/organization';
   event.waitUntil(openNotificationUrl(url));
 });

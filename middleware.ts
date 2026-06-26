@@ -43,10 +43,19 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // API/정적 리소스는 제외
+  // API/정적·PWA 리소스는 제외 (SW·workbox가 로그인 리다이렉트되면 푸시 클릭 이동이 깨짐)
   if (pathname.startsWith('/api')) return NextResponse.next();
   if (pathname.startsWith('/_next')) return NextResponse.next();
-  if (pathname.startsWith('/icons') || pathname === '/manifest.json' || pathname === '/sw.js') return NextResponse.next();
+  if (
+    pathname.startsWith('/icons') ||
+    pathname === '/manifest.json' ||
+    pathname === '/sw.js' ||
+    pathname === '/push-nav-boot.js' ||
+    pathname.startsWith('/workbox-') ||
+    pathname.startsWith('/worker-')
+  ) {
+    return NextResponse.next();
+  }
 
   // 로그인 필요: /privacy, /login 외 전부
   return (async () => {

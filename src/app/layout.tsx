@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import Script from 'next/script';
 import PushNotificationNavigate from '@/components/push/PushNotificationNavigate';
 import './globals.css';
 
@@ -40,6 +41,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ko">
+      <head>
+        <Script src="/push-nav-boot.js" strategy="beforeInteractive" />
+      </head>
       <body>
         <PushNotificationNavigate />
         {children}
