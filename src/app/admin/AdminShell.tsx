@@ -24,6 +24,41 @@ function ShieldMini(props: { className?: string }) {
 
 type NavItem = { href: string; label: string };
 
+const TY_LIFE_CONTRACT_URL = 'https://n.ty-life.co.kr/contract/';
+
+function ExternalLinkIcon(props: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      className={props.className ?? 'h-4 w-4'}
+    >
+      <path
+        d="M14 3h7v7M10 14L21 3M21 14v6a1 1 0 01-1 1H4a1 1 0 01-1-1V5a1 1 0 011-1h6"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function TyLifeContractLinkButton() {
+  return (
+    <a
+      href={TY_LIFE_CONTRACT_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex w-full items-center justify-center gap-2 rounded-md border border-orange-500/50 bg-orange-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-500 active:bg-orange-700"
+    >
+      <ExternalLinkIcon />
+      태양 라이프 계약
+    </a>
+  );
+}
+
 function AdminLogoutButton(props: { className?: string; compact?: boolean }) {
   const supabase = useMemo(() => createClient(), []);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -112,8 +147,8 @@ function SidebarContents(props: {
   }, [pathname, props.navItems]);
 
   return (
-    <aside className="flex h-full w-full flex-col bg-slate-800 text-slate-200">
-      <div className="px-5 py-5 border-b border-slate-700">
+    <aside className="flex h-full max-h-screen w-full flex-col bg-slate-800 text-slate-200 md:sticky md:top-0 md:h-screen">
+      <div className="shrink-0 border-b border-slate-700 px-5 py-5">
         {props.brandAsLogo ? (
           <Link
             href="/admin"
@@ -135,7 +170,7 @@ function SidebarContents(props: {
         )}
         <p className="text-xs text-slate-400 mt-0.5">계약·정산 관리</p>
       </div>
-      <nav className="flex-1 px-3 py-4 space-y-1">
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-4">
         {props.navItems.map((item) => {
           const isActive = activeHref === item.href;
           return (
@@ -156,7 +191,8 @@ function SidebarContents(props: {
           );
         })}
       </nav>
-      <div className="mt-auto space-y-3 border-t border-slate-700 px-4 py-3">
+      <div className="shrink-0 space-y-3 border-t border-slate-700 bg-slate-800 px-4 py-3">
+        <TyLifeContractLinkButton />
         {props.vapidPublicKey ? (
           <div className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-slate-200">
             <PushSubscribeButton vapidPublicKey={props.vapidPublicKey} />
@@ -236,7 +272,7 @@ export function AdminShell(props: {
       </header>
 
       {/* 데스크톱 고정 사이드바 */}
-      <div className="hidden md:block md:w-56 md:shrink-0">
+      <div className="hidden md:block md:h-screen md:w-56 md:shrink-0">
         <div className="h-full w-56">
           <SidebarContents navItems={props.navItems} brandAsLogo vapidPublicKey={props.vapidPublicKey} />
         </div>
