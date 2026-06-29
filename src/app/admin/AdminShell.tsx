@@ -147,7 +147,7 @@ function SidebarContents(props: {
   }, [pathname, props.navItems]);
 
   return (
-    <aside className="flex h-full max-h-screen w-full flex-col bg-slate-800 text-slate-200 md:sticky md:top-0 md:h-screen">
+    <aside className="flex h-full min-h-0 w-full flex-col bg-slate-800 text-slate-200">
       <div className="shrink-0 border-b border-slate-700 px-5 py-5">
         {props.brandAsLogo ? (
           <Link
@@ -230,7 +230,7 @@ export function AdminShell(props: {
   }, [open]);
 
   return (
-    <div className="min-h-screen md:flex">
+    <div className="min-h-screen md:flex md:items-stretch">
       {/* 모바일 상단바 */}
       <header className="fixed left-0 right-0 top-0 z-40 h-14 border-b border-slate-200/90 bg-white/90 backdrop-blur md:hidden">
         <div className="flex h-full items-center gap-3 px-4">
@@ -271,9 +271,9 @@ export function AdminShell(props: {
         </div>
       </header>
 
-      {/* 데스크톱 고정 사이드바 */}
-      <div className="hidden md:block md:h-screen md:w-56 md:shrink-0">
-        <div className="h-full w-56">
+      {/* 데스크톱 고정 사이드바 — 바깥 컬럼은 페이지 높이만큼 bg를 이어 주고, 안쪽은 sticky */}
+      <div className="hidden md:block md:w-56 md:shrink-0 md:self-stretch bg-slate-800">
+        <div className="sticky top-0 h-screen w-56">
           <SidebarContents navItems={props.navItems} brandAsLogo vapidPublicKey={props.vapidPublicKey} />
         </div>
       </div>
@@ -310,8 +310,8 @@ export function AdminShell(props: {
         </div>
       </div>
 
-      {/* 메인 콘텐츠 */}
-      <main className="flex-1 min-w-0 overflow-auto pt-14 md:pt-0">
+      {/* 메인 콘텐츠 — 모바일은 영역 내 스크롤, 데스크톱은 페이지 스크롤(좌측 배경 연속) */}
+      <main className="flex-1 min-w-0 overflow-auto pt-14 md:overflow-visible md:pt-0">
         {props.children}
       </main>
     </div>
