@@ -360,7 +360,22 @@ export default function NewCodeClient() {
       </div>
 
       <section className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="min-w-max w-full text-xs sm:text-sm">
+        <table className="w-full table-fixed text-xs sm:text-sm">
+          <colgroup>
+            <col className="w-9" />
+            <col className="w-[8.5rem]" />
+            <col className="w-[5.5rem]" />
+            <col className="w-[4.5rem]" />
+            <col className="w-[6.5rem]" />
+            <col className="w-10" />
+            <col className="w-[7.5rem]" />
+            <col className="w-[5.5rem]" />
+            <col />
+            <col className="w-[6.5rem]" />
+            <col className="w-[5.5rem]" />
+            <col className="w-[8.5rem]" />
+            <col className="w-14" />
+          </colgroup>
           <thead className="bg-slate-50 text-slate-600">
             <tr>
               <th className="whitespace-nowrap px-2 py-2"> </th>
@@ -371,7 +386,7 @@ export default function NewCodeClient() {
               <th className="whitespace-nowrap px-2 py-2 text-left font-medium">성별</th>
               <th className="whitespace-nowrap px-2 py-2 text-left font-medium">전화번호</th>
               <th className="whitespace-nowrap px-2 py-2 text-left font-medium">본인 가입구좌</th>
-              <th className="min-w-[12rem] px-2 py-2 text-left font-medium">사유 메모</th>
+              <th className="px-2 py-2 text-left font-medium">사유 메모</th>
               <th className="whitespace-nowrap px-2 py-2 text-left font-medium">상태</th>
               <th className="whitespace-nowrap px-2 py-2 text-left font-medium">시트 동기화</th>
               <th className="whitespace-nowrap px-2 py-2 text-left font-medium">동기화 일시</th>
@@ -415,7 +430,7 @@ export default function NewCodeClient() {
                       <td className="whitespace-nowrap px-2 py-2 align-top">{it.gender}</td>
                       <td className="whitespace-nowrap px-2 py-2 align-top tabular-nums">{it.phone}</td>
                       <td className="whitespace-nowrap px-2 py-2 align-top">{it.has_own_contract ? '예' : '아니오'}</td>
-                      <td className="min-w-[12rem] max-w-md px-2 py-2 align-top">
+                      <td className="px-2 py-2 align-top">
                         {it.memo ? (
                           <span className="block whitespace-pre-wrap break-words text-slate-800">{it.memo}</span>
                         ) : (

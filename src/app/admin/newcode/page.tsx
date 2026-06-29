@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 export default function AdminNewCodePage() {
   return (
-    <div className="p-4 sm:p-6 max-w-7xl">
+    <div className="w-full max-w-[1800px] p-4 sm:p-6">
       <div className="mb-5">
         <h2 className="text-2xl font-bold text-slate-900">영업자 코드 발급</h2>
         <p className="mt-1 text-sm text-slate-500">
