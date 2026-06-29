@@ -17,7 +17,7 @@ import { isOrgDisplayHiddenMemberName } from '@/lib/organization/org-display-hid
 import { extractMemberName } from '@/lib/utils/normalize-member-name';
 import SettlementLineTableClient, { type SettlementLineRow } from './SettlementLineTableClient';
 import {
-  computeSalesMemberPromotionThreshold,
+  computeLeaderPromotionThresholds,
   type AttributedJoinContractRow,
 } from '@/lib/settlement/leader-promotion';
 import {
@@ -251,10 +251,6 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   // - 동기화/정산 재계산 없이도 조직도에서 리더로 보이는 케이스가 있어,
   //   정산 현황에서도 같은 기준으로 effective rank를 맞춘다.
   {
-    const rankByIdForThreshold = new Map<string, any>();
-    for (const m of membersRaw as any[]) {
-      rankByIdForThreshold.set(m.id as string, (m.rank === '리더' ? '영업사원' : m.rank) as any);
-    }
     const joinAttributedForThreshold: AttributedJoinContractRow[] = eligibleContracts
       .filter((c: any) => !c.is_cancelled)
       .map((c: any) => ({
@@ -266,15 +262,18 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       }))
       .filter((c) => !!c.id && !!c.join_date && !!c.sales_member_id);
 
-    const promotionThresholdByMemberId = computeSalesMemberPromotionThreshold(
+    const promotionThresholdByMemberId = computeLeaderPromotionThresholds(
       treeRows as any[],
       joinAttributedForThreshold,
-      rankByIdForThreshold as any,
+      (membersRaw as any[]).map((m) => ({
+        id: String(m.id),
+        rank: m.rank as RankType,
+        external_id: (m.external_id ?? null) as string | null,
+      })),
     );
 
     for (const [memberId, th] of promotionThresholdByMemberId.entries()) {
       if (!th) continue;
-      // 승격자: 조직도와 동일하게 화면상 리더로 표시
       rankByMemberId[memberId] = '리더';
     }
   }

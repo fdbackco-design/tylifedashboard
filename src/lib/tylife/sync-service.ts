@@ -43,7 +43,7 @@ import { resolveSalesMemberByNameOnly } from './sales-resolution';
 import { resolveContractorByNameOnly } from './contractor-resolution';
 import { buildSettlementTreeRows } from '../settlement/settlement-org-tree';
 import {
-  computeSalesMemberPromotionThreshold,
+  computeLeaderPromotionThresholds,
   computeCenterChiefPromotionMemberIds,
   type AttributedJoinContractRow,
 } from '../settlement/leader-promotion';
@@ -1670,17 +1670,27 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
         }
 
         const treeRows = buildSettlementTreeRows(
-          membersRaw as Array<{ id: string; name: string; rank: RankType; source_customer_id?: string | null }>,
+          membersRaw as Array<{
+            id: string;
+            name: string;
+            rank: RankType;
+            source_customer_id?: string | null;
+            external_id?: string | null;
+          }>,
           edgesRaw,
         );
 
         const rankById = new Map<string, RankType>();
         for (const m of membersRaw) rankById.set(m.id as string, m.rank as RankType);
 
-        const promotionThresholdByMemberId = computeSalesMemberPromotionThreshold(
+        const promotionThresholdByMemberId = computeLeaderPromotionThresholds(
           treeRows,
           joinAttributed,
-          rankById,
+          membersRaw.map((m) => ({
+            id: m.id as string,
+            rank: m.rank as RankType,
+            external_id: (m as { external_id?: string | null }).external_id ?? null,
+          })),
         );
 
         const toPromote: string[] = [];
@@ -1692,9 +1702,10 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
         for (const m of membersRaw) rankByIdRaw.set(m.id, m.rank);
 
         for (const m of membersRaw) {
-          if (m.rank !== '영업사원') continue;
           const th = promotionThresholdByMemberId.get(m.id) ?? null;
-          if (th) toPromote.push(m.id);
+          if (!th) continue;
+          if (m.rank !== '영업사원') continue;
+          toPromote.push(m.id);
 
           // 추가 규칙: 기존 상위가 리더인 상태에서 정책 승격되면 본사 직속으로 재배치
           // (organization_edges: 기존 리더 -> 승격자 관계를 끊고, 본사 -> 승격자로 재연결)
@@ -1715,6 +1726,25 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
             .eq('rank', '영업사원'); // 안전장치: 상위직급 덮어쓰기 방지
           if (upErr) throw new Error(`승격 반영 실패: ${upErr.message}`);
           for (const id of toPromote) rankById.set(id, '리더');
+
+          const promoRows = toPromote
+            .map((id) => {
+              const th = promotionThresholdByMemberId.get(id);
+              if (!th) return null;
+              return {
+                member_id: id,
+                previous_parent_id: parentByChild.get(id) ?? null,
+                threshold_contract_id: th.threshold_contract_id,
+                threshold_join_date: th.threshold_join_date,
+              };
+            })
+            .filter((row): row is NonNullable<typeof row> => row != null);
+          if (promoRows.length > 0) {
+            const { error: promoErr } = await db
+              .from('leader_promotion_events')
+              .upsert(promoRows as any, { onConflict: 'member_id' });
+            if (promoErr) throw new Error(`leader_promotion_events 기록 실패: ${promoErr.message}`);
+          }
         }
 
         // 센터장 승격: 산하 리더 5명 이상인 리더 → 센터장

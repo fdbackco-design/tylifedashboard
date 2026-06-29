@@ -303,6 +303,82 @@ export function isLeaderMaintenanceBonusEligible(params: {
 /** 센터장 승격: 산하 리더 최소 인원 */
 export const CENTER_CHIEF_PROMOTION_MIN_LEADERS = 5;
 
+/** 리더 정책 승격: 산하 가입 누적 구좌 최소 */
+export const LEADER_PROMOTION_MIN_UNITS = 20;
+
+/** `external_id = customer:{uuid}` 가상 노드(본인 고객 귀속용). 20구좌 승격 대상에서 제외 */
+export function isCustomerVirtualOrgMember(externalId: string | null | undefined): boolean {
+  return String(externalId ?? '').trim().startsWith('customer:');
+}
+
+/** DB 승격 반영 대상: 영업사원이면서 customer 가상 노드가 아닌 경우만 */
+export function isLeaderPromotionEligibleMember(params: {
+  rank: RankType;
+  externalId?: string | null;
+}): boolean {
+  if (params.rank !== '영업사원') return false;
+  if (isCustomerVirtualOrgMember(params.externalId)) return false;
+  return true;
+}
+
+function computeThresholdForSubtree(
+  subtree: Set<string>,
+  sorted: AttributedJoinContractRow[],
+  minUnits: number,
+): SalesMemberPromotionThreshold | null {
+  let cum = 0;
+  for (const c of sorted) {
+    if (!subtree.has(c.sales_member_id)) continue;
+    cum += Math.max(0, c.unit_count ?? 0);
+    if (cum >= minUnits) {
+      return {
+        threshold_contract_id: c.id,
+        threshold_join_date: c.join_date.slice(0, 10),
+        threshold_created_at: c.created_at ?? null,
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * DB 승격·leader_promotion_events 기록용 threshold.
+ *
+ * `computeSalesMemberPromotionThreshold` 와 달리:
+ * - DB rank 가 **영업사원** 인 멤버만 대상 (이미 리더인 사람 재계산/백필 없음)
+ * - `customer:*` 가상 노드 제외
+ * - 승격 계약의 귀속 `sales_member_id` 가 해당 멤버 subtree 에 포함되는 경우만 허용
+ */
+export function computeLeaderPromotionThresholds(
+  treeRows: OrgTreeRow[],
+  joinContractsAttributed: AttributedJoinContractRow[],
+  members: ReadonlyArray<{ id: string; rank: RankType; external_id?: string | null }>,
+  minUnits: number = LEADER_PROMOTION_MIN_UNITS,
+): Map<string, SalesMemberPromotionThreshold | null> {
+  const childrenByParent = buildChildrenByParentFromRows(treeRows);
+  const sorted = [...joinContractsAttributed].sort(compareAttributedJoinRows);
+  const out = new Map<string, SalesMemberPromotionThreshold | null>();
+
+  for (const m of members) {
+    if (!isLeaderPromotionEligibleMember({ rank: m.rank, externalId: m.external_id })) {
+      continue;
+    }
+    const subtree = collectSubtreeMemberIdsDownstream(m.id, childrenByParent);
+    const promo = computeThresholdForSubtree(subtree, sorted, minUnits);
+    if (!promo) {
+      out.set(m.id, null);
+      continue;
+    }
+    const thRow = joinContractsAttributed.find((c) => c.id === promo.threshold_contract_id);
+    if (!thRow || !subtree.has(thRow.sales_member_id)) {
+      out.set(m.id, null);
+      continue;
+    }
+    out.set(m.id, promo);
+  }
+  return out;
+}
+
 /**
  * 산하(본인 제외)에 rank가 '리더'인 멤버가 CENTER_CHIEF_PROMOTION_MIN_LEADERS 이상이면
  * 해당 멤버(현재 직급이 리더인 경우)를 센터장으로 승격 대상으로 본다.

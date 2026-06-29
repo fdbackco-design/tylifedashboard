@@ -6,7 +6,7 @@ import {
 } from '@/lib/settlement/calculator';
 import { buildSettlementTreeRows } from '@/lib/settlement/settlement-org-tree';
 import {
-  computeSalesMemberPromotionThreshold,
+  computeLeaderPromotionThresholds,
   mergeLeaderPromotionEventThresholds,
   type AttributedJoinContractRow,
   isContractStrictlyAfterPromotionThreshold,
@@ -299,16 +299,15 @@ export async function calculateMonthlySettlement(params: {
     leaderMaintBlockByMemberId.set(mid, paidYm != null && paidYm !== yearMonth);
   }
 
-  const rankById = new Map<string, RankType>();
-  for (const m of membersRaw) {
-    const r = m.rank as RankType;
-    // 산하 20구좌 승격 계약(threshold) 계산: DB가 이미 '리더'여도 동일 기준으로 누적을 잡는다.
-    // (leader_promotion_events 없이도 리더 직전 계약=30만·롤업 차액 반영 가능)
-    if (r === '리더') rankById.set(m.id as string, '영업사원');
-    else rankById.set(m.id as string, r);
-  }
-
-  const promotionThresholdByMemberId = computeSalesMemberPromotionThreshold(treeRows, joinAttributed, rankById);
+  const promotionThresholdByMemberId = computeLeaderPromotionThresholds(
+    treeRows,
+    joinAttributed,
+    (membersRaw as OrganizationMember[]).map((m) => ({
+      id: m.id,
+      rank: m.rank as RankType,
+      external_id: m.external_id ?? null,
+    })),
+  );
 
   const eventRowsWithThreshold = ((promoEvents ?? []) as any[]).filter(
     (r) => r?.member_id && r?.threshold_contract_id && r?.threshold_join_date,

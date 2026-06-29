@@ -25,8 +25,9 @@ import type { ContractItem } from '@/components/org-tree/OrgTreeNode';
 import type { OrgTreeRow, OrganizationMember } from '@/lib/types';
 import type { RankType } from '@/lib/types/organization';
 import {
-  computeSalesMemberPromotionThreshold,
+  computeLeaderPromotionThresholds,
   computeCenterChiefPromotionMemberIds,
+  isCustomerVirtualOrgMember,
   type AttributedJoinContractRow,
 } from '@/lib/settlement/leader-promotion';
 import SyncButton from './SyncButton';
@@ -374,15 +375,15 @@ export default async function OrganizationPage({
     return c.sales_member_id;
   };
 
-  // ── 정책 승격(산하 가입 누적 20구좌)으로 "본사 직속 재배치"를 조직도 UI에도 즉시 반영 ──
-  // - 동기화/정산 재계산을 안 돌려도, 조직도 페이지에서 승격 조건을 만족하면 본사 직속으로 보이게 한다.
-  // - 단, DB organization_edges는 여기서 변경하지 않고(페이지 렌더는 읽기 전용 유지),
-  //   트리 구성 시에만 parent/rank를 오버라이드한다.
+  // ── 정책 승격(산하 가입 누적 20구좌) 표시용 rank 보정 ──
+  // DB 승격·leader_promotion_events 기록은 sync-service 에서만 수행한다.
   {
-    const rankByIdForThreshold = new Map<string, any>();
-    for (const m of members as any[]) {
-      // threshold 계산은 영업사원만 대상으로 하므로, '리더'도 임시로 영업사원 취급(정책 승격 후 rank가 올라간 경우 대비)
-      rankByIdForThreshold.set(m.id as string, (m.rank === '리더' ? '영업사원' : m.rank) as any);
+    const externalIdByMemberId = new Map<string, string | null>();
+    for (const m of membersRaw as any[]) {
+      externalIdByMemberId.set(
+        String((m as any).id),
+        ((m as any).external_id ?? null) as string | null,
+      );
     }
 
     const joinAttributedForThreshold: AttributedJoinContractRow[] = rawContractRows
@@ -400,7 +401,6 @@ export default async function OrganizationPage({
         id: c.id,
         join_date: String(c.join_date ?? '').slice(0, 10),
         unit_count: c.unit_count ?? 0,
-        // 조직도와 동일한 귀속 정책(고객 노드 치환/HQ 치환 등) 반영
         sales_member_id: remapMemberId(
           mapSalesMemberForOrg({
             sales_member_id: c.sales_member_id,
@@ -417,10 +417,14 @@ export default async function OrganizationPage({
         created_at: (c as { created_at?: string | null }).created_at ?? null,
       }));
 
-    const promotionThresholdByMemberId = computeSalesMemberPromotionThreshold(
+    const promotionThresholdByMemberId = computeLeaderPromotionThresholds(
       treeRowsBase,
       joinAttributedForThreshold,
-      rankByIdForThreshold as any,
+      membersRaw.map((m: any) => ({
+        id: String(m.id),
+        rank: m.rank as RankType,
+        external_id: (m.external_id ?? null) as string | null,
+      })),
     );
 
     const rankByIdRaw = new Map<string, string>();
@@ -428,131 +432,32 @@ export default async function OrganizationPage({
 
     treeRows = treeRowsBase.map((r) => {
       if (r.rank === '본사') return r;
+      // customer:* 가상 노드는 잘못된 DB 승격이 있어도 화면에서는 영업사원으로 표시
+      if (isCustomerVirtualOrgMember(externalIdByMemberId.get(r.id))) {
+        if (r.rank === '리더' || r.rank === '센터장') {
+          return { ...r, rank: '영업사원' as RankType };
+        }
+        return r;
+      }
       const th = promotionThresholdByMemberId.get(r.id) ?? null;
-      if (!th || !hqIdForTree) return r;
-
-      // 승격자는 조직도 배지/정렬에서도 리더로 보이게(요구: 원본 rank가 아니라 effective rank 반영)
-      return { ...r, rank: '리더' as any };
+      if (!th) return r;
+      if ((rankByIdRaw.get(r.id) ?? '') !== '영업사원') return r;
+      return { ...r, rank: '리더' as RankType };
     });
 
     // 센터장 승격(표시): 산하 리더 5명 이상인 리더
-    let toCenterChiefIds: string[] = [];
     {
       const rankByIdForCenterChief = new Map<string, RankType>();
       for (const r of treeRows) rankByIdForCenterChief.set(r.id, r.rank as RankType);
-      toCenterChiefIds = computeCenterChiefPromotionMemberIds(treeRows, rankByIdForCenterChief).filter(
+      const toCenterChiefIds = computeCenterChiefPromotionMemberIds(treeRows, rankByIdForCenterChief).filter(
         (id) => !lockedCenterChiefSet.has(String(id)),
       );
       if (toCenterChiefIds.length > 0) {
         const centerChiefSet = new Set(toCenterChiefIds);
         treeRows = treeRows.map((r) =>
-          centerChiefSet.has(r.id) ? { ...r, rank: '센터장' as any } : r,
+          centerChiefSet.has(r.id) ? { ...r, rank: '센터장' as RankType } : r,
         );
       }
-    }
-
-    // UI에서 '리더'로 보이게 되는 경우, DB의 organization_members.rank도 함께 승격 반영한다.
-    // - 안전을 위해 "승격(영업사원 → 리더)"만 수행하고, 조건이 풀렸다고 해서 강등은 하지 않는다.
-    // - 본사/특정 예외(안성준 본사 취급)는 DB에 쓰지 않는다.
-    // - leader_promotion_events: 정산에서 승격 전 상위 리더·policy 플래그를 복원하므로, rank 업데이트와 함께 기록한다.
-    try {
-      const existingPromoMemberIds = new Set(
-        ((promoEventsRes.data ?? []) as any[]).map((r) => String(r.member_id)),
-      );
-
-      const buildLeaderPromoEventRow = (
-        memberId: string,
-      ): {
-        member_id: string;
-        previous_parent_id: string | null;
-        threshold_contract_id: string;
-        threshold_join_date: string;
-      } | null => {
-        const th = promotionThresholdByMemberId.get(memberId) ?? null;
-        if (!th) return null;
-        return {
-          member_id: memberId,
-          previous_parent_id: edgeMap.get(memberId) ?? null,
-          threshold_contract_id: th.threshold_contract_id,
-          threshold_join_date: th.threshold_join_date,
-        };
-      };
-
-      const promotedIds = treeRows
-        .filter((r) => r.rank === '리더')
-        .map((r) => r.id)
-        .filter((id) => {
-          const raw = rankByIdRaw.get(id) ?? null;
-          if (!raw) return false;
-          if (raw === '리더') return false;
-          if (raw === '본사') return false;
-          // 승격 대상은 기본적으로 영업사원에서 올라오는 케이스만
-          return raw === '영업사원';
-        });
-
-      // 안성준(본사) 예외는 DB 업데이트에서 제외
-      const ahnId = membersRaw.find((m: any) => m.name === '안성준')?.id ?? null;
-      const idsToUpdate = ahnId ? promotedIds.filter((id) => id !== ahnId) : promotedIds;
-
-      let rankUpdateErr: { message: string } | null = null;
-      if (idsToUpdate.length > 0) {
-        const { error } = await db
-          .from('organization_members')
-          .update({ rank: '리더' as any } as any)
-          .in('id', idsToUpdate);
-        rankUpdateErr = error ?? null;
-        if (error) {
-          // 페이지 렌더는 막지 않는다.
-          // (서버 로그에서만 확인 가능)
-          console.error('organization_members.rank 업데이트 실패:', error.message);
-        }
-      }
-
-      const memberIdsNeedingPromoRow = new Set<string>();
-      if (!rankUpdateErr && idsToUpdate.length > 0) {
-        for (const id of idsToUpdate) memberIdsNeedingPromoRow.add(id);
-      }
-      // 이미 DB에 리더인데 이전 코드 때문에 leader_promotion_events 가 비어 있는 경우 보정
-      for (const m of members as any[]) {
-        const id = String(m.id);
-        if (ahnId && id === ahnId) continue;
-        if (existingPromoMemberIds.has(id)) continue;
-        const raw = rankByIdRaw.get(id) ?? '';
-        if (raw !== '리더') continue;
-        if (!buildLeaderPromoEventRow(id)) continue;
-        memberIdsNeedingPromoRow.add(id);
-      }
-
-      const promoRows = [...memberIdsNeedingPromoRow]
-        .map((id) => buildLeaderPromoEventRow(id))
-        .filter((row): row is NonNullable<typeof row> => row != null)
-        .filter((row) => !existingPromoMemberIds.has(row.member_id));
-
-      if (promoRows.length > 0) {
-        const { error: promoErr } = await db.from('leader_promotion_events').insert(promoRows as any);
-        if (promoErr) {
-          console.error('leader_promotion_events 삽입 실패:', promoErr.message);
-        }
-      }
-
-      // 센터장 승격(DB): 산하 리더 5명 이상인 리더
-      if (!rankUpdateErr && toCenterChiefIds.length > 0) {
-        const centerChiefDbIds = ahnId
-          ? toCenterChiefIds.filter((id) => id !== ahnId)
-          : toCenterChiefIds;
-        if (centerChiefDbIds.length > 0) {
-          const { error: ccErr } = await db
-            .from('organization_members')
-            .update({ rank: '센터장' as any } as any)
-            .in('id', centerChiefDbIds)
-            .eq('rank', '리더');
-          if (ccErr) {
-            console.error('organization_members 센터장 승격 실패:', ccErr.message);
-          }
-        }
-      }
-    } catch (e) {
-      console.error('organization_members.rank 자동 승격 반영 실패:', e instanceof Error ? e.message : String(e));
     }
   }
 
