@@ -27,6 +27,7 @@ import type { RankType } from '@/lib/types/organization';
 import {
   computeLeaderPromotionThresholds,
   computeCenterChiefPromotionMemberIds,
+  computeCenterChiefDemotionMemberIds,
   isCustomerVirtualOrgMember,
   type AttributedJoinContractRow,
 } from '@/lib/settlement/leader-promotion';
@@ -449,9 +450,28 @@ export default async function OrganizationPage({
     {
       const rankByIdForCenterChief = new Map<string, RankType>();
       for (const r of treeRows) rankByIdForCenterChief.set(r.id, r.rank as RankType);
-      const toCenterChiefIds = computeCenterChiefPromotionMemberIds(treeRows, rankByIdForCenterChief).filter(
-        (id) => !lockedCenterChiefSet.has(String(id)),
-      );
+      const externalIdByMemberId = new Map<string, string | null>();
+      for (const m of membersRaw as any[]) {
+        externalIdByMemberId.set(String(m.id), ((m as any).external_id ?? null) as string | null);
+      }
+      // 잘못 센터장인 경우 표시에서 리더로 되돌림
+      const toDemoteDisplay = computeCenterChiefDemotionMemberIds(
+        treeRows,
+        rankByIdForCenterChief,
+        externalIdByMemberId,
+      ).filter((id) => !lockedCenterChiefSet.has(String(id)));
+      if (toDemoteDisplay.length > 0) {
+        const demoteSet = new Set(toDemoteDisplay);
+        treeRows = treeRows.map((r) =>
+          demoteSet.has(r.id) && r.rank === '센터장' ? { ...r, rank: '리더' as RankType } : r,
+        );
+        for (const id of toDemoteDisplay) rankByIdForCenterChief.set(id, '리더');
+      }
+      const toCenterChiefIds = computeCenterChiefPromotionMemberIds(
+        treeRows,
+        rankByIdForCenterChief,
+        externalIdByMemberId,
+      ).filter((id) => !lockedCenterChiefSet.has(String(id)));
       if (toCenterChiefIds.length > 0) {
         const centerChiefSet = new Set(toCenterChiefIds);
         treeRows = treeRows.map((r) =>

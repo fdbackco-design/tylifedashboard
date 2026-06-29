@@ -45,6 +45,7 @@ import { buildSettlementTreeRows } from '../settlement/settlement-org-tree';
 import {
   computeLeaderPromotionThresholds,
   computeCenterChiefPromotionMemberIds,
+  computeCenterChiefDemotionMemberIds,
   type AttributedJoinContractRow,
 } from '../settlement/leader-promotion';
 import type { RankType } from '../types/organization';
@@ -1753,9 +1754,34 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
             .filter((m) => Boolean(m.lock_center_chief_promotion))
             .map((m) => String(m.id)),
         );
-        const toCenterChief = computeCenterChiefPromotionMemberIds(treeRows, rankById).filter(
-          (id) => !lockedCenterChiefSet.has(String(id)),
+        const externalIdByMemberId = new Map<string, string | null>(
+          membersRaw.map((m) => [String(m.id), (m.external_id ?? null) as string | null]),
         );
+
+        const toDemoteFromCenterChief = computeCenterChiefDemotionMemberIds(
+          treeRows,
+          rankById,
+          externalIdByMemberId,
+        ).filter((id) => !lockedCenterChiefSet.has(String(id)));
+        if (toDemoteFromCenterChief.length > 0) {
+          const { error: demoteErr } = await db
+            .from('organization_members')
+            .update({ rank: '리더' })
+            .in('id', toDemoteFromCenterChief)
+            .eq('rank', '센터장');
+          if (demoteErr) throw new Error(`센터장 강등 반영 실패: ${demoteErr.message}`);
+          for (const id of toDemoteFromCenterChief) rankById.set(id, '리더');
+          await log(db, runId, 'info', '센터장 강등 반영(산하 리더 부족)', {
+            count: toDemoteFromCenterChief.length,
+            member_ids: toDemoteFromCenterChief,
+          });
+        }
+
+        const toCenterChief = computeCenterChiefPromotionMemberIds(
+          treeRows,
+          rankById,
+          externalIdByMemberId,
+        ).filter((id) => !lockedCenterChiefSet.has(String(id)));
         if (toCenterChief.length > 0) {
           const { error: ccErr } = await db
             .from('organization_members')
