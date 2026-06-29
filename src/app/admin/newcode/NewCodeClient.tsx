@@ -360,22 +360,22 @@ export default function NewCodeClient() {
       </div>
 
       <section className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="min-w-full text-xs sm:text-sm">
+        <table className="min-w-max w-full text-xs sm:text-sm">
           <thead className="bg-slate-50 text-slate-600">
             <tr>
-              <th className="px-2 py-2"> </th>
-              <th className="px-2 py-2 text-left font-medium">요청일자</th>
-              <th className="px-2 py-2 text-left font-medium">신청자</th>
-              <th className="px-2 py-2 text-left font-medium">이름</th>
-              <th className="px-2 py-2 text-left font-medium">생년월일</th>
-              <th className="px-2 py-2 text-left font-medium">성별</th>
-              <th className="px-2 py-2 text-left font-medium">전화번호</th>
-              <th className="px-2 py-2 text-left font-medium">본인 가입구좌</th>
-              <th className="px-2 py-2 text-left font-medium">사유 메모</th>
-              <th className="px-2 py-2 text-left font-medium">상태</th>
-              <th className="px-2 py-2 text-left font-medium">시트 동기화</th>
-              <th className="px-2 py-2 text-left font-medium">동기화 일시</th>
-              <th className="px-2 py-2 text-right font-medium">동작</th>
+              <th className="whitespace-nowrap px-2 py-2"> </th>
+              <th className="whitespace-nowrap px-2 py-2 text-left font-medium">요청일자</th>
+              <th className="whitespace-nowrap px-2 py-2 text-left font-medium">신청자</th>
+              <th className="whitespace-nowrap px-2 py-2 text-left font-medium">이름</th>
+              <th className="whitespace-nowrap px-2 py-2 text-left font-medium">생년월일</th>
+              <th className="whitespace-nowrap px-2 py-2 text-left font-medium">성별</th>
+              <th className="whitespace-nowrap px-2 py-2 text-left font-medium">전화번호</th>
+              <th className="whitespace-nowrap px-2 py-2 text-left font-medium">본인 가입구좌</th>
+              <th className="min-w-[12rem] px-2 py-2 text-left font-medium">사유 메모</th>
+              <th className="whitespace-nowrap px-2 py-2 text-left font-medium">상태</th>
+              <th className="whitespace-nowrap px-2 py-2 text-left font-medium">시트 동기화</th>
+              <th className="whitespace-nowrap px-2 py-2 text-left font-medium">동기화 일시</th>
+              <th className="whitespace-nowrap px-2 py-2 text-right font-medium">동작</th>
             </tr>
           </thead>
           <tbody>
@@ -400,7 +400,7 @@ export default function NewCodeClient() {
                           : ''
                       }`}
                     >
-                      <td className="px-2 py-2 align-top">
+                      <td className="whitespace-nowrap px-2 py-2 align-top">
                         <input
                           type="checkbox"
                           disabled={it.synced_to_sheet}
@@ -408,23 +408,21 @@ export default function NewCodeClient() {
                           onChange={(e) => toggle(it.id, e.target.checked)}
                         />
                       </td>
-                      <td className="px-2 py-2 align-top tabular-nums">{fmtDateTime(it.requested_at)}</td>
-                      <td className="px-2 py-2 align-top">{it.applicant_name}</td>
-                      <td className="px-2 py-2 align-top font-medium text-slate-900">{it.name}</td>
-                      <td className="px-2 py-2 align-top tabular-nums">{fmtBirth(it.birth_date)}</td>
-                      <td className="px-2 py-2 align-top">{it.gender}</td>
-                      <td className="px-2 py-2 align-top tabular-nums">{it.phone}</td>
-                      <td className="px-2 py-2 align-top">{it.has_own_contract ? '예' : '아니오'}</td>
-                      <td className="px-2 py-2 align-top">
+                      <td className="whitespace-nowrap px-2 py-2 align-top tabular-nums">{fmtDateTime(it.requested_at)}</td>
+                      <td className="whitespace-nowrap px-2 py-2 align-top">{it.applicant_name}</td>
+                      <td className="whitespace-nowrap px-2 py-2 align-top font-medium text-slate-900">{it.name}</td>
+                      <td className="whitespace-nowrap px-2 py-2 align-top tabular-nums">{fmtBirth(it.birth_date)}</td>
+                      <td className="whitespace-nowrap px-2 py-2 align-top">{it.gender}</td>
+                      <td className="whitespace-nowrap px-2 py-2 align-top tabular-nums">{it.phone}</td>
+                      <td className="whitespace-nowrap px-2 py-2 align-top">{it.has_own_contract ? '예' : '아니오'}</td>
+                      <td className="min-w-[12rem] max-w-md px-2 py-2 align-top">
                         {it.memo ? (
-                          <span className="block max-w-[14rem] truncate" title={it.memo}>
-                            {it.memo}
-                          </span>
+                          <span className="block whitespace-pre-wrap break-words text-slate-800">{it.memo}</span>
                         ) : (
                           <span className="text-slate-300">-</span>
                         )}
                       </td>
-                      <td className="px-2 py-2 align-top">
+                      <td className="whitespace-nowrap px-2 py-2 align-top">
                         <span
                           className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusBadgeClass(
                             it.status,
@@ -433,15 +431,15 @@ export default function NewCodeClient() {
                           {it.status}
                         </span>
                       </td>
-                      <td className="px-2 py-2 align-top">
+                      <td className="whitespace-nowrap px-2 py-2 align-top">
                         {it.synced_to_sheet ? (
                           <span className="text-emerald-700">완료</span>
                         ) : (
                           <span className="text-slate-400">미완료</span>
                         )}
                       </td>
-                      <td className="px-2 py-2 align-top tabular-nums">{fmtDateTime(it.sheet_synced_at)}</td>
-                      <td className="px-2 py-2 align-top text-right">
+                      <td className="whitespace-nowrap px-2 py-2 align-top tabular-nums">{fmtDateTime(it.sheet_synced_at)}</td>
+                      <td className="whitespace-nowrap px-2 py-2 align-top text-right">
                         {canReject ? (
                           <button
                             type="button"
