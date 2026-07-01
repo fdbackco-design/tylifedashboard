@@ -29,6 +29,37 @@ function extractLoginDigits(v: string): string | null {
   return /^\d{8}$/.test(local) ? local : null;
 }
 
+function stripCustomerNamePrefix(s: unknown): string {
+  return String(s ?? '').replace(/^\[고객\]\s*/, '').trim();
+}
+
+async function convertCustomerStyleMemberToEmployeeIfIssued(
+  adminDb: SupabaseClient,
+  memberId: string,
+): Promise<void> {
+  const { data } = await adminDb
+    .from('organization_members')
+    .select('id, name, external_id')
+    .eq('id', memberId)
+    .maybeSingle();
+  const row = (data ?? null) as { id: string; name: string | null; external_id: string | null } | null;
+  if (!row) return;
+
+  const ext = (row.external_id ?? '').trim();
+  const isCustomerStyle = ext.startsWith('customer:') || String(row.name ?? '').trim().startsWith('[고객]');
+  if (!isCustomerStyle) return;
+
+  const next: Record<string, unknown> = {};
+  const cleanName = stripCustomerNamePrefix(row.name);
+  if (cleanName && cleanName !== row.name) next.name = cleanName;
+  // 계정 발급이 된 순간부터는 "담당자(직원)"로 취급해야 하므로 customer:* 표식을 제거한다.
+  // customer_id 연계는 source_customer_id 컬럼으로 계속 유지된다.
+  if (ext.startsWith('customer:')) next.external_id = null;
+
+  if (Object.keys(next).length === 0) return;
+  await adminDb.from('organization_members').update(next).eq('id', memberId);
+}
+
 /**
  * 이미 같은 login_code 로 발급된 user_profiles 가 있는지 검사한다.
  * - 시트 동기화에서 "로그인 ID 중복" 판단 용도
@@ -115,7 +146,7 @@ export async function issueMappedAccount(
     // 1) 보강용 row 와 auth user 생성을 병렬
     const memberPromise = adminDb
       .from('organization_members')
-      .select('id, name, rank, phone')
+      .select('id, name, rank, phone, external_id, source_customer_id')
       .eq('id', memberId)
       .maybeSingle();
     const customerPromise = customerId
@@ -165,6 +196,13 @@ export async function issueMappedAccount(
         // ignore
       }
       return { ok: false, code: 'PROFILE_INSERT_FAILED', message: ins.error.message };
+    }
+
+    // 계정 발급이 완료된 멤버는 customer:* 임시 노드가 아니라 직원 노드로 취급되도록 보정 (best-effort).
+    try {
+      await convertCustomerStyleMemberToEmployeeIfIssued(adminDb, memberId);
+    } catch {
+      // ignore
     }
 
     // 발급 직후 정합성 회복(옛 customer 노드/어긋난 user_profiles) 시도 — best-effort.
