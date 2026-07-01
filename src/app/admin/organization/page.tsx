@@ -433,13 +433,9 @@ export default async function OrganizationPage({
 
     treeRows = treeRowsBase.map((r) => {
       if (r.rank === '본사') return r;
-      // customer:* 가상 노드는 잘못된 DB 승격이 있어도 화면에서는 영업사원으로 표시
-      if (isCustomerVirtualOrgMember(externalIdByMemberId.get(r.id))) {
-        if (r.rank === '리더' || r.rank === '센터장') {
-          return { ...r, rank: '영업사원' as RankType };
-        }
-        return r;
-      }
+      // customer:* 가상 노드는 "표시용 자동 승격" 대상에서만 제외한다.
+      // DB에 저장된 rank(예: 실제로 리더로 관리되는 케이스)는 그대로 표시한다.
+      if (isCustomerVirtualOrgMember(externalIdByMemberId.get(r.id))) return r;
       const th = promotionThresholdByMemberId.get(r.id) ?? null;
       if (!th) return r;
       if ((rankByIdRaw.get(r.id) ?? '') !== '영업사원') return r;
