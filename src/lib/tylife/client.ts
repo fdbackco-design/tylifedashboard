@@ -15,8 +15,12 @@ import { assertTyLifeCookie, describeTyLifeCookie, getTyLifeBaseUrl } from './en
 const RATE_LIMIT_MS = parseInt(process.env.TYLIFE_RATE_LIMIT_MS ?? '200', 10);
 const MAX_RETRIES = parseInt(process.env.TYLIFE_MAX_RETRIES ?? '3', 10);
 
-const BROWSER_USER_AGENT =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+const DEFAULT_BROWSER_USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36';
+
+function browserUserAgent(): string {
+  return (process.env.TYLIFE_USER_AGENT ?? '').trim() || DEFAULT_BROWSER_USER_AGENT;
+}
 
 function tylifeBaseUrl(): string {
   const base = getTyLifeBaseUrl();
@@ -111,7 +115,11 @@ export async function probeTyLifeSession(): Promise<TyLifeSessionProbe> {
       isHtml: false,
       redirectLocation,
       bodyPreview: '',
-      hint: `로그인 리다이렉트(${res.status})입니다. 쿠키가 만료되었거나 서버에 잘못 붙여넣었을 수 있습니다. Vercel Production에 저장 후 재배포했는지 확인하세요.`,
+      hint:
+        `로그인 리다이렉트(${res.status})입니다. ` +
+        `브라우저에서는 200 OK인데 서버만 302라면, ` +
+        `세션이 IP/디바이스(또는 User-Agent)에 바인딩되어 서버에서 재사용이 불가능한 케이스일 수 있습니다. ` +
+        `먼저 TYLIFE_USER_AGENT를 브라우저 UA(예: Chrome/149)로 맞춰보고, 그래도 302면 TY Life 측 정책상 서버 동기화 방식(쿠키 재사용)이 막혀 있을 수 있습니다.`,
     };
   }
 
@@ -167,13 +175,18 @@ async function sleep(ms: number): Promise<void> {
 /** POST /contract/list 헤더 */
 function buildListHeaders(): HeadersInit {
   const base = tylifeBaseUrl();
+  const ua = browserUserAgent();
   return {
     'Content-Type': 'application/json; charset=UTF-8',
     Accept: 'application/json, text/javascript, */*; q=0.01',
     'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
     Origin: base,
     Referer: `${base}/contract/`,
-    'User-Agent': BROWSER_USER_AGENT,
+    'User-Agent': ua,
+    // 브라우저와 최대한 유사한 힌트 헤더(서버에서 검사하는 경우 대비)
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Dest': 'empty',
     'X-Requested-With': 'XMLHttpRequest',
     Cookie: tyLifeCookie(),
   };
@@ -182,13 +195,14 @@ function buildListHeaders(): HeadersInit {
 /** GET /contract/{id} 헤더 */
 function buildDetailHeaders(): HeadersInit {
   const base = tylifeBaseUrl();
+  const ua = browserUserAgent();
   return {
     Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'ko-KR,ko;q=0.9',
     'Cache-Control': 'no-cache',
     Pragma: 'no-cache',
     'Upgrade-Insecure-Requests': '1',
-    'User-Agent': BROWSER_USER_AGENT,
+    'User-Agent': ua,
     Referer: `${base}/contract/`,
     Cookie: tyLifeCookie(),
   };
