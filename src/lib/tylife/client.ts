@@ -47,10 +47,11 @@ let cachedCookie: { value: string; fetchedAt: number } | null = null;
 const COOKIE_TTL_MS = 2 * 60 * 1000; // 2분 (IP 바인딩/만료 정책 대응: 짧게)
 
 async function tyLifeCookie(): Promise<string> {
-  const direct = getTyLifeCookie();
-  if (direct) return direct;
-
+  // IP 바인딩 정책이 있는 경우를 우회하려면,
+  // 브라우저에서 뽑은 쿠키(TYLIFE_COOKIE)보다 "서버에서 직접 로그인해 발급받은 쿠키"를 우선 사용해야 한다.
   if (!hasTyLifeCredentials()) {
+    const direct = getTyLifeCookie();
+    if (direct) return direct;
     return assertTyLifeCookie();
   }
 
