@@ -33,9 +33,14 @@ begin;
 -- where (m.external_id like 'customer:%' or m.name like '[고객] %')
 --   and p.mapping_status = 'MATCHED';
 
--- 1) external_id: customer:* → NULL (직원 노드로 전환)
+-- NOTE:
+-- `external_id IS NULL` 인 row는 (uniq_org_members_name_when_no_external) 제약 때문에 name 중복이 불가하다.
+-- customer:* 노드를 NULL로 바꾸면 기존 "직원 노드(external_id NULL)"와 이름 충돌이 날 수 있어,
+-- customer:* prefix만 제거한 별도 external_id로 전환한다. (customer 가상 노드 판정은 `external_id LIKE 'customer:%'` 기반)
+--
+-- 1) external_id: customer:* → cust:* (직원 노드로 전환)
 update organization_members m
-set external_id = null
+set external_id = regexp_replace(m.external_id, '^customer:', 'cust:')
 where m.external_id like 'customer:%'
   and exists (
     select 1

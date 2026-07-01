@@ -39,10 +39,15 @@ async function convertCustomerStyleMemberToEmployeeIfIssued(
 ): Promise<void> {
   const { data } = await adminDb
     .from('organization_members')
-    .select('id, name, external_id')
+    .select('id, name, external_id, source_customer_id')
     .eq('id', memberId)
     .maybeSingle();
-  const row = (data ?? null) as { id: string; name: string | null; external_id: string | null } | null;
+  const row = (data ?? null) as {
+    id: string;
+    name: string | null;
+    external_id: string | null;
+    source_customer_id: string | null;
+  } | null;
   if (!row) return;
 
   const ext = (row.external_id ?? '').trim();
@@ -54,7 +59,11 @@ async function convertCustomerStyleMemberToEmployeeIfIssued(
   if (cleanName && cleanName !== row.name) next.name = cleanName;
   // 계정 발급이 된 순간부터는 "담당자(직원)"로 취급해야 하므로 customer:* 표식을 제거한다.
   // customer_id 연계는 source_customer_id 컬럼으로 계속 유지된다.
-  if (ext.startsWith('customer:')) next.external_id = null;
+  if (ext.startsWith('customer:')) {
+    const cid = (row.source_customer_id ?? '').trim();
+    // external_id IS NULL은 name unique 제약과 충돌할 수 있어 prefix만 변경한다.
+    next.external_id = cid ? `cust:${cid}` : `cust:${ext.slice('customer:'.length)}`;
+  }
 
   if (Object.keys(next).length === 0) return;
   await adminDb.from('organization_members').update(next).eq('id', memberId);
