@@ -10,15 +10,40 @@
  */
 
 import type { TyLifeListApiResponse } from '../types/sync';
+import { assertTyLifeCookie } from './env';
 
 const TYLIFE_BASE_URL = process.env.TYLIFE_BASE_URL;
-const TYLIFE_COOKIE = process.env.TYLIFE_COOKIE;
 const RATE_LIMIT_MS = parseInt(process.env.TYLIFE_RATE_LIMIT_MS ?? '200', 10);
 const MAX_RETRIES = parseInt(process.env.TYLIFE_MAX_RETRIES ?? '3', 10);
 
 function assertEnv(): void {
   if (!TYLIFE_BASE_URL) throw new Error('TYLIFE_BASE_URL 환경변수가 설정되지 않았습니다.');
-  if (!TYLIFE_COOKIE) throw new Error('TYLIFE_COOKIE 환경변수가 설정되지 않았습니다.');
+  assertTyLifeCookie();
+}
+
+function tyLifeCookie(): string {
+  return assertTyLifeCookie();
+}
+
+async function parseTyLifeListJson(res: Response): Promise<TyLifeListApiResponse> {
+  const text = await res.text();
+  const trimmed = text.trimStart();
+  if (
+    trimmed.startsWith('<') ||
+    trimmed.toLowerCase().startsWith('<!doctype') ||
+    trimmed.toLowerCase().startsWith('<html')
+  ) {
+    throw new Error(
+      'TY Life가 로그인 페이지(HTML)를 반환했습니다. TYLIFE_COOKIE(또는 TYLIFE_SESSION_COOKIE)를 갱신하세요.',
+    );
+  }
+  try {
+    return JSON.parse(text) as TyLifeListApiResponse;
+  } catch {
+    throw new Error(
+      'TY Life 응답을 JSON으로 읽을 수 없습니다. 세션 쿠키가 만료되었을 수 있습니다.',
+    );
+  }
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -33,7 +58,7 @@ function buildListHeaders(): HeadersInit {
     Origin: TYLIFE_BASE_URL!,
     Referer: `${TYLIFE_BASE_URL}/contract/`,
     'X-Requested-With': 'XMLHttpRequest',
-    Cookie: TYLIFE_COOKIE!,
+    Cookie: tyLifeCookie(),
   };
 }
 
@@ -48,7 +73,7 @@ function buildDetailHeaders(): HeadersInit {
     'User-Agent':
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     Referer: `${TYLIFE_BASE_URL}/contract/`,
-    Cookie: TYLIFE_COOKIE!,
+    Cookie: tyLifeCookie(),
   };
 }
 
@@ -63,7 +88,7 @@ async function fetchWithRetry(
 
     if (res.status === 401 || res.status === 403) {
       throw new Error(
-        `TY Life 세션 만료 또는 접근 거부 (${res.status}). TYLIFE_COOKIE를 갱신하세요.`,
+        `TY Life 세션 만료 또는 접근 거부 (${res.status}). TYLIFE_COOKIE(또는 TYLIFE_SESSION_COOKIE)를 갱신하세요.`,
       );
     }
 
@@ -112,7 +137,7 @@ export async function fetchContractList(
     throw new Error(`fetchContractList 실패: ${res.status} ${res.statusText}`);
   }
 
-  const data = (await res.json()) as TyLifeListApiResponse;
+  const data = await parseTyLifeListJson(res);
   await sleep(RATE_LIMIT_MS);
   return data;
 }

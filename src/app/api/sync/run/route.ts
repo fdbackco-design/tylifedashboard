@@ -16,13 +16,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { syncContractPage } from '@/lib/tylife/sync-service';
+import { getTyLifeCookie } from '@/lib/tylife/env';
 import type { SyncRun } from '@/lib/types/sync';
 import { notifyAdminsOfNewContracts } from '@/lib/push/admin-event-notify';
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  if (!process.env.TYLIFE_COOKIE) {
+  if (!getTyLifeCookie()) {
     return NextResponse.json(
-      { success: false, error: 'TYLIFE_COOKIE 환경변수가 설정되지 않았습니다.' },
+      {
+        success: false,
+        error: 'TYLIFE_COOKIE(또는 TYLIFE_SESSION_COOKIE) 환경변수가 설정되지 않았습니다.',
+      },
       { status: 503 },
     );
   }

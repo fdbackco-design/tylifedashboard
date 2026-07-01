@@ -12,6 +12,34 @@ interface Progress {
   totalErrors: number;
 }
 
+interface SyncRunResponse {
+  success?: boolean;
+  runId?: string;
+  page?: number;
+  fetched?: number;
+  created?: number;
+  updated?: number;
+  errors?: number;
+  hasMore?: boolean;
+  error?: string;
+}
+
+async function readJsonResponse<T>(res: Response): Promise<T | null> {
+  const text = await res.text();
+  if (!text.trim()) return null;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const preview = text.trimStart().slice(0, 60);
+    if (preview.startsWith('<')) {
+      throw new Error(
+        '서버가 JSON 대신 HTML 페이지를 반환했습니다. 로그인 세션 또는 배포 설정을 확인하세요.',
+      );
+    }
+    throw new Error('서버 응답을 읽을 수 없습니다.');
+  }
+}
+
 export default function SyncButton() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -34,25 +62,20 @@ export default function SyncButton() {
 
     try {
       while (true) {
-        const body = runId ? { runId, page } : {};
+        const payload: { runId?: string; page?: number } = runId ? { runId, page } : {};
 
         const res = await fetch('/api/sync/run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          body: JSON.stringify(payload),
         });
 
-        const json = (await res.json()) as {
-          success?: boolean;
-          runId?: string;
-          page?: number;
-          fetched?: number;
-          created?: number;
-          updated?: number;
-          errors?: number;
-          hasMore?: boolean;
-          error?: string;
-        };
+        const json = await readJsonResponse<SyncRunResponse>(res);
+
+        if (!json) {
+          setError(`동기화 실패 (HTTP ${res.status})`);
+          return;
+        }
 
         if (!res.ok || !json.success) {
           const errMsg = typeof json.error === 'string' ? json.error : '동기화 실패 (서버 오류)';
@@ -60,7 +83,12 @@ export default function SyncButton() {
           return;
         }
 
-        runId = json.runId!;
+        runId = json.runId ?? null;
+        if (!runId) {
+          setError('동기화 runId를 받지 못했습니다.');
+          return;
+        }
+
         totalFetched += json.fetched ?? 0;
         totalCreated += json.created ?? 0;
         totalUpdated += json.updated ?? 0;
@@ -100,8 +128,8 @@ export default function SyncButton() {
 
         page++;
       }
-    } catch {
-      setError('네트워크 오류');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '네트워크 오류');
     } finally {
       setLoading(false);
     }

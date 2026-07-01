@@ -21,6 +21,7 @@ import { runSync } from '@/lib/tylife/sync-service';
 import { verifyBearerMatchesEnvSecret } from '@/lib/api/verify-bearer-env-secret';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { notifyAdminsOfNewContracts } from '@/lib/push/admin-event-notify';
+import { getTyLifeCookie } from '@/lib/tylife/env';
 
 export const dynamic = 'force-dynamic';
 /** Vercel Pro 등에서 긴 동기화 허용 (플랜별 상한은 Vercel 정책 따름) */
@@ -39,9 +40,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
   }
 
-  if (!process.env.TYLIFE_COOKIE) {
+  if (!getTyLifeCookie()) {
     return NextResponse.json(
-      { success: false, error: 'TYLIFE_COOKIE 환경변수가 설정되지 않았습니다.' },
+      {
+        success: false,
+        error: 'TYLIFE_COOKIE(또는 TYLIFE_SESSION_COOKIE) 환경변수가 설정되지 않았습니다.',
+      },
       { status: 503 },
     );
   }
