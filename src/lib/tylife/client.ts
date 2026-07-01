@@ -10,7 +10,14 @@
  */
 
 import type { TyLifeListApiResponse } from '../types/sync';
-import { assertTyLifeCookie, describeTyLifeCookie, getTyLifeBaseUrl } from './env';
+import {
+  assertTyLifeCookie,
+  describeTyLifeCookie,
+  getTyLifeBaseUrl,
+  getTyLifeCookie,
+  hasTyLifeCredentials,
+} from './env';
+import { loginToTYLife } from './auth';
 
 const RATE_LIMIT_MS = parseInt(process.env.TYLIFE_RATE_LIMIT_MS ?? '200', 10);
 const MAX_RETRIES = parseInt(process.env.TYLIFE_MAX_RETRIES ?? '3', 10);
@@ -30,11 +37,31 @@ function tylifeBaseUrl(): string {
 
 function assertEnv(): void {
   tylifeBaseUrl();
+  // 쿠키가 직접 주어지거나, ID/PW로 로그인 가능한 상태여야 한다.
+  if (getTyLifeCookie()) return;
+  if (hasTyLifeCredentials()) return;
   assertTyLifeCookie();
 }
 
-function tyLifeCookie(): string {
-  return assertTyLifeCookie();
+let cachedCookie: { value: string; fetchedAt: number } | null = null;
+const COOKIE_TTL_MS = 2 * 60 * 1000; // 2분 (IP 바인딩/만료 정책 대응: 짧게)
+
+async function tyLifeCookie(): Promise<string> {
+  const direct = getTyLifeCookie();
+  if (direct) return direct;
+
+  if (!hasTyLifeCredentials()) {
+    return assertTyLifeCookie();
+  }
+
+  const now = Date.now();
+  if (cachedCookie && now - cachedCookie.fetchedAt < COOKIE_TTL_MS) {
+    return cachedCookie.value;
+  }
+
+  const login = await loginToTYLife();
+  cachedCookie = { value: login.cookieHeader, fetchedAt: now };
+  return login.cookieHeader;
 }
 
 function sessionExpiredMessage(extra?: string): string {
@@ -94,9 +121,10 @@ export async function probeTyLifeSession(): Promise<TyLifeSessionProbe> {
     };
   }
 
+  const cookieHeader = await tyLifeCookie();
   const res = await fetch(`${baseUrl}/contract/list`, {
     method: 'POST',
-    headers: buildListHeaders(),
+    headers: { ...buildListHeaders(), Cookie: cookieHeader },
     body: JSON.stringify({
       pageInfo: { page: '1', row_per_page: 10 },
     }),
@@ -188,7 +216,6 @@ function buildListHeaders(): HeadersInit {
     'Sec-Fetch-Mode': 'cors',
     'Sec-Fetch-Dest': 'empty',
     'X-Requested-With': 'XMLHttpRequest',
-    Cookie: tyLifeCookie(),
   };
 }
 
@@ -204,7 +231,6 @@ function buildDetailHeaders(): HeadersInit {
     'Upgrade-Insecure-Requests': '1',
     'User-Agent': ua,
     Referer: `${base}/contract/`,
-    Cookie: tyLifeCookie(),
   };
 }
 
@@ -260,9 +286,10 @@ export async function fetchContractList(
   assertEnv();
 
   const base = tylifeBaseUrl();
+  const cookieHeader = await tyLifeCookie();
   const res = await fetchWithRetry(`${base}/contract/list`, {
     method: 'POST',
-    headers: buildListHeaders(),
+    headers: { ...buildListHeaders(), Cookie: cookieHeader },
     body: JSON.stringify({
       pageInfo: { page: String(page), row_per_page: rowPerPage },
     }),
@@ -286,9 +313,10 @@ export async function fetchContractDetailHtml(externalId: string): Promise<strin
   assertEnv();
 
   const base = tylifeBaseUrl();
+  const cookieHeader = await tyLifeCookie();
   const res = await fetchWithRetry(
     `${base}/contract/${encodeURIComponent(externalId)}`,
-    { method: 'GET', headers: buildDetailHeaders(), redirect: 'manual' },
+    { method: 'GET', headers: { ...buildDetailHeaders(), Cookie: cookieHeader }, redirect: 'manual' },
   );
 
   if (!res.ok) {

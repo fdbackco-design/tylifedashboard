@@ -20,6 +20,10 @@ export function getTyLifeBaseUrl(): string | undefined {
   return raw.replace(/\/+$/, '');
 }
 
+export function hasTyLifeCredentials(): boolean {
+  return Boolean((process.env.TYLIFE_ID ?? '').trim() && (process.env.TYLIFE_PW ?? '').trim());
+}
+
 export function getTyLifeCookie(): string | undefined {
   const fromPrimary = process.env.TYLIFE_COOKIE;
   const fromLegacy = process.env.TYLIFE_SESSION_COOKIE;
