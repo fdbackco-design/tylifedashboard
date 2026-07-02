@@ -37,6 +37,7 @@
  */
 
 import { isKoreanHoliday } from './korean-holidays';
+import { hasValidInvoiceNo } from '@/lib/utils/invoice-no';
 
 export const SETTLEMENT_VALID_HAPPYCALL_RESULTS: ReadonlySet<string> = new Set([
   '성공',
@@ -277,7 +278,7 @@ export function evaluateContractEligibility(
   // - 2026-06 이후: invoice_registered_at 의 ymd <= yearMonth-30(공휴일 보정) 이어야 충족.
   //   invoice_registered_at IS NULL 이면서 invoice_no 가 존재하면 "자동 기록 이전부터 있던 송장"
   //   으로 간주(=충족된 것으로 처리). 자동 기록 도입 이전 데이터 보호용.
-  const hasInvoice = String(c.invoice_no ?? '').trim().length > 0;
+  const hasInvoice = hasValidInvoiceNo(c.invoice_no);
   if (!hasInvoice) {
     return {
       result: 'DEFERRED',
@@ -339,7 +340,7 @@ export function isV2EligibleStatic(c: ContractEligibilityStaticInput): boolean {
   const hc = String(c.happycall_result ?? '').trim();
   if (SETTLEMENT_CANCELLED_HAPPYCALL_RESULTS.has(hc)) return false;
   if (!SETTLEMENT_VALID_HAPPYCALL_RESULTS.has(hc)) return false;
-  if (!String(c.invoice_no ?? '').trim()) return false;
+  if (!hasValidInvoiceNo(c.invoice_no)) return false;
   return true;
 }
 

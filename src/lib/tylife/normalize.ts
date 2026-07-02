@@ -21,6 +21,7 @@ import type {
 import type { OrganizationMemberInsert, RankType } from '../types/organization';
 import { parseSsn, parseMaskedSsn, parseRentalOrMemo } from '../utils/mask';
 import { normalizeDate } from './html-parser';
+import { normalizeInvoiceNo } from '../utils/invoice-no';
 
 export const DEFAULT_ITEM_NAME_PLACEHOLDER = '헬스365 고주파 발마사지기 [Health365]';
 
@@ -49,8 +50,14 @@ export function normalizeStatus(raw: string): ContractStatus {
 }
 
 export function normalizeProductType(raw: string): ProductType {
-  if (raw.includes('갤럭시케어') || raw.includes('TY')) return 'TY갤럭시케어';
-  if (raw === '무') return '무';
+  const text = raw.trim();
+  if (text.includes('갤럭시케어 라이트')) return '갤럭시케어 라이트';
+  if (text.includes('TY갤럭시케어')) return 'TY갤럭시케어';
+  if (text.includes('올라이프케어')) return '올라이프케어';
+  if (text.includes('일반가전')) return '일반가전';
+  if (text === '무') return '무';
+  // 레거시: 갤럭시케어/TY 단독 표기
+  if (text.includes('갤럭시케어') || text.includes('TY')) return 'TY갤럭시케어';
   return '일반';
 }
 
@@ -163,7 +170,7 @@ export function normalizeContractFromList(
     contract_code: item.contract_code,
     sequence_no: item.sequence_no_raw ? (parseInt(item.sequence_no_raw, 10) || null) : null,
     rental_request_no,
-    invoice_no: item.invoice_no ?? null,
+    invoice_no: normalizeInvoiceNo(item.invoice_no),
     memo,
     customer_id: customerId,
     sales_member_id: salesMemberId,
@@ -197,7 +204,7 @@ export function mergeDetailIntoContract(
 ): ContractInsert {
   return {
     ...base,
-    invoice_no: detail.invoice_no ?? base.invoice_no,
+    invoice_no: normalizeInvoiceNo(detail.invoice_no ?? base.invoice_no),
     rental_request_no: detail.rental_request_no ?? base.rental_request_no,
     item_name: detail.item_name ?? base.item_name,
     unit_count: (detail.unit_count != null && detail.unit_count > 0)

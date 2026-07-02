@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { buildOrgTree } from '@/lib/settlement/calculator';
-import { BASE_AMOUNT_PER_UNIT } from '@/lib/settlement/constants';
+import { sumHqRevenueForContracts } from '@/lib/settlement/hq-revenue';
 import {
   coalesceYearMonthSearchParam,
   contractJoinYmdInInclusiveWindow,
@@ -637,8 +637,20 @@ export default async function OrganizationPage({
     })
     .reduce((sum, c) => sum + (c.unit_count ?? 0), 0);
 
-  const totalSales = totalJoinUnits * BASE_AMOUNT_PER_UNIT;
-  const periodSales = periodJoinUnits * BASE_AMOUNT_PER_UNIT;
+  const { totalHqRevenue: totalSales, periodHqRevenue: periodSales } = sumHqRevenueForContracts(
+    rawContractRows.map((c) => ({
+      status: c.status,
+      is_cancelled: c.is_cancelled,
+      sales_member_id: c.sales_member_id,
+      sales_link_status: c.sales_link_status,
+      rental_request_no: c.rental_request_no,
+      invoice_no: c.invoice_no,
+      join_date: c.join_date,
+      unit_count: c.unit_count,
+      product_type: c.product_type,
+    })),
+    { periodStart: start_date, periodEnd: end_date },
+  );
 
   // 직급별 카운트: DB 전체가 아니라 조직도에 실제로 그려지는 노드(가상 본사 루트 제외, strip 반영)
   const rankCounts = orgTreeVisibleNodes.reduce<Record<string, number>>((acc, m) => {

@@ -1,7 +1,10 @@
 import type { RankType } from '../types/organization';
 import type { ContractStatus } from '../types/contract';
 
-/** 1구좌당 기준 매출액 (원) */
+/**
+ * 레거시 TY갤럭시케어 본사 매출 단가(2026-06-25 이전) 및 settlement_rules 폴백용.
+ * 본사 매출 집계는 `hq-revenue.ts` 의 거래별 상품·일자 단가를 사용한다.
+ */
 export const BASE_AMOUNT_PER_UNIT = 715_000;
 
 /**

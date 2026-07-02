@@ -5,6 +5,8 @@
  *   (렌탈신청번호 유무는 더 이상 따지지 않는다.)
  * - 그 외에는 DB status 그대로
  */
+import { hasValidInvoiceNo } from '@/lib/utils/invoice-no';
+
 export type ContractDisplayStatusInput = {
   status: string;
   rental_request_no?: string | null;
@@ -17,7 +19,7 @@ export function getContractDisplayStatus(c: ContractDisplayStatusInput): string 
   if ((c.status === '준비' || c.status === '대기') && v === '렌탈기준 미충족') {
     return '렌탈 미충족';
   }
-  const hasInvoice = (c.invoice_no ?? '').trim().length > 0;
+  const hasInvoice = hasValidInvoiceNo(c.invoice_no);
   if (c.status === '가입' || (c.status !== '해약' && hasInvoice)) {
     return '가입';
   }

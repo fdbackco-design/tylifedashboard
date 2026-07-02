@@ -10,7 +10,13 @@ export type ContractStatus =
   | '취소'
   | '해약';
 
-export type ProductType = 'TY갤럭시케어' | '무' | '일반';
+export type ProductType =
+  | 'TY갤럭시케어'
+  | '올라이프케어'
+  | '일반가전'
+  | '갤럭시케어 라이트'
+  | '무'
+  | '일반';
 
 export type WatchFitType = '갤럭시워치' | '갤럭시핏' | '해당없음';
 

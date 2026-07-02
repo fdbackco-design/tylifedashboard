@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
+    "verify:hq-revenue": "node scripts/verify-hq-revenue.mjs",
     "bench:api": "node scripts/api-bench.mjs",
     "cleanup:recruitment-nodes": "node scripts/cleanup-recruitment-nodes.mjs"
   },

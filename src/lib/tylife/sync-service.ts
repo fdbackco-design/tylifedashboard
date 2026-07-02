@@ -49,6 +49,7 @@ import {
   type AttributedJoinContractRow,
 } from '../settlement/leader-promotion';
 import type { RankType } from '../types/organization';
+import { hasValidInvoiceNo, normalizeInvoiceNo } from '../utils/invoice-no';
 import { isContractJoinCompleted } from '../utils/contract-display-status';
 
 function shouldExcludeRecruitmentName(name: string, relationship: string): boolean {
@@ -123,7 +124,7 @@ function isJoinEligibleByRule(params: {
   const status = params.status ?? '';
   if (status === '가입') return true;
   if (status === '해약') return false;
-  return (params.rental_request_no ?? '').trim() !== '' && (params.invoice_no ?? '').trim() !== '';
+  return (params.rental_request_no ?? '').trim() !== '' && hasValidInvoiceNo(params.invoice_no);
 }
 
 function isEligibleForHqCustomerAttribution(params: {
@@ -1248,9 +1249,9 @@ async function processItem(
     //   이월 마킹이 남아 있으면 송장이 충족되어도 그 정산월에서는 EXCLUDED 되어 들어가지 않는다.
     let shouldClearInvoiceMissingDefer = false;
     {
-      const newInvoiceNo = String(contractFinal.invoice_no ?? '').trim();
-      const oldInvoiceNo = String(ec?.invoice_no ?? '').trim();
-      if (newInvoiceNo !== '' && oldInvoiceNo === '') {
+      const newInvoiceNo = normalizeInvoiceNo(contractFinal.invoice_no);
+      const oldInvoiceNo = normalizeInvoiceNo(ec?.invoice_no);
+      if (newInvoiceNo && !oldInvoiceNo) {
         contractFinal = { ...contractFinal, invoice_registered_at: new Date().toISOString() };
         if (ec?.settlement_deferred === true && String(ec?.deferred_reason ?? '') === 'invoice_missing') {
           shouldClearInvoiceMissingDefer = true;

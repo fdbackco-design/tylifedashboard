@@ -9,7 +9,7 @@ import {
   getSettlementWindowSeoul,
   getSettlementWindowDisplayForYearMonth,
 } from '@/lib/settlement/settlement-window';
-import { BASE_AMOUNT_PER_UNIT } from '@/lib/settlement/constants';
+import { sumHqRevenueForContracts } from '@/lib/settlement/hq-revenue';
 import type { RankType } from '@/lib/types';
 import type { SettlementCalculationDetail } from '@/lib/types/settlement';
 import RecalcButton from './RecalcButton';
@@ -68,7 +68,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   // 표시 전용: 공휴일/주말 보정된 정산 구간 (데이터 필터는 위 start_date/end_date 그대로 사용).
   const displayWindow = getSettlementWindowDisplayForYearMonth(yearMonth);
 
-  const [allCountRes, eligibleCountRes, kpiRes] = await Promise.all([
+  const [allCountRes, eligibleCountRes, hqRevenueContractsRes] = await Promise.all([
     db
       .from('contracts')
       .select('id', { head: true, count: 'estimated' })
@@ -80,7 +80,13 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       .from('v_contract_settlement_base')
       .select('contract_id', { head: true, count: 'estimated' })
       .eq('year_month', yearMonth),
-    db.rpc('get_organization_kpis', { p_start_date: start_date, p_end_date: end_date }),
+    db
+      .from('contracts')
+      .select(
+        'join_date, unit_count, product_type, status, is_cancelled, sales_member_id, sales_link_status, rental_request_no, invoice_no',
+      )
+      .not('sales_member_id', 'is', null)
+      .limit(20000),
   ]);
 
   const allContractsCount = allCountRes.count ?? 0;
@@ -615,13 +621,20 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     // ignore
   }
 
-  const kpiRow = ((kpiRes.data ?? [])[0] ?? null) as
-    | { total_join_units: number; period_join_units: number }
-    | null;
-  const totalJoinUnits = kpiRow?.total_join_units ?? 0;
-  const periodJoinUnits = kpiRow?.period_join_units ?? 0;
-  const totalSales = totalJoinUnits * BASE_AMOUNT_PER_UNIT;
-  const periodSales = periodJoinUnits * BASE_AMOUNT_PER_UNIT;
+  const { totalHqRevenue: totalSales, periodHqRevenue: periodSales } = sumHqRevenueForContracts(
+    (hqRevenueContractsRes.data ?? []) as Array<{
+      join_date: string | null;
+      unit_count: number | null;
+      product_type: string | null;
+      status: string;
+      is_cancelled: boolean | null;
+      sales_member_id: string | null;
+      sales_link_status: string | null;
+      rental_request_no: string | null;
+      invoice_no: string | null;
+    }>,
+    { periodStart: start_date, periodEnd: end_date },
+  );
   const profit = periodSales - totalAmount;
 
   const yearsForPicker = (() => {
