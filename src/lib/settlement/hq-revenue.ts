@@ -1,6 +1,11 @@
 import { BASE_AMOUNT_PER_UNIT } from './constants';
 import { isOrganizationKpiEligibleContract, type OrganizationKpiContractInput } from './kpi-eligibility';
+import { isSettlementEligibleContract } from './settlement-eligibility';
+import { happycallYmdSeoul } from './settlement-eligibility-v2';
 import { contractJoinYmdInInclusiveWindow } from './settlement-window';
+
+export type HqRevenueEligibilityMode = 'kpi' | 'settlement_v2_static';
+export type HqRevenuePeriodDateField = 'join_date' | 'happy_call_at';
 
 /** TY갤럭시케어 본사 매출 단가 변경 적용 시작일 (당일 포함 770,000원) */
 export const TY_GALAXY_CARE_HQ_PRICE_INCREASE_DATE = '2026-06-26';
@@ -46,7 +51,7 @@ export function resolveHqProductKind(productTypeText: string | null | undefined)
 
 /**
  * 본사 매출 단가(원/구좌).
- * TY갤럭시케어는 기존 KPI·정산과 동일하게 join_date(정산 기준일)로 단가를 분기한다.
+ * TY갤럭시케어 날짜 분기는 호출 측에서 넘긴 기준일(가입일 또는 해피콜 완료일)로 판단한다.
  */
 export function getHqRevenueUnitPrice(
   productTypeText: string | null | undefined,
@@ -79,34 +84,89 @@ export type HqRevenueContractInput = OrganizationKpiContractInput & {
   join_date: string | null;
   unit_count: number | null;
   product_type: string | null;
+  happycall_result?: string | null;
+  happy_call_at?: string | null;
 };
 
-export function calcContractHqRevenue(contract: {
-  unit_count: number | null;
-  product_type: string | null;
-  join_date: string | null;
-}): number {
+function contractInHqRevenuePeriod(
+  contract: HqRevenueContractInput,
+  periodStart: string,
+  periodEnd: string,
+  periodDateField: HqRevenuePeriodDateField,
+): boolean {
+  if (periodDateField === 'happy_call_at') {
+    const ymd = happycallYmdSeoul(contract.happy_call_at);
+    if (!ymd) return false;
+    return ymd >= periodStart && ymd <= periodEnd;
+  }
+  return contractJoinYmdInInclusiveWindow(contract.join_date, periodStart, periodEnd);
+}
+
+function resolveHqUnitPriceDateYmd(
+  contract: HqRevenueContractInput,
+  unitPriceDateField: HqRevenuePeriodDateField,
+): string | null {
+  if (unitPriceDateField === 'happy_call_at') {
+    const ymd = happycallYmdSeoul(contract.happy_call_at);
+    return ymd || null;
+  }
+  return normalizeSettlementDateYmd(contract.join_date);
+}
+
+function isHqRevenueEligibleContract(
+  contract: HqRevenueContractInput,
+  mode: HqRevenueEligibilityMode,
+): boolean {
+  if (mode === 'settlement_v2_static') {
+    return isSettlementEligibleContract(contract);
+  }
+  return isOrganizationKpiEligibleContract(contract);
+}
+
+export function calcContractHqRevenue(
+  contract: {
+    unit_count: number | null;
+    product_type: string | null;
+    join_date: string | null;
+    happy_call_at?: string | null;
+  },
+  options?: { unitPriceDateField?: HqRevenuePeriodDateField },
+): number {
   const units = Math.max(0, Number(contract.unit_count ?? 0));
   if (units === 0) return 0;
 
-  const unitPrice = getHqRevenueUnitPrice(contract.product_type, contract.join_date);
+  const unitPriceDateField = options?.unitPriceDateField ?? 'join_date';
+  const priceDateYmd = resolveHqUnitPriceDateYmd(contract as HqRevenueContractInput, unitPriceDateField);
+  const unitPrice = getHqRevenueUnitPrice(contract.product_type, priceDateYmd);
   return units * unitPrice;
 }
 
 export function sumHqRevenueForContracts(
   contracts: readonly HqRevenueContractInput[],
-  options: { periodStart: string; periodEnd: string },
+  options: {
+    periodStart: string;
+    periodEnd: string;
+    /** 조직 KPI(기본) vs 정산 v2 정적 가입 인정 */
+    eligibility?: HqRevenueEligibilityMode;
+    /** 이번달(기간) 매출 집계에 쓸 날짜 필드. 정산현황·조직도는 happy_call_at. */
+    periodDateField?: HqRevenuePeriodDateField;
+    /** 상품별 본사 매출 단가 분기에 쓸 날짜 필드. 조직도는 happy_call_at, 정산현황 기본은 join_date. */
+    unitPriceDateField?: HqRevenuePeriodDateField;
+  },
 ): { totalHqRevenue: number; periodHqRevenue: number } {
+  const eligibility = options.eligibility ?? 'kpi';
+  const periodDateField = options.periodDateField ?? 'join_date';
+  const unitPriceDateField = options.unitPriceDateField ?? 'join_date';
   let totalHqRevenue = 0;
   let periodHqRevenue = 0;
 
   for (const contract of contracts) {
-    if (!isOrganizationKpiEligibleContract(contract)) continue;
+    if (!isHqRevenueEligibleContract(contract, eligibility)) continue;
 
-    const revenue = calcContractHqRevenue(contract);
+    const revenue = calcContractHqRevenue(contract, { unitPriceDateField });
     totalHqRevenue += revenue;
 
-    if (contractJoinYmdInInclusiveWindow(contract.join_date, options.periodStart, options.periodEnd)) {
+    if (contractInHqRevenuePeriod(contract, options.periodStart, options.periodEnd, periodDateField)) {
       periodHqRevenue += revenue;
     }
   }

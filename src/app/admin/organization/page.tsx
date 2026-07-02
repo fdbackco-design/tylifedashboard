@@ -646,10 +646,18 @@ export default async function OrganizationPage({
       rental_request_no: c.rental_request_no,
       invoice_no: c.invoice_no,
       join_date: c.join_date,
+      happy_call_at: c.happy_call_at ?? null,
+      happycall_result: c.happycall_result ?? null,
       unit_count: c.unit_count,
       product_type: c.product_type,
     })),
-    { periodStart: start_date, periodEnd: end_date },
+    {
+      periodStart: start_date,
+      periodEnd: end_date,
+      eligibility: 'kpi',
+      periodDateField: 'happy_call_at',
+      unitPriceDateField: 'happy_call_at',
+    },
   );
 
   // 직급별 카운트: DB 전체가 아니라 조직도에 실제로 그려지는 노드(가상 본사 루트 제외, strip 반영)

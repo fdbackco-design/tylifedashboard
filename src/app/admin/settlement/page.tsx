@@ -618,7 +618,12 @@ export default async function SettlementPage({ searchParams }: PageProps) {
 
   const { totalHqRevenue: totalSales, periodHqRevenue: periodSales } = sumHqRevenueForContracts(
     hqRevenueContracts,
-    { periodStart: start_date, periodEnd: end_date },
+    {
+      periodStart: start_date,
+      periodEnd: end_date,
+      eligibility: 'settlement_v2_static',
+      periodDateField: 'happy_call_at',
+    },
   );
   const profit = periodSales - totalAmount;
 
