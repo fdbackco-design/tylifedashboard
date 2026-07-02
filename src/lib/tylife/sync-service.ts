@@ -37,7 +37,7 @@ import type {
   ParsedListItem,
 } from '../types/sync';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { ContractInsert } from '../types/contract';
+import type { ContractInsert, ContractStatus } from '../types/contract';
 import { buildPerformancePath } from '../organization/performance-path';
 import { resolveSalesMemberByNameOnly } from './sales-resolution';
 import { resolveContractorByNameOnly } from './contractor-resolution';
@@ -51,6 +51,12 @@ import {
 import type { RankType } from '../types/organization';
 import { hasValidInvoiceNo, normalizeInvoiceNo } from '../utils/invoice-no';
 import { isContractJoinCompleted } from '../utils/contract-display-status';
+import {
+  mergeExistingContractFields,
+  resolveInternalContractStatus,
+  isEligibleForHqCustomerAttribution,
+  type ExistingContractMergeSource,
+} from './contract-internal-status';
 
 function shouldExcludeRecruitmentName(name: string, relationship: string): boolean {
   const n = name.trim();
@@ -114,33 +120,6 @@ function minusDaysYmd(ymd: string, days: number): string {
 
 function isTerminalContractStatus(status: string | null | undefined): boolean {
   return status === '가입' || status === '해약';
-}
-
-function isJoinEligibleByRule(params: {
-  status: string | null | undefined;
-  rental_request_no?: string | null;
-  invoice_no?: string | null;
-}): boolean {
-  const status = params.status ?? '';
-  if (status === '가입') return true;
-  if (status === '해약') return false;
-  return (params.rental_request_no ?? '').trim() !== '' && hasValidInvoiceNo(params.invoice_no);
-}
-
-function isEligibleForHqCustomerAttribution(params: {
-  status: string | null | undefined;
-  is_cancelled?: boolean | null;
-  rental_request_no?: string | null;
-  invoice_no?: string | null;
-}): boolean {
-  if (params.is_cancelled) return false;
-  const status = (params.status ?? '').trim();
-  if (status === '취소' || status === '해약') return false;
-  return isJoinEligibleByRule({
-    status,
-    rental_request_no: params.rental_request_no,
-    invoice_no: params.invoice_no,
-  });
 }
 
 async function getHqMemberId(db: SupabaseClient): Promise<string | null> {
@@ -1085,25 +1064,29 @@ async function processItem(
     const { data: existingContract } = await db
       .from('contracts')
       .select(
-        'id, status, unit_count, invoice_no, rental_request_no, item_name, performance_path_json, settlement_deferred, deferred_reason',
+        'id, status, ty_source_status, unit_count, invoice_no, rental_request_no, item_name, happycall_result, happy_call_at, performance_path_json, settlement_deferred, deferred_reason',
       )
       .eq('contract_code', item.contract_code)
       .maybeSingle();
 
     const ec = existingContract as {
       status: string;
+      ty_source_status: string | null;
       unit_count: number | null;
       invoice_no: string | null;
       rental_request_no: string | null;
       item_name: string | null;
+      happycall_result: string | null;
+      happy_call_at: string | null;
       performance_path_json: unknown;
       settlement_deferred: boolean | null;
       deferred_reason: string | null;
     } | null;
     const existingPathStamped = ec != null && ec.performance_path_json != null;
+    const ecTySource = (ec?.ty_source_status ?? ec?.status ?? null) as string | null;
     const alreadyHasDetail =
       ec != null &&
-      ec.status === normalizeStatus(item.status_raw ?? '') &&
+      ecTySource === normalizeStatus(item.status_raw ?? '') &&
       ec.unit_count != null &&
       ec.invoice_no != null &&
       ec.rental_request_no != null &&
@@ -1160,9 +1143,12 @@ async function processItem(
       finalSalesMemberId = null;
     }
 
+    const tySourceStatus = normalizeStatus(item.status_raw ?? '');
+
     const contractBase = normalizeContractFromList(item, customerId, finalSalesMemberId);
     let contractFinal: ContractInsert = {
       ...contractBase,
+      ty_source_status: tySourceStatus,
       source_snapshot_json: item._snapshot,
       sales_link_status: salesLinkStatus,
       raw_sales_member_name: salesLinkStatus === 'pending_mapping' ? rawSalesName : null,
@@ -1172,6 +1158,7 @@ async function processItem(
     if (detail) {
       contractFinal = {
         ...mergeDetailIntoContract(contractBase, detail),
+        ty_source_status: tySourceStatus,
         source_snapshot_json: item._snapshot,
         sales_member_id: finalSalesMemberId,
         sales_link_status: salesLinkStatus,
@@ -1180,16 +1167,33 @@ async function processItem(
       };
     }
 
-    // ── 상태 정규화(가입 인정 기준) ──
-    // 원본 status가 '대기/준비/...'여도, 해약이 아니고 송장+렌탈이 있으면 "가입"으로 본다.
-    // 이렇게 DB에 저장되는 status 자체를 통일하면, /organization 예외/집계가 동기화 타이밍에 흔들리지 않는다.
-    if (isJoinEligibleByRule({
-      status: contractFinal.status,
-      rental_request_no: contractFinal.rental_request_no,
+    // 기존 DB 값 병합(송장·해피콜 등) 후 내부 status 판정 — 리스트 일시 누락 시 가입↔대기 흔들림 방지
+    const ecMergeSource: ExistingContractMergeSource | null = ec
+      ? {
+          status: ec.status as ContractStatus,
+          ty_source_status: (ec.ty_source_status ?? ec.status) as ContractStatus,
+          invoice_no: ec.invoice_no,
+          rental_request_no: ec.rental_request_no,
+          item_name: ec.item_name,
+          happycall_result: ec.happycall_result,
+          happy_call_at: ec.happy_call_at,
+        }
+      : null;
+    contractFinal = mergeExistingContractFields(contractFinal, ecMergeSource);
+
+    const internalStatus = resolveInternalContractStatus({
+      tySourceStatus,
+      tyStatusRaw: item.status_raw ?? null,
+      isCancelled: Boolean(contractFinal.is_cancelled),
+      existingInternalStatus: (ec?.status ?? null) as ContractStatus | null,
       invoice_no: contractFinal.invoice_no,
-    })) {
-      contractFinal = { ...contractFinal, status: '가입' };
-    }
+      happycall_result: contractFinal.happycall_result,
+    });
+    contractFinal = {
+      ...contractFinal,
+      ty_source_status: tySourceStatus,
+      status: internalStatus,
+    };
 
     // ── 5. 실적 스탬핑: 최초 1회만 경로 박제 (이후 조직 개편·퇴사에도 당시 레그 유지)
     if (salesLinkStatus === 'linked' && finalSalesMemberId && !existingPathStamped) {
@@ -1216,24 +1220,6 @@ async function processItem(
         ...contractFinal,
         performance_path_json: ec.performance_path_json as ContractInsert['performance_path_json'],
       };
-    }
-
-    // upsert 시 리스트 값(null)이 기존 상세 값을 덮어쓰지 않도록 보호
-    // (송장번호/렌탈번호가 상세에만 존재하는 케이스가 있어, 상세 fetch가 일시 실패하면 null로 떨어질 수 있음)
-    if (ec) {
-      if ((contractFinal.invoice_no ?? null) == null && (ec.invoice_no ?? null) != null) {
-        contractFinal = { ...contractFinal, invoice_no: ec.invoice_no };
-      }
-      if ((contractFinal.rental_request_no ?? null) == null && (ec.rental_request_no ?? null) != null) {
-        contractFinal = { ...contractFinal, rental_request_no: ec.rental_request_no };
-      }
-      if (
-        (contractFinal.item_name ?? null) === DEFAULT_ITEM_NAME_PLACEHOLDER &&
-        (ec.item_name ?? null) != null &&
-        ec.item_name !== DEFAULT_ITEM_NAME_PLACEHOLDER
-      ) {
-        contractFinal = { ...contractFinal, item_name: ec.item_name ?? undefined };
-      }
     }
 
     // 정산 v2: 송장번호 최초 등록 시점 자동 기록.
@@ -1285,10 +1271,11 @@ async function processItem(
     // - 가입 인정 기준을 만족하는 계약만
     // - linked 상태만
     if (autoCreatedSalesMemberId && salesLinkStatus === 'linked') {
-      const eligible = isJoinEligibleByRule({
-        status: contractFinal.status,
-        rental_request_no: contractFinal.rental_request_no,
+      const eligible = isEligibleForHqCustomerAttribution({
+        status: contractFinal.status ?? '',
+        is_cancelled: contractFinal.is_cancelled ?? null,
         invoice_no: contractFinal.invoice_no,
+        happycall_result: contractFinal.happycall_result,
       });
       if (eligible) {
         const hqId = await getHqMemberId(db);
@@ -1327,10 +1314,10 @@ async function processItem(
       const hqId = await getHqMemberId(db);
       const isHqSales = hqId != null && finalSalesMemberId === hqId;
       const eligible = isEligibleForHqCustomerAttribution({
-        status: contractFinal.status,
-        is_cancelled: (contractFinal as any).is_cancelled ?? null,
-        rental_request_no: contractFinal.rental_request_no,
+        status: contractFinal.status ?? '',
+        is_cancelled: contractFinal.is_cancelled ?? null,
         invoice_no: contractFinal.invoice_no,
+        happycall_result: contractFinal.happycall_result,
       });
       if (isHqSales && eligible) {
         const customerSalesMemberId = await ensureCustomerMemberId();

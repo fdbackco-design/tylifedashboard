@@ -67,6 +67,8 @@ export interface Contract {
   unit_count: number;
   join_method: JoinMethodType;
   status: ContractStatus;
+  /** TY Life 수집 원본 가입 상태 (내부 status 와 분리) */
+  ty_source_status?: ContractStatus | null;
   happy_call_at: string | null;
   /** true이면 당월 정산 제외 */
   is_cancelled: boolean;
@@ -110,6 +112,7 @@ export interface ContractInsert {
   unit_count: number;
   join_method: JoinMethodType;
   status?: ContractStatus;
+  ty_source_status?: ContractStatus | null;
   happy_call_at?: string | null;
   is_cancelled?: boolean;
   contractor_name?: string | null;
