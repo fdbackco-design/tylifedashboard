@@ -1,5 +1,6 @@
 import { BASE_AMOUNT_PER_UNIT } from './constants';
 import { isOrganizationKpiEligibleContract, type OrganizationKpiContractInput } from './kpi-eligibility';
+import { contractJoinYmdInInclusiveWindow } from './settlement-window';
 
 /** TY갤럭시케어 본사 매출 단가 변경 적용 시작일 (당일 포함 770,000원) */
 export const TY_GALAXY_CARE_HQ_PRICE_INCREASE_DATE = '2026-06-26';
@@ -105,12 +106,7 @@ export function sumHqRevenueForContracts(
     const revenue = calcContractHqRevenue(contract);
     totalHqRevenue += revenue;
 
-    const joinDate = normalizeSettlementDateYmd(contract.join_date);
-    if (
-      joinDate &&
-      joinDate >= options.periodStart &&
-      joinDate <= options.periodEnd
-    ) {
+    if (contractJoinYmdInInclusiveWindow(contract.join_date, options.periodStart, options.periodEnd)) {
       periodHqRevenue += revenue;
     }
   }
