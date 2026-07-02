@@ -330,40 +330,6 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     );
   }
 
-  // contract_id -> 기본수당(subtotal) (월정산 계산 결과에서 추출)
-  const baseWonByContractId = new Map<string, number>();
-  for (const s of (settlements ?? []) as any[]) {
-    const detail = s.calculation_detail as SettlementCalculationDetail | null;
-    for (const dc of detail?.direct_contracts ?? []) {
-      const cid = String((dc as any).contract_id ?? '');
-      if (!cid) continue;
-      if (!baseWonByContractId.has(cid)) {
-        baseWonByContractId.set(cid, Number((dc as any).subtotal ?? 0));
-      }
-    }
-  }
-
-  const contractBaseItems = eligibleContracts
-    .map((c) => {
-      const contractId = String((c as any).id ?? '');
-      if (!contractId) return null;
-      const baseWon = baseWonByContractId.get(contractId) ?? 0;
-      return {
-        contractId,
-        baseWon,
-        rawSalesMemberId: ((c as any).raw_sales_member_id ?? null) as string | null,
-        mappedMemberId: ((c as any).sales_member_id ?? null) as string | null,
-        isSelfCustomerContract: Boolean((c as any).is_self_customer_contract ?? false),
-      };
-    })
-    .filter((v): v is {
-      contractId: string;
-      baseWon: number;
-      rawSalesMemberId: string | null;
-      mappedMemberId: string | null;
-      isSelfCustomerContract: boolean;
-    } => v != null);
-
   const ZERO_OUT_MEMBER_NAME = '정성은';
 
   const isZeroOutMember = (s: any): boolean => {
@@ -735,7 +701,6 @@ export default async function SettlementPage({ searchParams }: PageProps) {
         childrenByParent={childrenByParent}
         memberAggById={memberAggById}
         topLineIdByMemberId={topLineIdByMemberId}
-        contractBaseItems={contractBaseItems}
         rows={displayLineRows.map<SettlementLineRow>((r) => ({
           topLineId: r.topLineId,
           topDisplayName: r.topDisplayName,

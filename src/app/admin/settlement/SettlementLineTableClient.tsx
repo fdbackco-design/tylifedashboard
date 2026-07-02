@@ -58,13 +58,6 @@ export default function SettlementLineTableClient(props: {
     }
   >;
   topLineIdByMemberId: Record<string, string>;
-  contractBaseItems: Array<{
-    contractId: string;
-    baseWon: number;
-    rawSalesMemberId: string | null;
-    mappedMemberId: string | null;
-    isSelfCustomerContract: boolean;
-  }>;
 }) {
   const [selfIncludedByTopId, setSelfIncludedByTopId] = useState<Record<string, boolean>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -134,10 +127,10 @@ export default function SettlementLineTableClient(props: {
         topLineId: nodeId,
         topDisplayName: meta?.displayName ?? nodeId,
         topRank: props.rankByMemberId[nodeId] ?? meta?.rank ?? '-',
-        base: 0, // 기본수당은 아래 계약 단위 귀속으로 재계산
+        base: meta?.base ?? 0,
         rollup: agg.rollup,
         leaderMaint: agg.leaderMaint,
-        total: agg.rollup + agg.leaderMaint,
+        total: (meta?.base ?? 0) + agg.rollup + agg.leaderMaint,
         directContractCount: agg.directContractCount,
         directUnitSum: agg.directUnitSum,
         ownDirectUnitSum: meta?.directUnitSum ?? 0,
@@ -155,10 +148,10 @@ export default function SettlementLineTableClient(props: {
         topLineId: nodeId,
         topDisplayName: meta.displayName ?? nodeId,
         topRank: props.rankByMemberId[nodeId] ?? meta.rank ?? '-',
-        base: 0, // 기본수당은 아래 계약 단위 귀속으로 재계산
+        base: meta.base,
         rollup: meta.rollup,
         leaderMaint: meta.leaderMaint,
-        total: meta.rollup + meta.leaderMaint,
+        total: meta.base + meta.rollup + meta.leaderMaint,
         directContractCount: meta.directContractCount,
         directUnitSum: meta.directUnitSum,
         ownDirectUnitSum: meta.directUnitSum,
@@ -192,170 +185,9 @@ export default function SettlementLineTableClient(props: {
       expandedRowsBase.push(...expandNode(anchorTopLineId, anchorTopLineId, 0));
     }
 
-    // row index by member set membership (분리 상태 반영)
-    const rowMemberSetList = expandedRowsBase.map((r) => {
-      const subtree = collectSubtree(r.topLineId);
-      const inLine = new Set<string>();
-      for (const mid of subtree) {
-        if ((props.topLineIdByMemberId[mid] ?? null) === r.__anchorTopLineId) inLine.add(mid);
-      }
-      // split된 self row는 본인만 포함
-      const isSplitSelf = (splitOpenByTopId[r.topLineId] ?? false) && (r.__depth >= 0);
-      if (isSplitSelf) return new Set<string>([r.topLineId]);
-      return inLine;
-    });
-
-    const rowMetaList = expandedRowsBase.map((r, idx) => ({
-      idx,
-      topLineId: r.topLineId,
-      topDisplayName: r.topDisplayName,
-      depth: (r.__depth ?? 0) as number,
-      memberSet: rowMemberSetList[idx],
-    }));
-
-    const rowByTopLineId = new Map<string, (typeof rowMetaList)[number]>();
-    for (const rm of rowMetaList) rowByTopLineId.set(rm.topLineId, rm);
-
-    const parentByChild = new Map<string, string | null>();
-    for (const [pid, children] of Object.entries(props.childrenByParent)) {
-      for (const ch of children ?? []) parentByChild.set(ch, pid);
-    }
-
-    const baseByRowIdx = new Map<number, number>();
-    const addBase = (rowIdx: number, won: number) => {
-      baseByRowIdx.set(rowIdx, (baseByRowIdx.get(rowIdx) ?? 0) + won);
-    };
-
-    const baseSummaryByRow = new Map<string, {
-      selectedRowName: string;
-      selectedRowTopLineId: string;
-      contractCount: number;
-      totalBaseWon: number;
-      contractIds: string[];
-    }>();
-
-    // 기본수당 귀속 우선순위 적용 (계약 단위)
-    for (const c of props.contractBaseItems) {
-      const baseWon = Number(c.baseWon ?? 0);
-      if (!Number.isFinite(baseWon) || baseWon === 0) continue;
-
-      const rawRank = c.rawSalesMemberId ? (props.rankByMemberId[c.rawSalesMemberId] ?? props.memberAggById[c.rawSalesMemberId]?.rank ?? null) : null;
-      const isRawSalesMemberHeadOffice = rawRank === '본사';
-
-      let targetMemberId: string | null = null;
-      let targetSource = 'fallback';
-      let reason = 'fallback_display_root';
-
-      // 1) 본인 고객 계약 우선
-      if (c.isSelfCustomerContract && c.mappedMemberId) {
-        const mappedTop = props.topLineIdByMemberId[c.mappedMemberId] ?? null;
-        const isTopLineSelf = mappedTop != null && mappedTop === c.mappedMemberId;
-        targetMemberId = isTopLineSelf ? c.mappedMemberId : mappedTop;
-        targetSource = isTopLineSelf ? 'self_customer_top_root' : 'self_customer_parent_root';
-        reason = isTopLineSelf ? 'self_customer_top_root' : 'self_customer_parent_root';
-      }
-
-      // 2) 일반 계약: raw 담당자가 있고 "본사"가 아니면 raw를 타깃으로 사용
-      if (!targetMemberId && c.rawSalesMemberId) {
-        if (!isRawSalesMemberHeadOffice) {
-          targetMemberId = c.rawSalesMemberId;
-          targetSource = 'raw_sales_member';
-          reason = 'direct_raw_sales_member';
-        } else if (c.mappedMemberId) {
-          targetMemberId = c.mappedMemberId;
-          targetSource = 'mapped_member_because_raw_is_head_office';
-          reason = 'raw_is_head_office_use_mapped';
-        }
-      }
-
-      // 3) raw가 없거나 raw가 본사였고 mapped로 아직 못 잡은 경우 mapped 사용
-      if (!targetMemberId && c.mappedMemberId) {
-        targetMemberId = c.mappedMemberId;
-        targetSource = 'mapped_member';
-        reason = 'mapped_member';
-      }
-      if (!targetMemberId) {
-        continue;
-      }
-
-      // targetMemberId를 포함하는 후보 row를 모두 수집
-      const candidates = rowMetaList.filter((rm) => rm.memberSet.has(targetMemberId as string));
-      let selected: (typeof rowMetaList)[number] | null = null;
-
-      // 우선순위 1) row.topLineId === targetMemberId 인 정확한 row
-      const exactRow = rowMetaList.find((rm) => rm.topLineId === targetMemberId) ?? null;
-      if (exactRow) {
-        selected = exactRow;
-      } else {
-        // 우선순위 2) target의 "가장 가까운 표시 조상 row"를 먼저 탐색
-        let cur: string | null = targetMemberId;
-        const seen = new Set<string>();
-        while (cur) {
-          const hit = rowByTopLineId.get(cur);
-          if (hit) {
-            selected = hit;
-            if (reason === 'raw_is_head_office_use_mapped') {
-              targetSource = 'mapped_ancestor_because_raw_is_head_office';
-              reason = 'raw_is_head_office_use_mapped_ancestor';
-            }
-            break;
-          }
-          const parentId: string | null = parentByChild.get(cur) ?? null;
-          if (!parentId || seen.has(parentId)) break;
-          seen.add(parentId);
-          cur = parentId;
-        }
-
-        // 조상 탐색 실패 시 후보 기반으로 보정
-        if (!selected && candidates.length > 0) {
-          const maxDepth = Math.max(...candidates.map((rm) => rm.depth));
-          const deepest = candidates.filter((rm) => rm.depth === maxDepth);
-          if (deepest.length === 1) {
-            selected = deepest[0];
-            if (reason === 'raw_is_head_office_use_mapped') {
-              targetSource = 'mapped_ancestor_because_raw_is_head_office';
-              reason = 'raw_is_head_office_use_mapped_ancestor';
-            }
-          } else {
-            // 우선순위 3) depth 동률이면 memberSet size가 가장 작은 row
-            const minSetSize = Math.min(...deepest.map((rm) => rm.memberSet.size));
-            const smallest = deepest.filter((rm) => rm.memberSet.size === minSetSize);
-            selected = smallest[0] ?? deepest[0];
-            if (reason === 'raw_is_head_office_use_mapped') {
-              targetSource = 'mapped_ancestor_because_raw_is_head_office';
-              reason = 'raw_is_head_office_use_mapped_ancestor';
-            }
-          }
-        }
-      }
-
-      if (!selected) {
-        continue;
-      }
-
-      if (selected) {
-        addBase(selected.idx, baseWon);
-        const summaryKey = selected.topLineId;
-        const prev = baseSummaryByRow.get(summaryKey);
-        if (prev) {
-          prev.contractCount += 1;
-          prev.totalBaseWon += baseWon;
-          prev.contractIds.push(c.contractId);
-        } else {
-          baseSummaryByRow.set(summaryKey, {
-            selectedRowName: selected.topDisplayName,
-            selectedRowTopLineId: selected.topLineId,
-            contractCount: 1,
-            totalBaseWon: baseWon,
-            contractIds: [c.contractId],
-          });
-        }
-      }
-    }
-
     let excludedUnits = 0;
-    const rows = expandedRowsBase.map((r, idx) => {
-      const base = baseByRowIdx.get(idx) ?? 0;
+    const rows = expandedRowsBase.map((r) => {
+      const base = r.base ?? 0;
       const totalBeforeSelfToggle = base + (r.rollup ?? 0) + (r.leaderMaint ?? 0);
       const included = selfIncludedByTopId[r.topLineId] ?? true;
       const rank = props.rankByMemberId[r.topLineId] ?? r.topRank ?? '';
@@ -387,8 +219,6 @@ export default function SettlementLineTableClient(props: {
     splitOpenByTopId,
     props.childrenByParent,
     props.memberAggById,
-    props.topLineIdByMemberId,
-    props.contractBaseItems,
   ]);
 
   const baseSum = useMemo(() => adjustedRows.reduce((s, r) => s + (r.base ?? 0), 0), [adjustedRows]);
