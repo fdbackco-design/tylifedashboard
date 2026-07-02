@@ -4,6 +4,7 @@ import {
   buildChildrenByParentFromRows,
   collectSubtreeMemberIdsDownstream,
 } from '@/lib/settlement/settlement-org-tree';
+import { happycallYmdSeoul } from '@/lib/settlement/settlement-eligibility-v2';
 
 /** 리더 승격/유지 판정에 쓰는 '가입' 계약만 (status === 가입, 귀속된 담당자 기준) */
 export type AttributedJoinContractRow = {
@@ -225,6 +226,15 @@ export function subtreeJoinUnitsJoinOnlyInWindow(params: {
 }
 
 /**
+ * 유지장려금(100만원) 정산월 구간 판정용 기준일 — 해피콜 완료일(서울 YMD).
+ * 해피콜 일시가 없으면 집계에서 제외한다.
+ */
+function leaderMaintenancePeriodYmd(c: AttributedJoinContractRow): string | null {
+  const ymd = happycallYmdSeoul(c.happy_call_at);
+  return ymd || null;
+}
+
+/**
  * 루트 멤버를 포함한 subtree를 모으되, 자식 중 "리더 이상" 직급(리더/센터장/사업본부장/본사)
  * 노드는 그 노드와 그 후손을 모두 제외한다.
  *
@@ -253,9 +263,12 @@ function collectSubtreeMemberIdsExcludingDownLeaders(
 }
 
 /**
- * 정산 윈도우(start~end) 내 산하 '가입' 구좌 합 — **유지장려금 전용**.
+ * 정산월 해피콜 윈도우(start~end) 내 산하 '가입' 구좌 합 — **유지장려금 전용**.
  *
- * `subtreeJoinUnitsJoinOnlyInWindow`와 동일한 입력을 받지만, subtree를 구성할 때
+ * 기준일은 join_date 가 아니라 happy_call_at(서울 YMD)이다.
+ * 윈도우 경계는 정산 v2 `getHappycallWindowForYearMonth` 와 동일하게 호출 측에서 넘긴다.
+ *
+ * `subtreeJoinUnitsJoinOnlyInWindow`와 동일한 subtree 컷 규칙(하위 리더 제외)을 적용한다.
  * 자식 중 리더 이상 직급 노드를 만나면 해당 노드와 그 후손을 모두 컷한다.
  *
  * 예) 리더 A 산하에 리더 B → 영업사원 C(10구좌)가 있을 때:
@@ -283,8 +296,8 @@ export function subtreeJoinUnitsForLeaderMaintenanceInWindow(params: {
   let sum = 0;
   for (const c of params.joinContractsAttributed) {
     if (!subtree.has(c.sales_member_id)) continue;
-    const jd = c.join_date.slice(0, 10);
-    if (jd < start || jd > end) continue;
+    const periodYmd = leaderMaintenancePeriodYmd(c);
+    if (!periodYmd || periodYmd < start || periodYmd > end) continue;
     sum += Math.max(0, c.unit_count ?? 0);
   }
   return sum;

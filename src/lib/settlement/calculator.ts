@@ -29,6 +29,7 @@ import {
   commissionPenaltyWonForItemName,
 } from './constants';
 import { getSettlementWindowForYearMonth } from '@/lib/settlement/settlement-window';
+import { getHappycallWindowForYearMonth } from '@/lib/settlement/settlement-eligibility-v2';
 
 function monthEndDate(yearMonth: string): string {
   // 'YYYY-MM' -> 'YYYY-MM-DD' (해당 월 말일)
@@ -668,7 +669,7 @@ export function calculateMemberSettlement(
   let leaderMaintenanceBonus = 0;
   if (leaderOpts && (member.rank === '영업사원' || member.rank === '리더')) {
     const th = leaderOpts.promotionThresholdByMemberId.get(member.id) ?? null;
-    const { start_date, end_date } = getSettlementWindowForYearMonth(yearMonth);
+    const { start_date, end_date } = getHappycallWindowForYearMonth(yearMonth);
     // 유지장려금 집계는 "하위 리더 컷" 규칙을 적용한다.
     // - 자식 노드 중 리더 이상이면 그 노드와 그 후손을 제외 → 해당 리더 본인의 유지장려금 계산에만 잡힘.
     // - 롤업수당 계산(`calcRollupItemsWithLeaderPromotion`)은 별도 함수이고 영향 없음.
