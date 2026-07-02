@@ -360,7 +360,7 @@ export default function NewCodeClient() {
       </div>
 
       <section className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full table-fixed text-xs sm:text-sm">
+        <table className="w-full min-w-[980px] text-xs sm:text-sm">
           <colgroup>
             <col className="w-9" />
             <col className="w-[8.5rem]" />
@@ -432,7 +432,9 @@ export default function NewCodeClient() {
                       <td className="whitespace-nowrap px-2 py-2 align-top">{it.has_own_contract ? '예' : '아니오'}</td>
                       <td className="px-2 py-2 align-top">
                         {it.memo ? (
-                          <span className="block whitespace-pre-wrap break-words text-slate-800">{it.memo}</span>
+                          <span className="block max-w-[18rem] whitespace-pre-wrap break-words text-slate-800 sm:max-w-[32rem] line-clamp-4">
+                            {it.memo}
+                          </span>
                         ) : (
                           <span className="text-slate-300">-</span>
                         )}
