@@ -58,13 +58,21 @@ function DetailCard({ item }: { item: AdminItem }) {
         <div>
           <dt className="text-xs font-medium text-slate-500">-변경 전 담당자명 / 연락처</dt>
           <dd className="mt-0.5 text-slate-900">
-            {item.before_manager_name} / {item.before_manager_phone ?? '-'}
+            <span className="flex flex-col gap-0.5 sm:flex-row sm:gap-1">
+              <span className="font-medium">{item.before_manager_name}</span>
+              <span className="text-slate-400 hidden sm:inline">/</span>
+              <span className="tabular-nums">{item.before_manager_phone ?? '-'}</span>
+            </span>
           </dd>
         </div>
         <div>
           <dt className="text-xs font-medium text-slate-500">-변경 후 담당자명 / 연락처</dt>
           <dd className="mt-0.5 font-medium text-orange-700">
-            {item.after_manager_name} / {item.after_manager_phone}
+            <span className="flex flex-col gap-0.5 sm:flex-row sm:gap-1">
+              <span className="font-semibold">{item.after_manager_name}</span>
+              <span className="text-orange-300 hidden sm:inline">/</span>
+              <span className="tabular-nums">{item.after_manager_phone}</span>
+            </span>
           </dd>
         </div>
       </dl>
@@ -241,7 +249,7 @@ export default function ManagerChangeAdminClient() {
             <p className="p-8 text-center text-sm text-slate-400">신청 내역이 없습니다.</p>
           ) : (
             <div className="max-h-[70vh] overflow-auto">
-              <table className="min-w-full text-sm">
+              <table className="min-w-[520px] text-sm">
                 <thead className="sticky top-0 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                   <tr>
                     <th className="px-3 py-2 w-8" />
@@ -269,7 +277,7 @@ export default function ManagerChangeAdminClient() {
                           />
                         ) : null}
                       </td>
-                      <td className="px-3 py-2 font-medium">{row.customer_name}</td>
+                      <td className="px-3 py-2 font-medium break-words">{row.customer_name}</td>
                       <td className="px-3 py-2">
                         <span
                           className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
