@@ -143,25 +143,30 @@ export default async function ContractsPage({ searchParams }: PageProps) {
     const rows = (contracts ?? []) as Row[];
     const map = new Map<string, AggregatedRow>();
 
-    // 상태 우선순위(같은 고객/가입일에 여러 상태가 섞이면 “가장 진행된” 상태 표시)
-    const statusRank: Record<ContractStatus, number> = {
-      준비: 1,
-      대기: 2,
-      상담중: 3,
-      가입: 4,
-      해피콜완료: 5,
-      배송준비: 6,
-      배송완료: 7,
-      정산완료: 8,
-      취소: 0,
-      해약: 0,
+    const salesMemberKey = (c: Row): string => {
+      if ((c as { sales_link_status?: string }).sales_link_status === 'pending_mapping') {
+        return `pending:${(c as { raw_sales_member_name?: string | null }).raw_sales_member_name ?? ''}`;
+      }
+      const member = (c as { sales_member?: { name?: string } | null }).sales_member;
+      return member?.name ?? '-';
     };
+
+    const displayStatusOf = (c: Row): string =>
+      getContractDisplayStatus({
+        status: (c as { status: ContractStatus }).status,
+        rental_request_no: ((c as { rental_request_no?: string | null }).rental_request_no ?? null) as
+          | string
+          | null,
+        invoice_no: ((c as { invoice_no?: string | null }).invoice_no ?? null) as string | null,
+        memo: ((c as { memo?: string | null }).memo ?? null) as string | null,
+      });
 
     for (const c of rows) {
       const customer = (c as { customers?: { name?: string } | null }).customers;
       const customerName = customer?.name ?? '-';
       const joinDate = (c as { join_date?: string }).join_date ?? '';
-      const key = `${customerName}__${joinDate}`;
+      const displayStatus = displayStatusOf(c);
+      const key = `${customerName}__${joinDate}__${salesMemberKey(c)}__${displayStatus}`;
 
       const existing = map.get(key);
       if (!existing) {
@@ -181,14 +186,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
           memo: ((c as { memo?: string | null }).memo ?? null) as string | null,
           unit_count: ((c as { unit_count?: number }).unit_count ?? 0) as number,
           join_method: (c as { join_method: string }).join_method,
-          status: getContractDisplayStatus({
-            status: (c as { status: ContractStatus }).status,
-            rental_request_no: ((c as { rental_request_no?: string | null }).rental_request_no ?? null) as
-              | string
-              | null,
-            invoice_no: ((c as { invoice_no?: string | null }).invoice_no ?? null) as string | null,
-            memo: ((c as { memo?: string | null }).memo ?? null) as string | null,
-          }) as ContractStatus,
+          status: displayStatus as ContractStatus,
           is_cancelled: (c as { is_cancelled: boolean }).is_cancelled,
           sales_link_status: (c as { sales_link_status?: string }).sales_link_status,
           raw_sales_member_name: (c as { raw_sales_member_name?: string | null }).raw_sales_member_name,
@@ -214,18 +212,6 @@ export default async function ContractsPage({ searchParams }: PageProps) {
       }
       if (!existing.memo) {
         existing.memo = ((c as { memo?: string | null }).memo ?? null) as string | null;
-      }
-
-      const s = getContractDisplayStatus({
-        status: (c as { status: ContractStatus }).status,
-        rental_request_no: ((c as { rental_request_no?: string | null }).rental_request_no ?? null) as
-          | string
-          | null,
-        invoice_no: ((c as { invoice_no?: string | null }).invoice_no ?? null) as string | null,
-        memo: ((c as { memo?: string | null }).memo ?? null) as string | null,
-      }) as ContractStatus;
-      if ((statusRank[s] ?? 0) > (statusRank[existing.status] ?? 0)) {
-        existing.status = s;
       }
     }
 
