@@ -1,6 +1,7 @@
 /**
  * 본사 매출 단가 정책 자가 검증 (npm run verify:hq-revenue)
  * hq-revenue.ts 예시·경계일과 동일한 케이스를 검증한다.
+ * TY갤럭시케어 6/26 분기는 해피콜 완료일(happy_call_at) 기준.
  */
 
 const TY_INCREASE = '2026-06-26';
@@ -12,9 +13,9 @@ const PRICES = {
   lite: 500_000,
 };
 
-function unitPrice(productType, joinDate) {
+function unitPrice(productType, happyCallAt) {
   const text = (productType ?? '').trim();
-  const ymd = joinDate ? String(joinDate).slice(0, 10) : null;
+  const ymd = happyCallAt ? String(happyCallAt).slice(0, 10) : null;
 
   if (text.includes('갤럭시케어 라이트')) return PRICES.lite;
   if (text.includes('TY갤럭시케어')) {
@@ -25,8 +26,8 @@ function unitPrice(productType, joinDate) {
   return ymd && ymd >= TY_INCREASE ? PRICES.tyFrom : PRICES.tyBefore;
 }
 
-function revenue(productType, joinDate, units) {
-  return Math.max(0, Number(units ?? 0)) * unitPrice(productType, joinDate);
+function revenue(productType, happyCallAt, units) {
+  return Math.max(0, Number(units ?? 0)) * unitPrice(productType, happyCallAt);
 }
 
 const failures = [];

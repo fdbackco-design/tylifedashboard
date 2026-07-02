@@ -51,7 +51,7 @@ export function resolveHqProductKind(productTypeText: string | null | undefined)
 
 /**
  * 본사 매출 단가(원/구좌).
- * TY갤럭시케어 날짜 분기는 호출 측에서 넘긴 기준일(가입일 또는 해피콜 완료일)로 판단한다.
+ * TY갤럭시케어 6/26 단가 분기는 해피콜 완료일(happy_call_at) 기준.
  */
 export function getHqRevenueUnitPrice(
   productTypeText: string | null | undefined,
@@ -135,7 +135,7 @@ export function calcContractHqRevenue(
   const units = Math.max(0, Number(contract.unit_count ?? 0));
   if (units === 0) return 0;
 
-  const unitPriceDateField = options?.unitPriceDateField ?? 'join_date';
+  const unitPriceDateField = options?.unitPriceDateField ?? 'happy_call_at';
   const priceDateYmd = resolveHqUnitPriceDateYmd(contract as HqRevenueContractInput, unitPriceDateField);
   const unitPrice = getHqRevenueUnitPrice(contract.product_type, priceDateYmd);
   return units * unitPrice;
@@ -150,13 +150,13 @@ export function sumHqRevenueForContracts(
     eligibility?: HqRevenueEligibilityMode;
     /** 이번달(기간) 매출 집계에 쓸 날짜 필드. 정산현황·조직도는 happy_call_at. */
     periodDateField?: HqRevenuePeriodDateField;
-    /** 상품별 본사 매출 단가 분기에 쓸 날짜 필드. 조직도는 happy_call_at, 정산현황 기본은 join_date. */
+    /** 상품별 본사 매출 단가 분기에 쓸 날짜 필드. TY갤럭시케어 6/26 분기는 해피콜 완료일 기준. */
     unitPriceDateField?: HqRevenuePeriodDateField;
   },
 ): { totalHqRevenue: number; periodHqRevenue: number } {
   const eligibility = options.eligibility ?? 'kpi';
   const periodDateField = options.periodDateField ?? 'join_date';
-  const unitPriceDateField = options.unitPriceDateField ?? 'join_date';
+  const unitPriceDateField = options.unitPriceDateField ?? 'happy_call_at';
   let totalHqRevenue = 0;
   let periodHqRevenue = 0;
 
@@ -189,12 +189,14 @@ export function runHqRevenueSelfCheck(): { ok: boolean; failures: string[] } {
   assertEq('TY 2026-06-25', calcContractHqRevenue({
     product_type: 'TY갤럭시케어',
     join_date: '2026-06-25',
+    happy_call_at: '2026-06-25',
     unit_count: 2,
   }), 1_430_000);
 
   assertEq('TY 2026-06-26', calcContractHqRevenue({
     product_type: 'TY갤럭시케어',
-    join_date: '2026-06-26',
+    join_date: '2026-06-20',
+    happy_call_at: '2026-06-26',
     unit_count: 1,
   }), 770_000);
 
@@ -218,6 +220,7 @@ export function runHqRevenueSelfCheck(): { ok: boolean; failures: string[] } {
         rental_request_no: null,
         invoice_no: null,
         join_date: '2026-06-25',
+        happy_call_at: '2026-06-25',
         unit_count: 2,
         product_type: 'TY갤럭시케어',
       },
@@ -228,7 +231,8 @@ export function runHqRevenueSelfCheck(): { ok: boolean; failures: string[] } {
         sales_link_status: 'linked',
         rental_request_no: null,
         invoice_no: null,
-        join_date: '2026-06-26',
+        join_date: '2026-06-20',
+        happy_call_at: '2026-06-26',
         unit_count: 1,
         product_type: 'TY갤럭시케어',
       },
@@ -240,6 +244,7 @@ export function runHqRevenueSelfCheck(): { ok: boolean; failures: string[] } {
         rental_request_no: null,
         invoice_no: null,
         join_date: '2026-06-26',
+        happy_call_at: '2026-06-26',
         unit_count: 3,
         product_type: '올라이프케어',
       },

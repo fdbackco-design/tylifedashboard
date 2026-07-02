@@ -623,6 +623,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       periodEnd: end_date,
       eligibility: 'settlement_v2_static',
       periodDateField: 'happy_call_at',
+      unitPriceDateField: 'happy_call_at',
     },
   );
   const profit = periodSales - totalAmount;
