@@ -496,6 +496,7 @@ export default async function OrganizationPage({
       id: c.id,
       contract_code: c.contract_code,
       join_date: c.join_date,
+      happy_call_at: c.happy_call_at ?? null,
       product_type: getContractDisplayProductName({
         product_type: c.product_type,
         item_name: c.item_name,

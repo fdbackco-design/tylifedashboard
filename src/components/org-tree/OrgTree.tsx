@@ -11,6 +11,7 @@ import {
   getContractDisplayStatus,
   isContractJoinCompleted as isJoinCompleted,
 } from '@/lib/utils/contract-display-status';
+import { happycallYmdSeoul } from '@/lib/settlement/settlement-eligibility-v2';
 import {
   flattenOrgTreeNodes,
   collectStrippedNodeIdsForDisplay,
@@ -52,6 +53,7 @@ type AggregatedContract = {
   sales_member_name: string;
   customer_name: string;
   join_date: string | null;
+  hc_ymd: string;
   product_type: string | null;
   item_name: string | null;
   status: string;
@@ -79,6 +81,7 @@ function aggregateContracts(contracts: ContractItem[]): AggregatedContract[] {
 
   for (const c of contracts) {
     const join = c.join_date?.slice(0, 10) ?? '';
+    const hcYmd = happycallYmdSeoul(c.happy_call_at);
     const displayStatus = getDisplayStatus(c);
     // 고객명+가입일이 같더라도 상태가 다르면 다른 행으로 표시
     const key = `${c.customer_name}__${join}__${displayStatus}`;
@@ -90,6 +93,7 @@ function aggregateContracts(contracts: ContractItem[]): AggregatedContract[] {
         sales_member_name: c.sales_member_name?.trim() || '-',
         customer_name: c.customer_name,
         join_date: c.join_date,
+        hc_ymd: hcYmd,
         product_type: c.product_type ?? null,
         item_name: c.item_name ?? null,
         status: displayStatus,
@@ -105,6 +109,7 @@ function aggregateContracts(contracts: ContractItem[]): AggregatedContract[] {
       existing.sales_member_name = c.sales_member_name.trim();
     }
     if (!existing.item_name && c.item_name) existing.item_name = c.item_name;
+    if (!existing.hc_ymd && hcYmd) existing.hc_ymd = hcYmd;
     if (isRentalUnmet(c)) existing.show_rental_unmet = true;
     existing.contract_codes.push(c.contract_code);
   }
@@ -188,6 +193,7 @@ export function OrgTreeContractDetailPanel({
                 <th className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">상태</th>
                 <th className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">구좌</th>
                 <th className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">가입일</th>
+                <th className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">해피콜 완료일</th>
                 {!hideProductAndContractCodeColumns ? (
                   <th className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">계약코드</th>
                 ) : null}
@@ -224,6 +230,9 @@ export function OrgTreeContractDetailPanel({
                     </td>
                     <td className="px-3 py-2 text-gray-500 whitespace-nowrap tabular-nums">
                       {c.join_date?.slice(0, 10) ?? '-'}
+                    </td>
+                    <td className="px-3 py-2 text-gray-600 whitespace-nowrap tabular-nums">
+                      {c.hc_ymd || '-'}
                     </td>
                     {!hideProductAndContractCodeColumns ? (
                       <td

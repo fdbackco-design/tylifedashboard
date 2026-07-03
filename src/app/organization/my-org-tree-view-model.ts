@@ -515,6 +515,7 @@ export async function buildMyOrganizationTreeViewModel(
         id: (c as any).id as string,
         contract_code: (c as any).contract_code as string,
         join_date: (c as any).join_date ? String((c as any).join_date).slice(0, 10) : null,
+        happy_call_at: ((c as any).happy_call_at ?? null) as string | null,
         product_type: getContractDisplayProductName({
           product_type: (c as any).product_type ?? null,
           item_name: (c as any).item_name ?? null,

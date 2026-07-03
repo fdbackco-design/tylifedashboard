@@ -9,6 +9,7 @@ export interface ContractItem {
   id: string;
   contract_code: string;
   join_date: string | null;
+  happy_call_at?: string | null;
   product_type: string | null;
   item_name?: string | null;
   rental_request_no?: string | null;
