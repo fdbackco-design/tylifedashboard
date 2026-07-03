@@ -5,10 +5,13 @@ import { getSettlementWindowDisplayForYearMonth } from '@/lib/settlement/settlem
 import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
 import { isOrgDisplayHiddenMemberName } from '@/lib/organization/org-display-hidden';
 import {
-  isV2EligibleStatic,
+  evaluateContractEligibility,
   getHappycallWindowForYearMonth,
   happycallYmdSeoul,
 } from '@/lib/settlement/settlement-eligibility-v2';
+
+const MEMBER_PAGE_CONTRACT_SELECT =
+  'id, contract_code, join_date, status, unit_count, item_name, product_type, source_snapshot_json, sales_member_id, settlement_sales_member_id, customer_id, sales_link_status, is_cancelled, rental_request_no, invoice_no, invoice_registered_at, settlement_deferred, deferred_to_month, memo, happy_call_at, happycall_result, customers(name)';
 import type { RankType, SettlementCalculationDetail, RollupContractItem, RollupItem } from '@/lib/types';
 
 export const metadata: Metadata = { title: '정산 현황 · 산하 내역' };
@@ -80,7 +83,8 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
   const hcFromIso = kstYmdToUtcIso(hcWindow.start_date); // KST 자정 (inclusive)
   const hcToIso = kstYmdToUtcIso(nextDay(hcWindow.end_date)); // KST 다음날 자정 (exclusive)
 
-  const [memberRes, membersRes, edgesRes, contractRowsRes, settlementRes] = await Promise.all([
+  const [memberRes, membersRes, edgesRes, contractRowsRes, deferredRowsRes, settlementRes] =
+    await Promise.all([
     db
       .from('organization_members')
       .select('id, name, rank, external_id, phone, source_customer_id')
@@ -93,12 +97,16 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     db.from('organization_edges').select('parent_id, child_id'),
     db
       .from('contracts')
-      .select(
-        'id, contract_code, join_date, status, unit_count, item_name, product_type, source_snapshot_json, sales_member_id, settlement_sales_member_id, customer_id, sales_link_status, is_cancelled, rental_request_no, invoice_no, memo, happy_call_at, happycall_result, customers(name)',
-      )
+      .select(MEMBER_PAGE_CONTRACT_SELECT)
       .not('happy_call_at', 'is', null)
       .gte('happy_call_at', hcFromIso)
       .lt('happy_call_at', hcToIso),
+    // 수동 이월(deferred_to_month) 계약은 해피콜 일자가 다른 정산월 윈도우에 있을 수 있다.
+    db
+      .from('contracts')
+      .select(MEMBER_PAGE_CONTRACT_SELECT)
+      .eq('settlement_deferred', true)
+      .eq('deferred_to_month', yearMonth),
     db
       .from('monthly_settlements')
       .select('rollup_commission, calculation_detail')
@@ -194,6 +202,34 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     }
   }
 
+  const settlement = settlementRes.data as
+    | { rollup_commission: number | null; calculation_detail: SettlementCalculationDetail | null }
+    | null;
+  const calcDetailEarly = (settlement?.calculation_detail ?? null) as SettlementCalculationDetail | null;
+  const directContractIdsFromSettlement = Array.isArray(calcDetailEarly?.direct_contracts)
+    ? (calcDetailEarly!.direct_contracts as Array<{ contract_id: string }>).map((x) => x.contract_id)
+    : [];
+
+  const contractRowMap = new Map<string, any>();
+  for (const c of [
+    ...((contractRowsRes.data ?? []) as any[]),
+    ...((deferredRowsRes.data ?? []) as any[]),
+  ]) {
+    contractRowMap.set(c.id as string, c);
+  }
+  const missingSettlementDirectIds = directContractIdsFromSettlement.filter(
+    (id) => !contractRowMap.has(id),
+  );
+  if (missingSettlementDirectIds.length > 0) {
+    const { data: extraRows } = await db
+      .from('contracts')
+      .select(MEMBER_PAGE_CONTRACT_SELECT)
+      .in('id', missingSettlementDirectIds);
+    for (const c of (extraRows ?? []) as any[]) {
+      contractRowMap.set(c.id as string, c);
+    }
+  }
+
   const attributedSalesMemberId = (r: { customer_id: string | null; sales_member_id: string }): string => {
     const customer_id = r.customer_id ?? null;
     let sales_member_id = r.sales_member_id;
@@ -204,29 +240,33 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     return sales_member_id;
   };
 
-  const rows = ((contractRowsRes.data ?? []) as any[])
-    // 1) 해피콜 완료 일자(서울시각 YMD)가 본 정산월의 해피콜 윈도우 [start..end] 안인지 정확 검증.
-    //    DB 쿼리는 KST 자정 ISO 로 보수적으로 가져왔고, 여기서 한 번 더 확정한다.
-    .filter((c) => {
-      const hcYmd = happycallYmdSeoul(c.happy_call_at);
-      if (!hcYmd) return false;
-      return hcYmd >= hcWindow.start_date && hcYmd <= hcWindow.end_date;
-    })
-    // 2) v_contract_settlement_base 와 동일한 "v2 정적 가입 인정 기준" 으로 필터
-    //    (취소/해약/계약취소 제외, sales_link_status='linked', happycall_result valid, invoice_no 존재)
-    .filter((c) =>
-      isV2EligibleStatic({
-        status: String(c.status ?? ''),
-        is_cancelled: Boolean(c.is_cancelled ?? false),
-        sales_member_id: (c.sales_member_id ?? null) as string | null,
-        sales_link_status: (c.sales_link_status ?? null) as string | null,
-        happy_call_at: c.happy_call_at ?? null,
-        happycall_result: (c.happycall_result ?? null) as string | null,
-        product_type: (c.product_type ?? null) as string | null,
-        item_name: (c.item_name ?? null) as string | null,
-        source_snapshot_json: (c.source_snapshot_json ?? null) as Record<string, string | null> | null,
-        invoice_no: (c.invoice_no ?? null) as string | null,
-      }),
+  const rows = [...contractRowMap.values()]
+    // 월정산 엔진과 동일: evaluateContractEligibility(yearMonth) === ELIGIBLE
+    // (수동 이월 deferred_to_month 포함, 해피콜 윈도우 밖 계약도 해당 월이면 표시)
+    .filter(
+      (c) =>
+        evaluateContractEligibility(
+          {
+            id: String(c.id ?? ''),
+            status: String(c.status ?? ''),
+            is_cancelled: Boolean(c.is_cancelled ?? false),
+            sales_member_id: (c.sales_member_id ?? null) as string | null,
+            sales_link_status: (c.sales_link_status ?? null) as string | null,
+            happy_call_at: c.happy_call_at ?? null,
+            happycall_result: (c.happycall_result ?? null) as string | null,
+            product_type: (c.product_type ?? null) as string | null,
+            item_name: (c.item_name ?? null) as string | null,
+            source_snapshot_json: (c.source_snapshot_json ?? null) as Record<
+              string,
+              string | null
+            > | null,
+            invoice_no: (c.invoice_no ?? null) as string | null,
+            invoice_registered_at: c.invoice_registered_at ?? null,
+            settlement_deferred: (c.settlement_deferred ?? false) as boolean | null,
+            deferred_to_month: (c.deferred_to_month ?? null) as string | null,
+          },
+          yearMonth,
+        ).result === 'ELIGIBLE',
     )
     .map((c) => {
       const origin = attributedSalesMemberId({
@@ -327,11 +367,8 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
   // ── 롤업수당 상세(계약 단위 근거) 준비 ─────────────────────────────────────
   // 1) calculation_detail.rollup_contract_items 가 있으면 우선 사용.
   // 2) 없으면 legacy 표시(멤버 단위 rollup_items 요약).
-  const settlement = settlementRes.data as
-    | { rollup_commission: number | null; calculation_detail: SettlementCalculationDetail | null }
-    | null;
   const rollupCommission = Number(settlement?.rollup_commission ?? 0);
-  const calcDetail = (settlement?.calculation_detail ?? null) as SettlementCalculationDetail | null;
+  const calcDetail = calcDetailEarly;
   const rollupContractItemsRaw: RollupContractItem[] =
     Array.isArray(calcDetail?.rollup_contract_items) ? calcDetail!.rollup_contract_items! : [];
   const rollupItems: RollupItem[] = Array.isArray(calcDetail?.rollup_items)
@@ -494,7 +531,8 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
             {displayName} · {yearMonth}
           </h2>
           <p className="text-xs sm:text-sm text-gray-500 mt-1 break-keep leading-relaxed">
-            해피콜 완료 일자 기준 {hcWindow.start_date}~{hcWindow.end_date} 정산월의 계약을 표시합니다.
+            {yearMonth} 정산 대상 계약(해피콜 윈도우 {hcWindow.start_date}~{hcWindow.end_date} + 수동 이월 포함)을
+            표시합니다.
             <span className="text-gray-400"> (가입 정산 윈도우 {start_date}~{end_date})</span>
           </p>
           <p className="text-xs text-gray-400 mt-1">
