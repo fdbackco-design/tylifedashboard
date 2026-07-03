@@ -345,6 +345,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
   type RollupContractMeta = {
     customer_name: string;
     join_ymd: string;
+    hc_ymd: string;
     item_name: string | null;
     display_status: string;
   };
@@ -353,13 +354,14 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     const { data: metaRows } = await db
       .from('contracts')
       .select(
-        'id, status, join_date, item_name, rental_request_no, invoice_no, memo, customers(name)',
+        'id, status, join_date, happy_call_at, item_name, rental_request_no, invoice_no, memo, customers(name)',
       )
       .in('id', rollupContractIds);
     for (const c of (metaRows ?? []) as any[]) {
       rollupContractMetaById.set(c.id as string, {
         customer_name: ((c.customers as any)?.name as string | undefined) ?? '-',
         join_ymd: String(c.join_date ?? '').slice(0, 10),
+        hc_ymd: happycallYmdSeoul(c.happy_call_at),
         item_name: (c.item_name as string | null | undefined) ?? null,
         display_status: getContractDisplayStatus({
           status: String(c.status ?? ''),
@@ -409,6 +411,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     contract_codes: string[];
     customer_name: string;
     join_ymd: string;
+    hc_ymd: string;
     item_name: string | null;
     display_status: string;
     from_member_id: string;
@@ -426,10 +429,12 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     const meta = rollupContractMetaById.get(r.contract_id);
     const customer_name = meta?.customer_name ?? '-';
     const join_ymd = meta?.join_ymd ?? '';
+    const hc_ymd = meta?.hc_ymd ?? '';
     const item_name = meta?.item_name ?? null;
     const display_status = meta?.display_status ?? '-';
     const key = [
       customer_name,
+      hc_ymd,
       join_ymd,
       item_name ?? '',
       display_status,
@@ -450,6 +455,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         contract_codes: [r.contract_code],
         customer_name,
         join_ymd,
+        hc_ymd,
         item_name,
         display_status,
         from_member_id: r.from_member_id,
@@ -531,6 +537,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                     {[
                       '계약코드',
                       '고객명',
+                      '해피콜 완료일',
                       '가입일',
                       '상품명',
                       '계약 상태',
@@ -559,6 +566,9 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                           {r.contract_codes.join(', ')}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">{r.customer_name}</td>
+                        <td className="px-3 py-2 tabular-nums text-gray-700 whitespace-nowrap font-medium">
+                          {r.hc_ymd || '-'}
+                        </td>
                         <td className="px-3 py-2 tabular-nums text-gray-600 whitespace-nowrap">
                           {r.join_ymd || '-'}
                         </td>
@@ -590,7 +600,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                 </tbody>
                 <tfoot className="bg-gray-50 border-t border-gray-200">
                   <tr>
-                    <td colSpan={8} className="px-3 py-2 text-right text-xs text-gray-500">
+                    <td colSpan={9} className="px-3 py-2 text-right text-xs text-gray-500">
                       합계
                     </td>
                     <td className="px-3 py-2 tabular-nums text-right">
