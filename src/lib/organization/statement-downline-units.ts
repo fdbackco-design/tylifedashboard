@@ -9,6 +9,7 @@ import type { OrgTreeRow } from '@/lib/types';
 import { buildOrgContractSalesRemap } from '@/lib/organization/org-contract-sales-remap';
 import {
   isContractStrictlyAfterPromotionThreshold,
+  contractJoinOrderYmd,
   type SalesMemberPromotionThreshold,
 } from '@/lib/settlement/leader-promotion';
 
@@ -38,7 +39,10 @@ export type StatementDownlineSharedData = {
   rankById: Map<string, string>;
   nameById: Map<string, string>;
   promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold>;
-  leaderPromotionThresholdContractCreatedAtById: Map<string, string | null>;
+  leaderPromotionThresholdContractMetaById: Map<
+    string,
+    { join_date: string; happy_call_at?: string | null; created_at?: string | null }
+  >;
 };
 
 export async function loadStatementDownlineSharedData(db: SupabaseClient): Promise<StatementDownlineSharedData> {
@@ -105,14 +109,41 @@ export async function loadStatementDownlineSharedData(db: SupabaseClient): Promi
     thresholdContractIds.push(cid);
   }
 
-  const leaderPromotionThresholdContractCreatedAtById = new Map<string, string | null>();
+  const leaderPromotionThresholdContractMetaById = new Map<
+    string,
+    { join_date: string; happy_call_at?: string | null; created_at?: string | null }
+  >();
   const uniqThIds = [...new Set(thresholdContractIds)];
   for (const thChunk of chunk(uniqThIds, 200)) {
     if (thChunk.length === 0) continue;
-    const { data: thRows } = await db.from('contracts').select('id, created_at').in('id', thChunk);
-    for (const row of (thRows ?? []) as Array<{ id: string; created_at?: string | null }>) {
+    const { data: thRows } = await db
+      .from('contracts')
+      .select('id, created_at, join_date, happy_call_at')
+      .in('id', thChunk);
+    for (const row of (thRows ?? []) as Array<{
+      id: string;
+      created_at?: string | null;
+      join_date?: string | null;
+      happy_call_at?: string | null;
+    }>) {
       if (!row?.id) continue;
-      leaderPromotionThresholdContractCreatedAtById.set(String(row.id), (row.created_at ?? null) as string | null);
+      const id = String(row.id);
+      const meta = {
+        join_date: String(row.join_date ?? '').slice(0, 10),
+        happy_call_at: (row.happy_call_at ?? null) as string | null,
+        created_at: (row.created_at ?? null) as string | null,
+      };
+      leaderPromotionThresholdContractMetaById.set(id, meta);
+      const orderYmd = contractJoinOrderYmd(meta);
+      for (const [mid, th] of promotionThresholdByMemberId) {
+        if (th.threshold_contract_id === id) {
+          promotionThresholdByMemberId.set(mid, {
+            ...th,
+            threshold_join_date: orderYmd,
+            threshold_created_at: meta.created_at ?? null,
+          });
+        }
+      }
     }
   }
 
@@ -126,7 +157,7 @@ export async function loadStatementDownlineSharedData(db: SupabaseClient): Promi
     rankById,
     nameById,
     promotionThresholdByMemberId,
-    leaderPromotionThresholdContractCreatedAtById,
+    leaderPromotionThresholdContractMetaById,
   };
 }
 
@@ -326,7 +357,7 @@ export async function computeStatementDownlineUnitsWithSharedContext(
     rankById,
     nameById,
     promotionThresholdByMemberId,
-    leaderPromotionThresholdContractCreatedAtById,
+    leaderPromotionThresholdContractMetaById,
   } = shared;
 
   const subtreeIds = collectSubtreeMemberIdsDownstream(rootMemberId, childrenByParent);
@@ -342,13 +373,7 @@ export async function computeStatementDownlineUnitsWithSharedContext(
   );
 
   const rootPromotionThresholdBase = promotionThresholdByMemberId.get(rootMemberId) ?? null;
-  const rootPromotionThreshold: SalesMemberPromotionThreshold | null = rootPromotionThresholdBase
-    ? {
-        ...rootPromotionThresholdBase,
-        threshold_created_at:
-          leaderPromotionThresholdContractCreatedAtById.get(rootPromotionThresholdBase.threshold_contract_id) ?? null,
-      }
-    : null;
+  const rootPromotionThreshold: SalesMemberPromotionThreshold | null = rootPromotionThresholdBase ?? null;
 
   const nearestLeaderBelowRoot = (originMemberId: string): string | null => {
     if (originMemberId === rootMemberId) return null;
@@ -505,10 +530,13 @@ export async function computeStatementDownlineUnitsWithSharedContext(
           }
         } else if (rootPromotionThreshold) {
           const after = isContractStrictlyAfterPromotionThreshold(
-            jd,
-            String(c.id),
+            {
+              id: String(c.id),
+              join_date: jd,
+              happy_call_at: (c.happy_call_at as string | null | undefined) ?? null,
+              created_at: createdAt,
+            },
             rootPromotionThreshold,
-            createdAt,
           );
           if (!after) excludedByRootLeaderEffectiveAt = true;
         }
@@ -541,19 +569,21 @@ export async function computeStatementDownlineUnitsWithSharedContext(
       nearestLeaderId = nearestLeaderBelowRoot(origin);
       if (nearestLeaderId) {
         const thBase = promotionThresholdByMemberId.get(nearestLeaderId) ?? null;
-        const th: SalesMemberPromotionThreshold | null = thBase
-          ? {
-              ...thBase,
-              threshold_created_at:
-                leaderPromotionThresholdContractCreatedAtById.get(thBase.threshold_contract_id) ?? null,
-            }
-          : null;
+        const th: SalesMemberPromotionThreshold | null = thBase ?? null;
         if (!th) {
           continue;
         }
         const jd = String((c.join_date as string | null | undefined) ?? '').slice(0, 10);
         const createdAt = (c.created_at as string | null | undefined) ?? null;
-        const after = isContractStrictlyAfterPromotionThreshold(jd, String(c.id), th, createdAt);
+        const after = isContractStrictlyAfterPromotionThreshold(
+          {
+            id: String(c.id),
+            join_date: jd,
+            happy_call_at: (c.happy_call_at as string | null | undefined) ?? null,
+            created_at: createdAt,
+          },
+          th,
+        );
         if (after) {
           excludedByPromotionAfter = true;
           if (opts?.debug) {

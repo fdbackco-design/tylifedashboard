@@ -236,12 +236,27 @@ export async function buildMyOrganizationTreeViewModel(
           .map((r: any) => String(r.threshold_contract_id)),
       ),
     ];
-    const leaderPromotionThresholdContractCreatedAtById = new Map<string, string | null>();
+    const leaderPromotionThresholdContractMetaById = new Map<
+      string,
+      { join_date: string; happy_call_at?: string | null; created_at?: string | null }
+    >();
     if (thPromoContractIds.length > 0) {
-      const { data: thRows } = await adminDb.from('contracts').select('id, created_at').in('id', thPromoContractIds);
-      for (const row of (thRows ?? []) as { id: string; created_at?: string | null }[]) {
+      const { data: thRows } = await adminDb
+        .from('contracts')
+        .select('id, created_at, join_date, happy_call_at')
+        .in('id', thPromoContractIds);
+      for (const row of (thRows ?? []) as {
+        id: string;
+        created_at?: string | null;
+        join_date?: string | null;
+        happy_call_at?: string | null;
+      }[]) {
         if (row?.id) {
-          leaderPromotionThresholdContractCreatedAtById.set(String(row.id), (row.created_at ?? null) as string | null);
+          leaderPromotionThresholdContractMetaById.set(String(row.id), {
+            join_date: String(row.join_date ?? '').slice(0, 10),
+            happy_call_at: (row.happy_call_at ?? null) as string | null,
+            created_at: (row.created_at ?? null) as string | null,
+          });
         }
       }
     }
@@ -567,7 +582,7 @@ export async function buildMyOrganizationTreeViewModel(
       previousLeaderByPromotedMemberId,
       policyPromotedMemberIdSet,
       leaderPromotionEventsForThreshold: (promoRows ?? []) as any[],
-      leaderPromotionThresholdContractCreatedAtById,
+      leaderPromotionThresholdContractMetaById,
       attributeCommissionToTopLineUnderHq: false,
       // 누적 구좌는 전체 기간 기준이어야 하므로 all-time 계약으로 계산한다.
       contracts: eligibleContractsAllTimeForMetrics as any[],

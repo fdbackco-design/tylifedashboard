@@ -189,6 +189,8 @@ export async function calculateMonthlySettlement(params: {
     status: String(r.status ?? ''),
     is_cancelled: Boolean(r.is_cancelled ?? false),
     sales_member_id: (r.sales_member_id ?? null) as string | null,
+    happy_call_at: (r.happy_call_at ?? null) as string | null,
+    created_at: (r.created_at ?? null) as string | null,
   }));
 
   const itemNameByContractId = new Map<string, string | null>();
@@ -260,7 +262,7 @@ export async function calculateMonthlySettlement(params: {
   // 리더 승격(20구좌) / 오버라이드 가입 순서 계산용 가입 인정 계약 집합.
   // - 정산 v2: status='가입' 이 아니어도 해피콜 결과(성공/완료/계약변경)면 가입 인정.
   // - 송장 미충족(=이월) 건도 가입 인정에는 포함 — 수당만 다음 월로 미뤄지는 것이지 가입 자체는 인정.
-  // - 정렬 키는 leader-promotion.ts 의 compareAttributedJoinRows 에서 happy_call_at 우선 적용.
+  // - 정렬·승격 전/후 판정 키: 해피콜 완료일(서울 YMD) 우선, 없으면 join_date.
   const joinAttributed: AttributedJoinContractRow[] = [];
   for (const row of (allContractRows ?? []) as any[]) {
     if (row.is_cancelled) continue;
@@ -325,22 +327,29 @@ export async function calculateMonthlySettlement(params: {
   const thresholdContractIds = [
     ...new Set(eventRowsWithThreshold.map((r) => String(r.threshold_contract_id))),
   ];
-  const thresholdCreatedAtByContractId = new Map<string, string | null>();
+  const thresholdContractMetaById = new Map<
+    string,
+    { join_date: string; happy_call_at?: string | null; created_at?: string | null }
+  >();
   if (thresholdContractIds.length > 0) {
     const { data: thContractRows, error: thCErr } = await db
       .from('contracts')
-      .select('id, created_at')
+      .select('id, created_at, join_date, happy_call_at')
       .in('id', thresholdContractIds);
     if (thCErr) throw new Error(`승격 계약(created_at) 조회 실패: ${thCErr.message}`);
     for (const row of (thContractRows ?? []) as any[]) {
       if (!row?.id) continue;
-      thresholdCreatedAtByContractId.set(String(row.id), (row.created_at ?? null) as string | null);
+      thresholdContractMetaById.set(String(row.id), {
+        join_date: String(row.join_date ?? '').slice(0, 10),
+        happy_call_at: (row.happy_call_at ?? null) as string | null,
+        created_at: (row.created_at ?? null) as string | null,
+      });
     }
   }
   mergeLeaderPromotionEventThresholds(
     promotionThresholdByMemberId,
     (promoEvents ?? []) as any[],
-    thresholdCreatedAtByContractId,
+    thresholdContractMetaById,
   );
 
   const leaderRankEffectiveAtByMemberId = new Map<string, string | null>();
@@ -410,7 +419,15 @@ export async function calculateMonthlySettlement(params: {
     if (
       dbRankOrigin === '영업사원' &&
       th &&
-      !isContractStrictlyAfterPromotionThreshold(c.join_date, c.id, th, cCreated)
+      !isContractStrictlyAfterPromotionThreshold(
+        {
+          id: c.id,
+          join_date: c.join_date,
+          happy_call_at: (c as { happy_call_at?: string | null }).happy_call_at ?? null,
+          created_at: cCreated,
+        },
+        th,
+      )
     ) {
       const recordedPrev = prevParentByMemberId.get(origin) ?? null;
       const parentId = recordedPrev ?? (parentByChild.get(origin) ?? null);

@@ -10,7 +10,9 @@ import {
   computeSalesMemberPromotionThreshold,
   mergeLeaderPromotionEventThresholds,
   isContractStrictlyAfterPromotionThreshold,
+  contractJoinOrderYmd,
   type AttributedJoinContractRow,
+  type PromotionOrderContractRef,
   type SalesMemberPromotionThreshold,
 } from '@/lib/settlement/leader-promotion';
 import {
@@ -34,7 +36,23 @@ type EligibleContract = {
   sales_member_id: string | null;
   item_name?: string | null;
   created_at?: string | null;
+  happy_call_at?: string | null;
 };
+
+function promotionOrderRef(c: {
+  contract_id?: string;
+  id?: string;
+  join_date: string;
+  created_at?: string | null;
+  happy_call_at?: string | null;
+}): PromotionOrderContractRef {
+  return {
+    id: String(c.contract_id ?? c.id ?? ''),
+    join_date: c.join_date.slice(0, 10),
+    happy_call_at: c.happy_call_at ?? null,
+    created_at: c.created_at ?? null,
+  };
+}
 
 const LEADER_OR_ABOVE: readonly RankType[] = ['리더', '센터장', '사업본부장'];
 const LEADER_MAINTENANCE_BONUS_WON = 1_000_000;
@@ -84,7 +102,7 @@ function buildTreeRowsForPromotionThreshold(params: {
 function effectiveRankForContract(params: {
   memberId: string;
   dbRank: RankType;
-  contract: { id: string; join_date: string; created_at?: string | null };
+  contract: PromotionOrderContractRef;
   promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>;
   leaderRankEffectiveAtByMemberId?: Map<string, string | null>;
 }): RankType {
@@ -107,17 +125,12 @@ function effectiveRankForContract(params: {
   }
 
   // threshold가 존재하면, 계약 단위로 승격 전/후를 구분한다.
-  const after = isContractStrictlyAfterPromotionThreshold(
-    params.contract.join_date,
-    params.contract.id,
-    th,
-    params.contract.created_at,
-  );
+  const after = isContractStrictlyAfterPromotionThreshold(params.contract, th);
   if (after) return '리더';
   if (params.dbRank === '리더') {
-    const jd = params.contract.join_date.slice(0, 10);
-    if (jd > th.threshold_join_date) return '리더';
-    if (jd === th.threshold_join_date) {
+    const orderYmd = contractJoinOrderYmd(params.contract);
+    if (orderYmd > th.threshold_join_date) return '리더';
+    if (orderYmd === th.threshold_join_date) {
       const cAt = (params.contract.created_at ?? '').trim();
       const tAt = (th.threshold_created_at ?? '').trim();
       if (cAt && tAt && cAt > tAt) return '리더';
@@ -251,7 +264,10 @@ export function calculateOrgNodeMetrics(params: {
     threshold_join_date?: string | null;
   }>;
   /** 승격 계약 id → `contracts.created_at` (동일 가입일 단가 분기용) */
-  leaderPromotionThresholdContractCreatedAtById?: ReadonlyMap<string, string | null>;
+  leaderPromotionThresholdContractMetaById?: ReadonlyMap<
+    string,
+    { join_date: string; happy_call_at?: string | null; created_at?: string | null }
+  >;
   /**
    * true면 인정수당/실지급액을 \"본사(HQ) 직속 최상위 라인\"으로 귀속(집계)한다.
    * - 본사(HQ) 노드 자체는 0 유지
@@ -276,7 +292,7 @@ export function calculateOrgNodeMetrics(params: {
     leaderMaintenanceBonusBlockedByMemberId,
     policyPromotedMemberIdSet,
     leaderPromotionEventsForThreshold,
-    leaderPromotionThresholdContractCreatedAtById,
+    leaderPromotionThresholdContractMetaById,
     attributeCommissionToTopLineUnderHq = false,
   } = params;
   const parentByChild = treeRowsParam?.length
@@ -307,6 +323,7 @@ export function calculateOrgNodeMetrics(params: {
       unit_count: c.unit_count ?? 0,
       sales_member_id: c.sales_member_id as string,
       created_at: c.created_at ?? null,
+      happy_call_at: c.happy_call_at ?? null,
     }));
   const promotionThresholdByMemberId = computeSalesMemberPromotionThreshold(
     treeRowsForThreshold,
@@ -317,7 +334,7 @@ export function calculateOrgNodeMetrics(params: {
   mergeLeaderPromotionEventThresholds(
     promotionThresholdByMemberId,
     leaderPromotionEventsForThreshold ?? [],
-    leaderPromotionThresholdContractCreatedAtById ?? new Map(),
+    leaderPromotionThresholdContractMetaById ?? new Map(),
   );
 
   const leaderRankEffectiveAtByMemberId = new Map<string, string | null>();
@@ -393,7 +410,7 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
     }
   })(roots as any[]);
 
-  const getRate = (memberId: string, contract: { id: string; join_date: string; created_at?: string | null }): number => {
+  const getRate = (memberId: string, contract: PromotionOrderContractRef): number => {
     const dbRank = rankById.get(memberId);
     if (!dbRank) return 0;
     const eff = effectiveRankForContract({
@@ -406,11 +423,11 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
     return getCommissionPerUnit(rules, eff, refDate);
   };
 
-  const effectiveParent = (childId: string, contract: { id: string; join_date: string; created_at?: string | null }): string | null => {
+  const effectiveParent = (childId: string, contract: PromotionOrderContractRef): string | null => {
     const prev = previousLeaderByPromotedMemberId?.get(childId) ?? null;
     if (prev) {
       const th = promotionThresholdByMemberId.get(childId) ?? null;
-      if (th && !isContractStrictlyAfterPromotionThreshold(contract.join_date, contract.id, th, contract.created_at)) return prev;
+      if (th && !isContractStrictlyAfterPromotionThreshold(contract, th)) return prev;
       return hqId ?? null;
     }
     return parentByChild.get(childId) ?? null;
@@ -456,7 +473,7 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
     if (
       prev &&
       th &&
-      !isContractStrictlyAfterPromotionThreshold(jd, c.contract_id, th, c.created_at ?? null)
+      !isContractStrictlyAfterPromotionThreshold(promotionOrderRef(c), th)
     ) {
       const originChain = new Set<string>([
         origin,
@@ -480,18 +497,14 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
     const jd = c.join_date.slice(0, 10);
     if (!inWindow(jd, settlementWindow.start_date, settlementWindow.end_date)) continue;
 
-    const contractKey = {
-      id: c.contract_id,
-      join_date: jd,
-      created_at: c.created_at ?? null,
-    };
+    const contractKey = promotionOrderRef(c);
     const originRate = getRate(origin, contractKey);
 
     // 기본수당 귀속: 승격 전(승격 계약 포함)은 이전 리더에게 귀속(단가=영업사원), 승격 후만 본인
     let baseRecipient = origin;
     const prev = previousLeaderByPromotedMemberId?.get(origin) ?? null;
     const th = promotionThresholdByMemberId.get(origin) ?? null;
-    if (prev && th && !isContractStrictlyAfterPromotionThreshold(jd, c.contract_id, th, c.created_at ?? null)) {
+    if (prev && th && !isContractStrictlyAfterPromotionThreshold(contractKey, th)) {
       const prevRank = rankById.get(prev) ?? null;
       if (prevRank === '리더') baseRecipient = prev;
     }

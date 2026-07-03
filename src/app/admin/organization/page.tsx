@@ -550,6 +550,7 @@ export default async function OrganizationPage({
         customer_name: c.customers?.name ?? '',
       })),
       created_at: (c as { created_at?: string | null }).created_at ?? null,
+      happy_call_at: c.happy_call_at ?? null,
     }));
 
   // 수당(인정/실지급) parent 체인은 트리와 동일한 단일 parent(child_id UNIQUE)를 써야 한다.
@@ -573,18 +574,22 @@ export default async function OrganizationPage({
         .map((r) => String(r.threshold_contract_id)),
     ),
   ];
-  const leaderPromotionThresholdContractCreatedAtById = new Map<string, string | null>();
+  const leaderPromotionThresholdContractMetaById = new Map<
+    string,
+    { join_date: string; happy_call_at?: string | null; created_at?: string | null }
+  >();
   if (thresholdPromoContractIds.length > 0) {
     const { data: thContractRows } = await db
       .from('contracts')
-      .select('id, created_at')
+      .select('id, created_at, join_date, happy_call_at')
       .in('id', thresholdPromoContractIds);
     for (const row of (thContractRows ?? []) as any[]) {
       if (!row?.id) continue;
-      leaderPromotionThresholdContractCreatedAtById.set(
-        String(row.id),
-        (row.created_at ?? null) as string | null,
-      );
+      leaderPromotionThresholdContractMetaById.set(String(row.id), {
+        join_date: String(row.join_date ?? '').slice(0, 10),
+        happy_call_at: (row.happy_call_at ?? null) as string | null,
+        created_at: (row.created_at ?? null) as string | null,
+      });
     }
   }
 
@@ -616,7 +621,7 @@ export default async function OrganizationPage({
     rules: (rulesRes.data ?? []) as any[],
     settlementWindow: { start_date, end_date, label_year_month },
     leaderPromotionEventsForThreshold: (promoEventsRes.data ?? []) as any[],
-    leaderPromotionThresholdContractCreatedAtById,
+    leaderPromotionThresholdContractMetaById,
   });
 
   const kpiRow = ((kpiRes.data ?? [])[0] ?? null) as

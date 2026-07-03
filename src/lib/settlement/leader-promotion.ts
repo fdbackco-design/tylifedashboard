@@ -12,27 +12,34 @@ export type AttributedJoinContractRow = {
   join_date: string; // YYYY-MM-DD
   unit_count: number;
   sales_member_id: string;
-  /** 동일 가입일 tie-break(정산·승격 계약 순서). DB에 없으면 생략 */
+  /** 동일 순서일 tie-break(정산·승격 계약 순서). DB에 없으면 생략 */
   created_at?: string | null;
   /**
-   * 정산 v2 가입 순서 기준: 해피콜 완료 일시(서울 'YYYY-MM-DD' 또는 ISO).
-   *
-   * 존재하는 경우 join_date 보다 우선 정렬되어 리더 승격(20구좌 누적) 시점을
-   * "해피콜 완료 순서"로 본다. 양쪽 모두에 존재할 때만 의미가 있고,
-   * 한쪽이라도 없으면 기존 join_date → created_at → id 순서로 fallback 된다.
+   * 정산 v2 가입 순서 1순위: 해피콜 완료 일시(서울 YMD 또는 ISO).
+   * 없으면 join_date 로 fallback.
    */
   happy_call_at?: string | null;
 };
 
+/** 승격 전/후·리더 단가 분기에 쓰는 계약 참조 */
+export type PromotionOrderContractRef = {
+  id: string;
+  join_date: string;
+  happy_call_at?: string | null;
+  created_at?: string | null;
+};
+
 /**
- * 산하 가입 계약을 (가입일 → created_at → id) 순으로 쌓을 때,
+ * 산하 가입 계약을 (순서일 → created_at → id) 순으로 쌓을 때,
  * 누적 구좌가 처음 20 이상이 되는 그 계약(승격 계약).
- * 같은 가입일에서 created_at이 없으면 id 문자열 순(레거시).
+ * 순서일은 해피콜 완료일(서울 YMD) 우선, 없으면 join_date.
+ * 같은 순서일에서 created_at이 없으면 id 문자열 순(레거시).
  */
 export type SalesMemberPromotionThreshold = {
   threshold_contract_id: string;
+  /** 승격 계약의 순서일(해피콜 완료 YMD 우선, 없으면 join_date). 컬럼명은 레거시 유지 */
   threshold_join_date: string;
-  /** 승격 계약의 created_at(동일 가입일에서 순서 안정화). 없으면 id만으로 비교 */
+  /** 승격 계약의 created_at(동일 순서일에서 순서 안정화). 없으면 id만으로 비교 */
   threshold_created_at?: string | null;
 };
 
@@ -41,7 +48,17 @@ function normalizeCreatedAt(s?: string | null): string {
   return String(s).trim();
 }
 
-/** 동일 가입일에서 승격 계약 대비 순서: created_at(둘 다 있을 때) → id */
+/** 정산 수당·승격 순서 판정용 기준일: 해피콜 완료일(서울 YMD) 우선, 없으면 join_date */
+export function contractJoinOrderYmd(c: {
+  join_date: string;
+  happy_call_at?: string | null;
+}): string {
+  const hc = happycallYmdSeoul(c.happy_call_at);
+  if (hc) return hc;
+  return String(c.join_date ?? '').slice(0, 10);
+}
+
+/** 동일 순서일에서 승격 계약 대비 순서: created_at(둘 다 있을 때) → id */
 function compareSameJoinDayOrder(
   contractId: string,
   contractCreatedAt: string | null | undefined,
@@ -57,52 +74,42 @@ function compareSameJoinDayOrder(
 }
 
 /**
- * 계약 c가 승격 계약 이후(동일 가입일이면 id가 승격 계약 id 이상)인지.
+ * 계약 c가 승격 계약 이후(동일 순서일이면 id가 승격 계약 id 이상)인지.
  * 이때부터 직급 단가를 리더(40만)로 본다.
+ * 순서일은 해피콜 완료일 우선.
  */
 export function isContractAtOrAfterPromotionThreshold(
-  contractJoinDate: string,
-  contractId: string,
+  contract: PromotionOrderContractRef,
   threshold: SalesMemberPromotionThreshold | null,
-  contractCreatedAt?: string | null,
 ): boolean {
   if (!threshold) return false;
-  const aj = contractJoinDate.slice(0, 10);
+  const aj = contractJoinOrderYmd(contract);
   const tj = threshold.threshold_join_date;
   if (aj > tj) return true;
   if (aj < tj) return false;
-  return compareSameJoinDayOrder(contractId, contractCreatedAt, threshold) >= 0;
+  return compareSameJoinDayOrder(contract.id, contract.created_at, threshold) >= 0;
 }
 
 /**
  * 계약 c가 승격 계약 "다음" 계약부터(엄밀히 after) 리더 단가를 적용해야 하는 경우에 사용.
  * - 승격 계약 자체(threshold_contract_id)는 승격 전(영업사원 단가)으로 본다.
+ * 순서일은 해피콜 완료일 우선.
  */
 export function isContractStrictlyAfterPromotionThreshold(
-  contractJoinDate: string,
-  contractId: string,
+  contract: PromotionOrderContractRef,
   threshold: SalesMemberPromotionThreshold | null,
-  contractCreatedAt?: string | null,
 ): boolean {
   if (!threshold) return false;
-  const aj = contractJoinDate.slice(0, 10);
+  const aj = contractJoinOrderYmd(contract);
   const tj = threshold.threshold_join_date;
   if (aj > tj) return true;
   if (aj < tj) return false;
-  return compareSameJoinDayOrder(contractId, contractCreatedAt, threshold) > 0;
+  return compareSameJoinDayOrder(contract.id, contract.created_at, threshold) > 0;
 }
 
 function compareAttributedJoinRows(a: AttributedJoinContractRow, b: AttributedJoinContractRow): number {
-  // 정산 v2: 양쪽 모두 happy_call_at 이 있으면 그 값을 1순위로 사용한다.
-  //          (리더 승격 / 오버라이드 가입 순서 기준이 "해피콜 완료 시점"으로 변경됨)
-  const ha = normalizeCreatedAt(a.happy_call_at);
-  const hb = normalizeCreatedAt(b.happy_call_at);
-  if (ha !== '' && hb !== '') {
-    const t = ha.localeCompare(hb);
-    if (t !== 0) return t;
-  }
-  const jd = a.join_date.slice(0, 10).localeCompare(b.join_date.slice(0, 10));
-  if (jd !== 0) return jd;
+  const od = contractJoinOrderYmd(a).localeCompare(contractJoinOrderYmd(b));
+  if (od !== 0) return od;
   const ca = normalizeCreatedAt(a.created_at);
   const cb = normalizeCreatedAt(b.created_at);
   if (ca !== '' && cb !== '') {
@@ -135,7 +142,7 @@ export function computeSalesMemberPromotionThreshold(
       if (cum >= 20) {
         promo = {
           threshold_contract_id: c.id,
-          threshold_join_date: c.join_date.slice(0, 10),
+          threshold_join_date: contractJoinOrderYmd(c),
           threshold_created_at: c.created_at ?? null,
         };
         break;
@@ -157,15 +164,21 @@ export function mergeLeaderPromotionEventThresholds(
     threshold_contract_id?: string | null;
     threshold_join_date?: string | null;
   }>,
-  thresholdContractCreatedAtById: ReadonlyMap<string, string | null>,
+  thresholdContractMetaById: ReadonlyMap<
+    string,
+    { join_date: string; happy_call_at?: string | null; created_at?: string | null }
+  >,
 ): void {
   for (const r of events) {
     if (!r?.member_id || !r.threshold_contract_id || !r.threshold_join_date) continue;
     const cid = String(r.threshold_contract_id);
+    const meta = thresholdContractMetaById.get(cid);
     promotionThresholdByMemberId.set(String(r.member_id), {
       threshold_contract_id: cid,
-      threshold_join_date: String(r.threshold_join_date).slice(0, 10),
-      threshold_created_at: thresholdContractCreatedAtById.get(cid) ?? null,
+      threshold_join_date: meta
+        ? contractJoinOrderYmd(meta)
+        : String(r.threshold_join_date).slice(0, 10),
+      threshold_created_at: meta?.created_at ?? null,
     });
   }
 }
@@ -346,7 +359,7 @@ function computeThresholdForSubtree(
     if (cum >= minUnits) {
       return {
         threshold_contract_id: c.id,
-        threshold_join_date: c.join_date.slice(0, 10),
+        threshold_join_date: contractJoinOrderYmd(c),
         threshold_created_at: c.created_at ?? null,
       };
     }

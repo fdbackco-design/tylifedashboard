@@ -8,10 +8,11 @@ import type {
   LeaderPromotionSettlementDetail,
 } from '../types/settlement';
 import type { RankType, OrgTreeNode, OrgTreeRow } from '../types/organization';
-import type { AttributedJoinContractRow, SalesMemberPromotionThreshold } from './leader-promotion';
+import type { AttributedJoinContractRow, PromotionOrderContractRef, SalesMemberPromotionThreshold } from './leader-promotion';
 import {
   isContractAtOrAfterPromotionThreshold,
   isContractStrictlyAfterPromotionThreshold,
+  contractJoinOrderYmd,
   isLeaderMaintenanceBonusEligible,
   subtreeJoinUnitsForLeaderMaintenanceInWindow,
   subtreeJoinUnitsJoinOnlyAsOf,
@@ -299,7 +300,7 @@ const LEADER_MAINTENANCE_BONUS_WON = 1_000_000;
 function commissionPerUnitForDirectContract(
   memberId: string,
   dbRank: RankType,
-  contract: { id: string; join_date: string; created_at?: string | null },
+  contract: PromotionOrderContractRef,
   rules: SettlementRule[],
   refDate: string,
   promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>,
@@ -322,17 +323,17 @@ function commissionPerUnitForDirectContract(
   // "승격 계약 이전" 직접 계약은 영업사원 단가, 이후는 리더 단가(롤업 차액 10만/구좌 등).
   // threshold가 없으면 DB 직급 단가 그대로(기존 리더·미달성 등).
   if (th && (dbRank === '영업사원' || dbRank === '리더')) {
-    if (isContractStrictlyAfterPromotionThreshold(contract.join_date, contract.id, th, contract.created_at)) {
+    if (isContractStrictlyAfterPromotionThreshold(contract, th)) {
       return getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
     }
-    // DB 직급이 이미 리더: 가입일이 승격 계약일보다 뒤면 리더 단가.
-    // 같은 가입일이면 contracts.created_at vs 승격 계약의 created_at(산하 20구좌 시점)으로 순서 보정.
+    // DB 직급이 이미 리더: 순서일이 승격 계약일보다 뒤면 리더 단가.
+    // 같은 순서일이면 contracts.created_at vs 승격 계약의 created_at(산하 20구좌 시점)으로 순서 보정.
     if (dbRank === '리더') {
-      const jd = contract.join_date.slice(0, 10);
-      if (jd > th.threshold_join_date) {
+      const orderYmd = contractJoinOrderYmd(contract);
+      if (orderYmd > th.threshold_join_date) {
         return getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
       }
-      if (jd === th.threshold_join_date) {
+      if (orderYmd === th.threshold_join_date) {
         const cAt = (contract.created_at ?? '').trim();
         const tAt = (th.threshold_created_at ?? '').trim();
         if (cAt && tAt && cAt > tAt) {
@@ -344,6 +345,15 @@ function commissionPerUnitForDirectContract(
   }
 
   return getActiveRuleOrFallback(rules, dbRank, refDate).commission_per_unit;
+}
+
+function contractPromotionRef(c: Contract): PromotionOrderContractRef {
+  return {
+    id: c.id,
+    join_date: c.join_date,
+    happy_call_at: c.happy_call_at ?? null,
+    created_at: (c as { created_at?: string | null }).created_at ?? null,
+  };
 }
 
 function calcDirectContractsWithLeaderPromotion(
@@ -361,7 +371,7 @@ function calcDirectContractsWithLeaderPromotion(
     const rate = commissionPerUnitForDirectContract(
       rateMemberId,
       originRank ?? member.rank,
-      { id: c.id, join_date: c.join_date, created_at: (c as { created_at?: string | null }).created_at },
+      contractPromotionRef(c),
       rules,
       refDate,
       promotionThresholdByMemberId,
@@ -420,12 +430,7 @@ function calcRollupItemsWithLeaderPromotion(
     const childContractsWithOwner = childThreshold
       ? childContractsAllWithOwner.filter(
           ({ contract: c }) =>
-            !isContractStrictlyAfterPromotionThreshold(
-              c.join_date,
-              c.id,
-              childThreshold,
-              (c as { created_at?: string | null }).created_at,
-            ),
+            !isContractStrictlyAfterPromotionThreshold(contractPromotionRef(c), childThreshold),
         )
       : childContractsAllWithOwner;
 
@@ -438,7 +443,7 @@ function calcRollupItemsWithLeaderPromotion(
       const upper = commissionPerUnitForDirectContract(
         node.id,
         node.rank,
-        { id: c.id, join_date: c.join_date, created_at: (c as { created_at?: string | null }).created_at },
+        contractPromotionRef(c),
         rules,
         refDate,
         promotionThresholdByMemberId,
@@ -449,7 +454,7 @@ function calcRollupItemsWithLeaderPromotion(
       const lower = commissionPerUnitForDirectContract(
         child.id,
         child.rank,
-        { id: c.id, join_date: c.join_date, created_at: (c as { created_at?: string | null }).created_at },
+        contractPromotionRef(c),
         rules,
         refDate,
         promotionThresholdByMemberId,
@@ -504,13 +509,7 @@ function calcRollupItemsWithLeaderPromotion(
       if (!th) continue;
       const all = contractsByMember.get(promotedId) ?? [];
       const pre = all.filter(
-        (c) =>
-          !isContractStrictlyAfterPromotionThreshold(
-            c.join_date,
-            c.id,
-            th,
-            (c as { created_at?: string | null }).created_at,
-          ),
+        (c) => !isContractStrictlyAfterPromotionThreshold(contractPromotionRef(c), th),
       );
       const units = pre.reduce((s, c) => s + c.unit_count, 0);
       if (units === 0) continue;
@@ -521,7 +520,7 @@ function calcRollupItemsWithLeaderPromotion(
         const upper = commissionPerUnitForDirectContract(
           node.id,
           node.rank,
-          { id: c.id, join_date: c.join_date, created_at: (c as { created_at?: string | null }).created_at },
+          contractPromotionRef(c),
           rules,
           refDate,
           promotionThresholdByMemberId,
@@ -531,7 +530,7 @@ function calcRollupItemsWithLeaderPromotion(
           promotedId,
           // 현재 DB rank가 리더로 바뀌었어도 threshold가 있으면 계약 단위로 30/40이 분기됨
           '리더',
-          { id: c.id, join_date: c.join_date, created_at: (c as { created_at?: string | null }).created_at },
+          contractPromotionRef(c),
           rules,
           refDate,
           promotionThresholdByMemberId,
@@ -731,21 +730,10 @@ export function calculateMemberSettlement(
         }
       } else {
         const hasBefore = eligible.some(
-          (c) =>
-            !isContractAtOrAfterPromotionThreshold(
-              c.join_date,
-              c.id,
-              th,
-              (c as { created_at?: string | null }).created_at,
-            ),
+          (c) => !isContractAtOrAfterPromotionThreshold(contractPromotionRef(c), th),
         );
         const hasAfter = eligible.some((c) =>
-          isContractAtOrAfterPromotionThreshold(
-            c.join_date,
-            c.id,
-            th,
-            (c as { created_at?: string | null }).created_at,
-          ),
+          isContractAtOrAfterPromotionThreshold(contractPromotionRef(c), th),
         );
         if (hasBefore && hasAfter) {
           label = `${(ruSales / 10_000).toFixed(0)}만/${(ruLeader / 10_000).toFixed(0)}만 혼합(승격 계약 전후)`;
