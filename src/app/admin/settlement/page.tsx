@@ -524,35 +524,37 @@ export default async function SettlementPage({ searchParams }: PageProps) {
 
   const totalAmount = displayLineRows.reduce((sum, r) => sum + (r.total ?? 0), 0);
 
-  // 테이블은 본사 직속 라인(topLineId) 단위로 개인/산하 실적을 표시한다 — 해당 라인만 계산.
-  const topLineIdsForStatement = [...new Set(displayLineRows.map((r) => r.topLineId))];
-  const directUnitsBySettlementMemberId = new Map<string, number>();
+  // /organization/statement 와 동일: 개인 실적 = 월정산 direct_unit_count, 산하 = 공통 스냅샷 기준 산하 집계.
+  // 산하 분리 보기 시 행 topLineId 가 자식 노드 id 가 될 수 있어, 정산 row 가 있는 멤버 전원을 맵에 둔다.
+  const settlementMemberIds = [
+    ...new Set(
+      ((settlements ?? []) as Array<{ member_id?: string | null }>)
+        .map((r) => String(r.member_id ?? '').trim())
+        .filter(Boolean),
+    ),
+  ];
+  const statementDirectUnitsByMemberId: Record<string, number> = {};
   for (const r of (settlements ?? []) as Array<{
     member_id?: string | null;
     direct_unit_count?: number | null;
   }>) {
     const mid = String(r.member_id ?? '').trim();
     if (!mid) continue;
-    directUnitsBySettlementMemberId.set(
-      mid,
-      Math.max(0, Math.floor(Number(r.direct_unit_count ?? 0) || 0)),
-    );
-  }
-  const statementDirectUnitsByMemberId: Record<string, number> = {};
-  for (const topId of topLineIdsForStatement) {
-    statementDirectUnitsByMemberId[topId] = directUnitsBySettlementMemberId.get(topId) ?? 0;
+    statementDirectUnitsByMemberId[mid] = Math.max(0, Math.floor(Number(r.direct_unit_count ?? 0) || 0));
   }
 
   const window = { start_date, end_date };
 
   const [statementDownlineUnitsByMemberId, totalSalesResult, prefResult] = await Promise.all([
-    computeStatementDownlineUnitsByMemberIds(
-      db,
-      topLineIdsForStatement,
-      window,
-      statementDirectUnitsByMemberId,
-      leaderRankEffectiveAtByMemberId,
-    ),
+    settlementMemberIds.length > 0
+      ? computeStatementDownlineUnitsByMemberIds(
+          db,
+          settlementMemberIds,
+          window,
+          statementDirectUnitsByMemberId,
+          leaderRankEffectiveAtByMemberId,
+        )
+      : Promise.resolve({} as Record<string, number>),
     (async () => {
       const allHqContracts = await fetchAllContractsForHqRevenue(db);
       return sumHqRevenueForContracts(allHqContracts, {
