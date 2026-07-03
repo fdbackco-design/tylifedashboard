@@ -109,7 +109,7 @@ export default async function OrganizationPage({
     db
       .from('contracts')
       .select(
-        'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, customer_id, sales_member_id, is_cancelled, sales_link_status, happy_call_at, happycall_result, source_snapshot_json, created_at, customers(name, phone)',
+        'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, customer_id, sales_member_id, is_cancelled, sales_link_status, happy_call_at, happycall_result, source_snapshot_json, created_at, invoice_registered_at, customers(name, phone)',
       )
       .not('sales_member_id', 'is', null)
       .order('join_date', { ascending: false })
@@ -293,6 +293,7 @@ export default async function OrganizationPage({
     source_snapshot_json?: Record<string, string | null> | null;
     customers: { name: string; phone: string | null } | null;
     created_at?: string | null;
+    invoice_registered_at?: string | null;
   }>;
 
   // treeRows는 기본적으로 DB edges + 표시 규칙으로 구성하되,
@@ -418,6 +419,8 @@ export default async function OrganizationPage({
           }),
         ),
         created_at: (c as { created_at?: string | null }).created_at ?? null,
+        happy_call_at: c.happy_call_at ?? null,
+        invoice_registered_at: c.invoice_registered_at ?? null,
       }));
 
     const promotionThresholdByMemberId = computeLeaderPromotionThresholds(
@@ -551,6 +554,7 @@ export default async function OrganizationPage({
       })),
       created_at: (c as { created_at?: string | null }).created_at ?? null,
       happy_call_at: c.happy_call_at ?? null,
+      invoice_registered_at: (c as { invoice_registered_at?: string | null }).invoice_registered_at ?? null,
     }));
 
   // 수당(인정/실지급) parent 체인은 트리와 동일한 단일 parent(child_id UNIQUE)를 써야 한다.

@@ -587,8 +587,15 @@ export function refreshPromotionThresholdsFromJoinAttributed(
   joinContractsAttributed: AttributedJoinContractRow[],
   memberIds: Iterable<string>,
 ): void {
-  for (const mid of memberIds) {
-    const recomputed = computePromotionThresholdForMember(mid, treeRows, joinContractsAttributed);
+  const refreshIds = new Set(memberIds);
+  if (refreshIds.size === 0) return;
+
+  const sortedJoin = [...joinContractsAttributed].sort(compareAttributedJoinRows);
+  const childrenByParent = buildChildrenByParentFromRows(treeRows);
+
+  for (const mid of refreshIds) {
+    const subtree = collectSubtreeMemberIdsDownstream(mid, childrenByParent);
+    const recomputed = computeThresholdForSubtree(subtree, sortedJoin, LEADER_PROMOTION_MIN_UNITS);
     if (recomputed) {
       promotionThresholdByMemberId.set(mid, recomputed);
       continue;
@@ -597,16 +604,17 @@ export function refreshPromotionThresholdsFromJoinAttributed(
     if (existing) {
       promotionThresholdByMemberId.set(
         mid,
-        enrichThresholdPrePromotionUnits(existing, mid, treeRows, joinContractsAttributed),
+        enrichThresholdPrePromotionUnits(existing, mid, treeRows, sortedJoin),
       );
     }
   }
 
-  for (const [mid, th] of promotionThresholdByMemberId) {
+  for (const mid of refreshIds) {
+    const th = promotionThresholdByMemberId.get(mid);
     if (!th || th.threshold_pre_promotion_units_on_contract != null) continue;
     promotionThresholdByMemberId.set(
       mid,
-      enrichThresholdPrePromotionUnits(th, mid, treeRows, joinContractsAttributed),
+      enrichThresholdPrePromotionUnits(th, mid, treeRows, sortedJoin),
     );
   }
 }

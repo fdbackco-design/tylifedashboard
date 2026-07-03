@@ -358,9 +358,6 @@ export async function calculateMonthlySettlement(params: {
   for (const m of membersRaw as OrganizationMember[]) {
     if (m.rank === '리더') thresholdRefreshIds.add(m.id);
   }
-  for (const mid of promotionThresholdByMemberId.keys()) {
-    thresholdRefreshIds.add(mid);
-  }
   refreshPromotionThresholdsFromJoinAttributed(
     promotionThresholdByMemberId,
     treeRows,

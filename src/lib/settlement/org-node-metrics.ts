@@ -38,6 +38,7 @@ type EligibleContract = {
   item_name?: string | null;
   created_at?: string | null;
   happy_call_at?: string | null;
+  invoice_registered_at?: string | null;
 };
 
 function promotionOrderRef(c: {
@@ -325,6 +326,7 @@ export function calculateOrgNodeMetrics(params: {
       sales_member_id: c.sales_member_id as string,
       created_at: c.created_at ?? null,
       happy_call_at: c.happy_call_at ?? null,
+      invoice_registered_at: c.invoice_registered_at ?? null,
     }));
   const promotionThresholdByMemberId = computeSalesMemberPromotionThreshold(
     treeRowsForThreshold,
@@ -341,9 +343,6 @@ export function calculateOrgNodeMetrics(params: {
   const thresholdRefreshIds = new Set<string>(policyPromotedMemberIdSet ?? []);
   for (const m of members) {
     if (m.rank === '리더') thresholdRefreshIds.add(m.id);
-  }
-  for (const mid of promotionThresholdByMemberId.keys()) {
-    thresholdRefreshIds.add(mid);
   }
   refreshPromotionThresholdsFromJoinAttributed(
     promotionThresholdByMemberId,
