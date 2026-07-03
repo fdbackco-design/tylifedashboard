@@ -453,6 +453,8 @@ export async function calculateMonthlySettlement(params: {
     }
   })(trees);
 
+  leaderOpts.orgNodeByMemberId = nodeById;
+
   let updatedCount = 0;
   for (const member of membersRaw as OrganizationMember[]) {
     const orgNode = nodeById.get(member.id) ?? null;

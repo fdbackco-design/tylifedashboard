@@ -205,22 +205,9 @@ function calcRollupItems(
   const items: RollupItem[] = [];
   const contractItems: RollupContractItem[] = [];
 
-  const collectSubtreeContractsWithOwner = (n: OrgTreeNode): SubtreeContractWithOwner[] => {
-    const out: SubtreeContractWithOwner[] = [];
-    const stack: OrgTreeNode[] = [n];
-    while (stack.length) {
-      const cur = stack.pop()!;
-      for (const c of contractsByMember.get(cur.id) ?? []) {
-        out.push({ contract: c, ownerMemberId: cur.id, ownerName: cur.name, ownerRank: cur.rank });
-      }
-      for (const ch of cur.children ?? []) stack.push(ch);
-    }
-    return out;
-  };
-
   for (const child of node.children) {
     // 롤업은 하위 라인 전체(subtree) 계약에 대해 발생한다.
-    const childContractsWithOwner = collectSubtreeContractsWithOwner(child);
+    const childContractsWithOwner = collectSubtreeContractsWithOwner(child, contractsByMember);
     const childUnits = childContractsWithOwner.reduce((s, x) => s + x.contract.unit_count, 0);
 
     if (childUnits === 0) continue;
@@ -293,6 +280,8 @@ export interface LeaderSettlementOpts {
    * - 보너스 적용 기간/그룹화 규칙은 `lib/settlement/group-bonus.ts` 참고.
    */
   groupBonusContracts?: ReadonlyArray<GroupBonusContractInput>;
+  /** 멤버 id → 조직 트리 노드(승격 후 HQ 직속 등 이전 리더 롤업 보강용) */
+  orgNodeByMemberId?: Map<string, OrgTreeNode>;
 }
 
 const LEADER_MAINTENANCE_BONUS_WON = 1_000_000;
@@ -391,6 +380,22 @@ function calcDirectContractsWithLeaderPromotion(
   return { items, total };
 }
 
+function collectSubtreeContractsWithOwner(
+  n: OrgTreeNode,
+  contractsByMember: Map<string, Contract[]>,
+): SubtreeContractWithOwner[] {
+  const out: SubtreeContractWithOwner[] = [];
+  const stack: OrgTreeNode[] = [n];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    for (const c of contractsByMember.get(cur.id) ?? []) {
+      out.push({ contract: c, ownerMemberId: cur.id, ownerName: cur.name, ownerRank: cur.rank });
+    }
+    for (const ch of cur.children ?? []) stack.push(ch);
+  }
+  return out;
+}
+
 function calcRollupItemsWithLeaderPromotion(
   node: OrgTreeNode,
   contractsByMember: Map<string, Contract[]>,
@@ -399,23 +404,12 @@ function calcRollupItemsWithLeaderPromotion(
   promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>,
   previousLeaderByPromotedMemberId?: Map<string, string | null>,
   leaderRankEffectiveAtByMemberId?: Map<string, string | null>,
+  orgNodeByMemberId?: Map<string, OrgTreeNode>,
 ): { items: RollupItem[]; total: number; contractItems: RollupContractItem[] } {
   const refDate = monthEndDate(yearMonth);
   const items: RollupItem[] = [];
   const contractItems: RollupContractItem[] = [];
-
-  const collectSubtreeContractsWithOwner = (n: OrgTreeNode): SubtreeContractWithOwner[] => {
-    const out: SubtreeContractWithOwner[] = [];
-    const stack: OrgTreeNode[] = [n];
-    while (stack.length) {
-      const cur = stack.pop()!;
-      for (const c of contractsByMember.get(cur.id) ?? []) {
-        out.push({ contract: c, ownerMemberId: cur.id, ownerName: cur.name, ownerRank: cur.rank });
-      }
-      for (const ch of cur.children ?? []) stack.push(ch);
-    }
-    return out;
-  };
+  const nodeThreshold = promotionThresholdByMemberId.get(node.id) ?? null;
 
   const directChildIdSet = new Set((node.children ?? []).map((c) => c.id));
 
@@ -423,16 +417,23 @@ function calcRollupItemsWithLeaderPromotion(
     // 롤업은 자식 subtree 전체 계약에 대해 계산해야 한다.
     const childThreshold = promotionThresholdByMemberId.get(child.id) ?? null;
 
-    // 월 중 정책 승격: "승격 전(누적 20 이하)"까지는 기존 상위(부모)가 롤업 귀속,
-    // "승격 후(21구좌부터)"는 부모가 더 이상 롤업을 받지 않는다.
-    // 따라서 부모(node)의 롤업 계산에서는 child가 승격한 이후 계약은 제외한다.
-    const childContractsAllWithOwner = collectSubtreeContractsWithOwner(child);
-    const childContractsWithOwner = childThreshold
-      ? childContractsAllWithOwner.filter(
-          ({ contract: c }) =>
-            !isContractStrictlyAfterPromotionThreshold(contractPromotionRef(c), childThreshold),
-        )
-      : childContractsAllWithOwner;
+    // 월 중 정책 승격:
+    // - childThreshold: 자식이 승격한 이후 계약은 부모(node) 롤업에서 제외(기존 상위가 못 받음).
+    // - nodeThreshold: node 본인이 승격하기 전 산하 계약은 node 롤업에서 제외(이전 상위 리더 귀속).
+    const childContractsAllWithOwner = collectSubtreeContractsWithOwner(child, contractsByMember);
+    const childContractsWithOwner =
+      childThreshold || nodeThreshold
+        ? childContractsAllWithOwner.filter(({ contract: c }) => {
+            const ref = contractPromotionRef(c);
+            if (childThreshold && isContractStrictlyAfterPromotionThreshold(ref, childThreshold)) {
+              return false;
+            }
+            if (nodeThreshold && !isContractStrictlyAfterPromotionThreshold(ref, nodeThreshold)) {
+              return false;
+            }
+            return true;
+          })
+        : childContractsAllWithOwner;
 
     const childUnits = childContractsWithOwner.reduce((s, x) => s + x.contract.unit_count, 0);
     if (childUnits === 0) continue;
@@ -507,16 +508,25 @@ function calcRollupItemsWithLeaderPromotion(
       if (directChildIdSet.has(promotedId)) continue;
       const th = promotionThresholdByMemberId.get(promotedId) ?? null;
       if (!th) continue;
-      const all = contractsByMember.get(promotedId) ?? [];
-      const pre = all.filter(
-        (c) => !isContractStrictlyAfterPromotionThreshold(contractPromotionRef(c), th),
+      const promotedNode = orgNodeByMemberId?.get(promotedId) ?? null;
+      const promotedContractsAllWithOwner: SubtreeContractWithOwner[] = promotedNode
+        ? collectSubtreeContractsWithOwner(promotedNode, contractsByMember)
+        : (contractsByMember.get(promotedId) ?? []).map((c) => ({
+            contract: c,
+            ownerMemberId: promotedId,
+            ownerName: '(승격자)',
+            ownerRank: '영업사원' as RankType,
+          }));
+      const preWithOwner = promotedContractsAllWithOwner.filter(
+        ({ contract: c }) =>
+          !isContractStrictlyAfterPromotionThreshold(contractPromotionRef(c), th),
       );
-      const units = pre.reduce((s, c) => s + c.unit_count, 0);
+      const units = preWithOwner.reduce((s, x) => s + x.contract.unit_count, 0);
       if (units === 0) continue;
 
       let subtotal = 0;
       const localContractItems: RollupContractItem[] = [];
-      for (const c of pre) {
+      for (const { contract: c, ownerMemberId, ownerName, ownerRank } of preWithOwner) {
         const upper = commissionPerUnitForDirectContract(
           node.id,
           node.rank,
@@ -546,9 +556,9 @@ function calcRollupItemsWithLeaderPromotion(
             from_member_id: promotedId,
             from_member_name: '(승격자)',
             from_rank: '영업사원',
-            effective_sales_member_id: promotedId,
-            effective_sales_member_name: '(승격자)',
-            effective_sales_member_rank: '영업사원',
+            effective_sales_member_id: ownerMemberId,
+            effective_sales_member_name: ownerName,
+            effective_sales_member_rank: ownerRank,
             unit_count: c.unit_count,
             rollup_amount_per_unit: diff,
             subtotal: sub,
@@ -646,6 +656,7 @@ export function calculateMemberSettlement(
       thresholdMap,
       leaderOpts?.previousLeaderByPromotedMemberId,
       leaderEffectiveMap,
+      leaderOpts?.orgNodeByMemberId,
     ));
   } else {
     ({ items: directItems, total: baseCommission } = calcDirectContracts(eligible, rule));
