@@ -6,6 +6,7 @@ import OrgTreeNode, {
   type ContractItem,
   collectSubtreeIds,
 } from './OrgTreeNode';
+import { getContractDisplayProductName } from '@/lib/utils/contract-display-product';
 import {
   getContractDisplayStatus,
   isContractJoinCompleted as isJoinCompleted,
@@ -204,7 +205,7 @@ export function OrgTreeContractDetailPanel({
                     </td>
                     {!hideProductAndContractCodeColumns ? (
                       <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
-                        {c.product_type ?? '-'}
+                        {getContractDisplayProductName({ product_type: c.product_type }) ?? '-'}
                       </td>
                     ) : null}
                     <td className="px-3 py-2 text-gray-600 whitespace-nowrap">

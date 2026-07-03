@@ -474,9 +474,9 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
   });
 
   return (
-    <div className="p-6">
-      <div className="mb-6 flex items-start justify-between gap-4">
-        <div>
+    <div className="p-3 sm:p-6">
+      <div className="mb-4 sm:mb-6 flex items-start justify-between gap-4">
+        <div className="min-w-0">
           <div className="text-xs text-gray-500">
             <Link className="text-blue-600 hover:underline" href={`/admin/settlement?year_month=${yearMonth}`}>
               정산 현황
@@ -484,10 +484,10 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
             <span className="mx-1">/</span>
             <span>산하 내역</span>
           </div>
-          <h2 className="text-2xl font-bold text-gray-800 mt-2">
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mt-2 break-keep">
             {displayName} · {yearMonth}
           </h2>
-          <p className="text-sm text-gray-500 mt-1">
+          <p className="text-xs sm:text-sm text-gray-500 mt-1 break-keep leading-relaxed">
             해피콜 완료 일자 기준 {hcWindow.start_date}~{hcWindow.end_date} 정산월의 계약을 표시합니다.
             <span className="text-gray-400"> (가입 정산 윈도우 {start_date}~{end_date})</span>
           </p>
@@ -678,8 +678,20 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
               직접 계약 + 정산 담당자 보정 계약
             </p>
             <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+              <div className="overflow-x-auto [-webkit-overflow-scrolling:touch]">
+                <table className="w-full min-w-[920px] text-xs sm:text-sm">
+                  <colgroup>
+                    <col className="w-[7.5rem]" />
+                    <col className="w-[5rem]" />
+                    <col className="w-[6.5rem]" />
+                    <col className="w-[5.5rem]" />
+                    <col className="min-w-[9rem]" />
+                    <col className="w-[4.5rem]" />
+                    <col className="w-[3rem]" />
+                    <col className="w-[5.5rem]" />
+                    <col className="w-[5.5rem]" />
+                    <col className="w-[5.5rem]" />
+                  </colgroup>
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
                       {[
@@ -696,7 +708,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                       ].map((h) => (
                         <th
                           key={h}
-                          className="px-4 py-3 text-left text-xs font-semibold text-gray-600 whitespace-nowrap"
+                          className="px-2 sm:px-3 py-2 text-left text-[11px] sm:text-xs font-semibold text-gray-600 whitespace-nowrap"
                         >
                           {h}
                         </th>
@@ -706,57 +718,72 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                   <tbody className="divide-y divide-gray-100">
                     {groupedRowsWithAmount.length === 0 && (
                       <tr>
-                        <td colSpan={10} className="px-6 py-10 text-center text-sm text-gray-500">
+                        <td colSpan={10} className="px-4 py-10 text-center text-sm text-gray-500">
                           표시할 계약이 없습니다.
                         </td>
                       </tr>
                     )}
-                    {groupedRowsWithAmount.map((r) => (
-                      <tr key={`${r.customer_name}__${r.hc_ymd}`} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 font-mono text-xs text-gray-700">
-                          {r.contract_codes.join(', ')}
-                        </td>
-                        <td className="px-4 py-3">{r.customer_name}</td>
-                        <td className="px-4 py-3 tabular-nums text-gray-700 whitespace-nowrap font-medium">
-                          {r.hc_ymd || '-'}
-                        </td>
-                        <td className="px-4 py-3 tabular-nums text-gray-500 whitespace-nowrap">
-                          {r.join_ymd}
-                        </td>
-                        <td className="px-4 py-3 text-xs text-gray-700 whitespace-nowrap">
-                          {r.item_name ?? '-'}
-                        </td>
-                        <td className="px-4 py-3">{r.display_status}</td>
-                        <td className="px-4 py-3 tabular-nums text-right">
-                          {Number(r.unit_count ?? 0).toLocaleString()}
-                        </td>
-                        <td className="px-4 py-3 text-xs text-gray-600">
-                          {(membersRaw.find((m: any) => m.id === r.origin)?.name ?? r.origin) as string}
-                        </td>
-                        <td className="px-4 py-3 text-xs text-gray-500">
-                          {
-                            (membersRaw.find((m: any) => m.id === r.raw_sales_member_id)?.name ??
-                              r.raw_sales_member_id) as string
-                          }
-                        </td>
-                        <td className="px-4 py-3 tabular-nums text-right font-semibold">
-                          ₩{r.amount.toLocaleString()}
-                        </td>
-                      </tr>
-                    ))}
+                    {groupedRowsWithAmount.map((r) => {
+                      const originName =
+                        (membersRaw.find((m: any) => m.id === r.origin)?.name ?? r.origin) as string;
+                      const rawSalesName =
+                        (membersRaw.find((m: any) => m.id === r.raw_sales_member_id)?.name ??
+                          r.raw_sales_member_id) as string;
+                      return (
+                        <tr key={`${r.customer_name}__${r.hc_ymd}`} className="hover:bg-gray-50 align-top">
+                          <td className="px-2 sm:px-3 py-2">
+                            <div className="flex flex-col gap-0.5">
+                              {r.contract_codes.map((code) => (
+                                <span
+                                  key={code}
+                                  className="font-mono text-[10px] sm:text-[11px] text-gray-700 whitespace-nowrap"
+                                >
+                                  {code}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 font-medium text-gray-800 whitespace-nowrap break-keep">
+                            {r.customer_name}
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 tabular-nums text-gray-700 whitespace-nowrap font-medium">
+                            {r.hc_ymd || '-'}
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 tabular-nums text-gray-500 whitespace-nowrap">
+                            {r.join_ymd}
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 text-gray-700 leading-snug">
+                            <span className="line-clamp-2 break-words">{r.item_name ?? '-'}</span>
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 whitespace-nowrap">{r.display_status}</td>
+                          <td className="px-2 sm:px-3 py-2 tabular-nums text-right whitespace-nowrap">
+                            {Number(r.unit_count ?? 0).toLocaleString()}
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 text-gray-600 whitespace-nowrap break-keep max-w-[5.5rem] truncate">
+                            {originName}
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 text-gray-500 whitespace-nowrap break-keep max-w-[5.5rem] truncate">
+                            {rawSalesName}
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 tabular-nums text-right font-semibold whitespace-nowrap">
+                            ₩{r.amount.toLocaleString()}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                   {groupedRowsWithAmount.length > 0 && (
                     <tfoot className="bg-gray-50 border-t border-gray-200">
                       <tr>
-                        <td colSpan={6} className="px-4 py-3 text-right text-xs text-gray-500">
+                        <td colSpan={6} className="px-2 sm:px-3 py-2 text-right text-xs text-gray-500 whitespace-nowrap">
                           합계
                         </td>
-                        <td className="px-4 py-3 tabular-nums text-right">
+                        <td className="px-2 sm:px-3 py-2 tabular-nums text-right whitespace-nowrap">
                           {totalUnits.toLocaleString()}
                         </td>
-                        <td className="px-4 py-3" />
-                        <td className="px-4 py-3" />
-                        <td className="px-4 py-3 tabular-nums text-right font-semibold">
+                        <td className="px-2 sm:px-3 py-2" />
+                        <td className="px-2 sm:px-3 py-2" />
+                        <td className="px-2 sm:px-3 py-2 tabular-nums text-right font-semibold whitespace-nowrap">
                           ₩{totalAmount.toLocaleString()}
                         </td>
                       </tr>

@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
+import { getContractDisplayProductName } from '@/lib/utils/contract-display-product';
 
 export const metadata: Metadata = { title: '계약 상세' };
 export const dynamic = 'force-dynamic';
@@ -94,7 +95,17 @@ export default async function ContractDetailPage({ params }: PageProps) {
           <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
             <DetailRow label="계약 코드" value={contract.contract_code as string} />
             <DetailRow label="가입일" value={contract.join_date as string} />
-            <DetailRow label="상품명" value={contract.product_type as string} />
+            <DetailRow
+              label="상품명"
+              value={getContractDisplayProductName({
+                product_type: contract.product_type as string,
+                item_name: contract.item_name as string | null,
+                source_snapshot_json: (contract.source_snapshot_json ?? null) as Record<
+                  string,
+                  string | null
+                > | null,
+              })}
+            />
             <DetailRow label="물품명" value={contract.item_name as string} />
             <DetailRow label="워치/핏" value={contract.watch_fit as string} />
             <DetailRow label="가입 구좌 수" value={`${contract.unit_count as number}구좌`} />

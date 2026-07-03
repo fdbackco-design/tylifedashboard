@@ -7,6 +7,7 @@ import { contractJoinYmdInInclusiveWindow, getSettlementWindowForYearMonth } fro
 import { calculateOrgNodeMetrics } from '@/lib/settlement/org-node-metrics';
 import { isSettlementEligibleContract } from '@/lib/settlement/settlement-eligibility';
 import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
+import { getContractDisplayProductName } from '@/lib/utils/contract-display-product';
 import type { OrgTreeNode, OrgTreeRow } from '@/lib/types';
 import type { SettlementRule } from '@/lib/types/settlement';
 import { type ContractItem, collectSubtreeIds, countByStatus } from '@/lib/organization/org-tree-contract-counts';
@@ -246,7 +247,7 @@ export async function buildMyOrganizationTreeViewModel(
     }
 
     const contractSelect =
-      'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, customer_id, is_cancelled, sales_link_status, happy_call_at, happycall_result, customers(name, phone), created_at';
+      'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, customer_id, is_cancelled, sales_link_status, happy_call_at, happycall_result, source_snapshot_json, customers(name, phone), created_at';
 
     const contractChunks = chunk(subtreeMemberIds, 500);
     const contractResList = await Promise.all(
@@ -514,7 +515,14 @@ export async function buildMyOrganizationTreeViewModel(
         id: (c as any).id as string,
         contract_code: (c as any).contract_code as string,
         join_date: (c as any).join_date ? String((c as any).join_date).slice(0, 10) : null,
-        product_type: (c as any).product_type ?? null,
+        product_type: getContractDisplayProductName({
+          product_type: (c as any).product_type ?? null,
+          item_name: (c as any).item_name ?? null,
+          source_snapshot_json: ((c as any).source_snapshot_json ?? null) as Record<
+            string,
+            string | null
+          > | null,
+        }),
         item_name: (c as any).item_name ?? null,
         rental_request_no: (c as any).rental_request_no ?? null,
         invoice_no: (c as any).invoice_no ?? null,

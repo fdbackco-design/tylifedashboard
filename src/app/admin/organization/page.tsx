@@ -21,6 +21,7 @@ import {
   stripOrgTreeNodesForDisplay,
 } from '@/lib/organization/org-tree-display';
 import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
+import { getContractDisplayProductName } from '@/lib/utils/contract-display-product';
 import type { ContractItem } from '@/components/org-tree/OrgTreeNode';
 import type { OrgTreeRow, OrganizationMember } from '@/lib/types';
 import type { RankType } from '@/lib/types/organization';
@@ -495,7 +496,11 @@ export default async function OrganizationPage({
       id: c.id,
       contract_code: c.contract_code,
       join_date: c.join_date,
-      product_type: c.product_type,
+      product_type: getContractDisplayProductName({
+        product_type: c.product_type,
+        item_name: c.item_name,
+        source_snapshot_json: c.source_snapshot_json ?? null,
+      }),
       item_name: c.item_name ?? null,
       rental_request_no: c.rental_request_no ?? null,
       invoice_no: c.invoice_no ?? null,
