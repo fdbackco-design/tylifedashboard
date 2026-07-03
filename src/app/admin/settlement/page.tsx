@@ -10,6 +10,7 @@ import {
   getSettlementWindowDisplayForYearMonth,
 } from '@/lib/settlement/settlement-window';
 import { sumHqRevenueForContracts } from '@/lib/settlement/hq-revenue';
+import { getHappycallWindowForYearMonth } from '@/lib/settlement/settlement-eligibility-v2';
 import { fetchAllContractsForHqRevenue } from '@/lib/settlement/fetch-contracts-for-hq-revenue';
 import type { RankType } from '@/lib/types';
 import type { SettlementCalculationDetail } from '@/lib/types/settlement';
@@ -68,6 +69,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const endExclusive = nextDay(end_date);
   // 표시 전용: 공휴일/주말 보정된 정산 구간 (데이터 필터는 위 start_date/end_date 그대로 사용).
   const displayWindow = getSettlementWindowDisplayForYearMonth(yearMonth);
+  const hcWindow = getHappycallWindowForYearMonth(yearMonth);
 
   const [allCountRes, eligibleCountRes, hqRevenueContracts] = await Promise.all([
     db
@@ -582,7 +584,11 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     // ignore
   }
 
-  const { totalHqRevenue: totalSales, periodHqRevenue: periodSales } = sumHqRevenueForContracts(
+  const {
+    totalHqRevenue: totalSales,
+    periodHqRevenue: periodSales,
+    periodEligibleUnits: periodJoinUnits,
+  } = sumHqRevenueForContracts(
     hqRevenueContracts,
     {
       periodStart: start_date,
@@ -690,10 +696,11 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       <SettlementLineTableClient
         yearMonth={yearMonth}
         todayYearMonth={todayYearMonth}
-        startDate={start_date}
-        endDate={end_date}
+        startDate={hcWindow.start_date}
+        endDate={hcWindow.end_date}
         totalSales={totalSales}
         periodSales={periodSales}
+        periodJoinUnits={periodJoinUnits}
         rankByMemberId={rankByMemberId}
         statementDirectUnitsByMemberId={statementDirectUnitsByMemberId}
         statementDownlineUnitsByMemberId={statementDownlineUnitsByMemberId}

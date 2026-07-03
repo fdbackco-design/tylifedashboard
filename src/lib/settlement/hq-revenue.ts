@@ -271,19 +271,20 @@ export function sumHqRevenueForContracts(
     /** 상품별 본사 매출 단가 분기에 쓸 날짜 필드. TY갤럭시케어 6/26 분기는 해피콜 완료일 기준. */
     unitPriceDateField?: HqRevenuePeriodDateField;
   },
-): { totalHqRevenue: number; periodHqRevenue: number } {
+): { totalHqRevenue: number; periodHqRevenue: number; periodEligibleUnits: number } {
   const eligibility = options.eligibility ?? 'kpi';
   const periodEligibility = options.periodEligibility ?? 'calendar_window';
   const periodDateField = options.periodDateField ?? 'join_date';
   const unitPriceDateField = options.unitPriceDateField ?? 'happy_call_at';
   let totalHqRevenue = 0;
   let periodHqRevenue = 0;
+  let periodEligibleUnits = 0;
 
   for (const contract of contracts) {
+    const units = Math.max(0, Number(contract.unit_count ?? 0));
     const revenue = calcContractHqRevenue(contract, { unitPriceDateField });
-    if (revenue === 0) continue;
 
-    if (isHqRevenueEligibleContract(contract, eligibility)) {
+    if (revenue > 0 && isHqRevenueEligibleContract(contract, eligibility)) {
       totalHqRevenue += revenue;
     }
 
@@ -297,11 +298,12 @@ export function sumHqRevenueForContracts(
         baseEligibility: eligibility,
       })
     ) {
-      periodHqRevenue += revenue;
+      periodEligibleUnits += units;
+      if (revenue > 0) periodHqRevenue += revenue;
     }
   }
 
-  return { totalHqRevenue, periodHqRevenue };
+  return { totalHqRevenue, periodHqRevenue, periodEligibleUnits };
 }
 
 /** 요구사항 예시·경계일 자가 검증 (스크립트/수동 확인용) */

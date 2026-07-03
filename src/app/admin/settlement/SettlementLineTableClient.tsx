@@ -28,6 +28,8 @@ export default function SettlementLineTableClient(props: {
   endDate: string;
   totalSales: number;
   periodSales: number;
+  /** 이번달 매출과 동일 기준(월별 정산 ELIGIBLE) 가입 구좌 합 */
+  periodJoinUnits: number;
   rankByMemberId: Record<string, string>;
   /** /organization/statement 의 개인 실적 구좌와 동일: monthly_settlements.direct_unit_count */
   statementDirectUnitsByMemberId: Record<string, number>;
@@ -298,9 +300,15 @@ export default function SettlementLineTableClient(props: {
 
   return (
     <>
-      {/* 총매출 / 이번달 매출 / 수익 — 모바일 한 줄, 데스크톱 3카드 */}
+      {/* 총 가입 구좌 / 총매출 / 이번달 매출 / 수익 — 모바일 한 줄, 데스크톱 4카드 */}
       <div className="mb-3 overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.035]">
         <div className="flex divide-x divide-slate-100 md:hidden">
+          <div className={kpiCellClass}>
+            <div className="text-[10px] font-medium text-slate-500">총 가입 구좌</div>
+            <div className="mt-0.5 truncate text-sm font-bold tabular-nums text-slate-900">
+              {props.periodJoinUnits.toLocaleString('ko-KR')}
+            </div>
+          </div>
           <div className={kpiCellClass}>
             <div className="text-[10px] font-medium text-slate-500">총 매출</div>
             <div className="mt-0.5 truncate text-sm font-bold tabular-nums text-slate-900">{formatKRW(props.totalSales)}</div>
@@ -318,7 +326,16 @@ export default function SettlementLineTableClient(props: {
             </div>
           </div>
         </div>
-        <div className="hidden gap-2 p-2 md:grid md:grid-cols-3">
+        <div className="hidden gap-2 p-2 md:grid md:grid-cols-4">
+          <div className="rounded-xl border border-slate-200/90 bg-gradient-to-b from-white to-slate-50/80 px-3 py-2 shadow-sm ring-1 ring-slate-900/[0.035]">
+            <div className="text-[11px] font-medium text-slate-500">총 가입 구좌수</div>
+            <div className="font-bold tabular-nums text-slate-900">
+              {props.periodJoinUnits.toLocaleString('ko-KR')}
+            </div>
+            <div className="mt-0.5 text-[10px] text-slate-500">
+              기준 {props.startDate}~{props.endDate}
+            </div>
+          </div>
           <div className="rounded-xl border border-slate-200/90 bg-gradient-to-b from-white to-slate-50/80 px-3 py-2 shadow-sm ring-1 ring-slate-900/[0.035]">
             <div className="text-[11px] font-medium text-slate-500">총 매출</div>
             <div className="font-bold tabular-nums text-slate-900">{formatKRW(props.totalSales)}</div>
