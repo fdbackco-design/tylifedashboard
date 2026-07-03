@@ -1,10 +1,16 @@
 import { BASE_AMOUNT_PER_UNIT } from './constants';
 import { isOrganizationKpiEligibleContract, type OrganizationKpiContractInput } from './kpi-eligibility';
 import { isSettlementEligibleContract } from './settlement-eligibility';
-import { happycallYmdSeoul } from './settlement-eligibility-v2';
+import {
+  evaluateContractEligibility,
+  happycallYmdSeoul,
+  type ContractEligibilityInput,
+} from './settlement-eligibility-v2';
 import { contractJoinYmdInInclusiveWindow } from './settlement-window';
 
 export type HqRevenueEligibilityMode = 'kpi' | 'settlement_v2_static';
+/** 이번달(기간) 매출 집계 방식 */
+export type HqRevenuePeriodEligibilityMode = 'calendar_window' | 'settlement_v2_monthly';
 export type HqRevenuePeriodDateField = 'join_date' | 'happy_call_at';
 
 /** TY갤럭시케어 본사 매출 단가 변경 적용 시작일 (당일 포함 770,000원) */
@@ -125,6 +131,7 @@ export function getHqRevenueUnitPrice(
 }
 
 export type HqRevenueContractInput = OrganizationKpiContractInput & {
+  id?: string;
   join_date: string | null;
   unit_count: number | null;
   product_type: string | null;
@@ -132,7 +139,54 @@ export type HqRevenueContractInput = OrganizationKpiContractInput & {
   source_snapshot_json?: Record<string, string | null> | null;
   happycall_result?: string | null;
   happy_call_at?: string | null;
+  invoice_registered_at?: string | null;
+  settlement_deferred?: boolean | null;
+  deferred_to_month?: string | null;
 };
+
+function toContractEligibilityInput(c: HqRevenueContractInput): ContractEligibilityInput {
+  return {
+    id: String(c.id ?? ''),
+    status: String(c.status ?? ''),
+    is_cancelled: Boolean(c.is_cancelled ?? false),
+    sales_member_id: (c.sales_member_id ?? null) as string | null,
+    sales_link_status: (c.sales_link_status ?? null) as string | null,
+    happy_call_at: c.happy_call_at ?? null,
+    happycall_result: (c.happycall_result ?? null) as string | null,
+    product_type: (c.product_type ?? null) as string | null,
+    item_name: (c.item_name ?? null) as string | null,
+    source_snapshot_json: (c.source_snapshot_json ?? null) as Record<string, string | null> | null,
+    invoice_no: (c.invoice_no ?? null) as string | null,
+    invoice_registered_at: c.invoice_registered_at ?? null,
+    settlement_deferred: (c.settlement_deferred ?? false) as boolean | null,
+    deferred_to_month: (c.deferred_to_month ?? null) as string | null,
+  };
+}
+
+function isHqRevenuePeriodEligibleContract(
+  contract: HqRevenueContractInput,
+  options: {
+    periodStart: string;
+    periodEnd: string;
+    periodEligibility: HqRevenuePeriodEligibilityMode;
+    yearMonth?: string;
+    periodDateField: HqRevenuePeriodDateField;
+    baseEligibility: HqRevenueEligibilityMode;
+  },
+): boolean {
+  if (options.periodEligibility === 'settlement_v2_monthly') {
+    const ym = (options.yearMonth ?? '').trim();
+    if (!ym) return false;
+    return evaluateContractEligibility(toContractEligibilityInput(contract), ym).result === 'ELIGIBLE';
+  }
+  if (!isHqRevenueEligibleContract(contract, options.baseEligibility)) return false;
+  return contractInHqRevenuePeriod(
+    contract,
+    options.periodStart,
+    options.periodEnd,
+    options.periodDateField,
+  );
+}
 
 function contractInHqRevenuePeriod(
   contract: HqRevenueContractInput,
@@ -201,27 +255,48 @@ export function sumHqRevenueForContracts(
   options: {
     periodStart: string;
     periodEnd: string;
-    /** 조직 KPI(기본) vs 정산 v2 정적 가입 인정 */
+    /** 총 매출·기간 매출( calendar_window ) 공통 정적/KPI 가입 인정 */
     eligibility?: HqRevenueEligibilityMode;
-    /** 이번달(기간) 매출 집계에 쓸 날짜 필드. 정산현황·조직도는 happy_call_at. */
+    /**
+     * 이번달(기간) 매출 집계 방식.
+     * - calendar_window: eligibility + periodStart~End (기본, 조직도 등)
+     * - settlement_v2_monthly: evaluateContractEligibility(yearMonth) === ELIGIBLE
+     *   (해피콜 윈도우·송장 마감·이월 반영, 월별 수당 정산과 동일)
+     */
+    periodEligibility?: HqRevenuePeriodEligibilityMode;
+    /** periodEligibility=settlement_v2_monthly 일 때 필수 (YYYY-MM) */
+    yearMonth?: string;
+    /** calendar_window 시 기간 필터 날짜 필드 */
     periodDateField?: HqRevenuePeriodDateField;
     /** 상품별 본사 매출 단가 분기에 쓸 날짜 필드. TY갤럭시케어 6/26 분기는 해피콜 완료일 기준. */
     unitPriceDateField?: HqRevenuePeriodDateField;
   },
 ): { totalHqRevenue: number; periodHqRevenue: number } {
   const eligibility = options.eligibility ?? 'kpi';
+  const periodEligibility = options.periodEligibility ?? 'calendar_window';
   const periodDateField = options.periodDateField ?? 'join_date';
   const unitPriceDateField = options.unitPriceDateField ?? 'happy_call_at';
   let totalHqRevenue = 0;
   let periodHqRevenue = 0;
 
   for (const contract of contracts) {
-    if (!isHqRevenueEligibleContract(contract, eligibility)) continue;
-
     const revenue = calcContractHqRevenue(contract, { unitPriceDateField });
-    totalHqRevenue += revenue;
+    if (revenue === 0) continue;
 
-    if (contractInHqRevenuePeriod(contract, options.periodStart, options.periodEnd, periodDateField)) {
+    if (isHqRevenueEligibleContract(contract, eligibility)) {
+      totalHqRevenue += revenue;
+    }
+
+    if (
+      isHqRevenuePeriodEligibleContract(contract, {
+        periodStart: options.periodStart,
+        periodEnd: options.periodEnd,
+        periodEligibility,
+        yearMonth: options.yearMonth,
+        periodDateField,
+        baseEligibility: eligibility,
+      })
+    ) {
       periodHqRevenue += revenue;
     }
   }

@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { HqRevenueContractInput } from './hq-revenue';
 
 const HQ_REVENUE_CONTRACT_SELECT =
-  'join_date, unit_count, product_type, item_name, source_snapshot_json, status, is_cancelled, sales_member_id, sales_link_status, rental_request_no, invoice_no, happycall_result, happy_call_at';
+  'id, join_date, unit_count, product_type, item_name, source_snapshot_json, status, is_cancelled, sales_member_id, sales_link_status, rental_request_no, invoice_no, invoice_registered_at, happycall_result, happy_call_at, settlement_deferred, deferred_to_month';
 
 const PAGE_SIZE = 1000;
 

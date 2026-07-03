@@ -588,7 +588,8 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       periodStart: start_date,
       periodEnd: end_date,
       eligibility: 'settlement_v2_static',
-      periodDateField: 'happy_call_at',
+      periodEligibility: 'settlement_v2_monthly',
+      yearMonth,
       unitPriceDateField: 'happy_call_at',
     },
   );
