@@ -108,7 +108,7 @@ export default async function OrganizationPage({
     db
       .from('contracts')
       .select(
-        'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, customer_id, sales_member_id, is_cancelled, sales_link_status, happy_call_at, happycall_result, created_at, customers(name, phone)',
+        'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, customer_id, sales_member_id, is_cancelled, sales_link_status, happy_call_at, happycall_result, source_snapshot_json, created_at, customers(name, phone)',
       )
       .not('sales_member_id', 'is', null)
       .order('join_date', { ascending: false })

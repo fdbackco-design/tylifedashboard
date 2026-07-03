@@ -52,6 +52,7 @@ export function normalizeStatus(raw: string): ContractStatus {
 export function normalizeProductType(raw: string): ProductType {
   const text = raw.trim();
   if (text.includes('갤럭시케어 라이트')) return '갤럭시케어 라이트';
+  if (text.includes('TY갤럭시케어_무') || text.endsWith('_무')) return '무';
   if (text.includes('TY갤럭시케어')) return 'TY갤럭시케어';
   if (text.includes('올라이프케어')) return '올라이프케어';
   if (text.includes('일반가전')) return '일반가전';

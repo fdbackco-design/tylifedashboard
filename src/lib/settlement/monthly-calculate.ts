@@ -21,6 +21,7 @@ import {
   SETTLEMENT_VALID_HAPPYCALL_RESULTS,
   SETTLEMENT_CANCELLED_HAPPYCALL_RESULTS,
 } from '@/lib/settlement/settlement-eligibility-v2';
+import { resolveHappycallEligibilityFields } from '@/lib/settlement/galaxy-care-mu';
 
 function isSettlementDebugEnabled(): boolean {
   const v = process.env.SETTLEMENT_DEBUG;
@@ -55,6 +56,9 @@ export async function calculateMonthlySettlement(params: {
         'sales_link_status',
         'happy_call_at',
         'happycall_result',
+        'product_type',
+        'item_name',
+        'source_snapshot_json',
         'invoice_no',
         'invoice_registered_at',
         'rental_request_no',
@@ -98,6 +102,9 @@ export async function calculateMonthlySettlement(params: {
         sales_link_status: (r.sales_link_status ?? null) as string | null,
         happy_call_at: r.happy_call_at ?? null,
         happycall_result: (r.happycall_result ?? null) as string | null,
+        product_type: (r.product_type ?? null) as string | null,
+        item_name: (r.item_name ?? null) as string | null,
+        source_snapshot_json: (r.source_snapshot_json ?? null) as Record<string, string | null> | null,
         invoice_no: (r.invoice_no ?? null) as string | null,
         invoice_registered_at: r.invoice_registered_at ?? null,
         settlement_deferred: (r.settlement_deferred ?? false) as boolean | null,
@@ -261,11 +268,14 @@ export async function calculateMonthlySettlement(params: {
     if (st === '취소' || st === '해약' || st === '계약취소') continue;
     if (!row.sales_member_id) continue;
     if ((row.sales_link_status ?? 'linked') !== 'linked') continue;
-    const hcResult = String(row.happycall_result ?? '').trim();
+    const { result: hcResult, ymd: hcYmdFromFields } = resolveHappycallEligibilityFields(
+      row.happy_call_at,
+      row.happycall_result,
+    );
     if (SETTLEMENT_CANCELLED_HAPPYCALL_RESULTS.has(hcResult)) continue;
     if (!SETTLEMENT_VALID_HAPPYCALL_RESULTS.has(hcResult)) continue;
     const sid = row.sales_member_id as string;
-    const hcYmd = happycallYmdSeoul(row.happy_call_at);
+    const hcYmd = hcYmdFromFields || happycallYmdSeoul(row.happy_call_at);
     joinAttributed.push({
       id: row.id,
       join_date: String(row.join_date ?? '').slice(0, 10),

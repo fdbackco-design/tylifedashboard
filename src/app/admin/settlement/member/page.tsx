@@ -94,7 +94,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     db
       .from('contracts')
       .select(
-        'id, contract_code, join_date, status, unit_count, item_name, sales_member_id, settlement_sales_member_id, customer_id, sales_link_status, is_cancelled, rental_request_no, invoice_no, memo, happy_call_at, happycall_result, customers(name)',
+        'id, contract_code, join_date, status, unit_count, item_name, product_type, source_snapshot_json, sales_member_id, settlement_sales_member_id, customer_id, sales_link_status, is_cancelled, rental_request_no, invoice_no, memo, happy_call_at, happycall_result, customers(name)',
       )
       .not('happy_call_at', 'is', null)
       .gte('happy_call_at', hcFromIso)
@@ -220,7 +220,11 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         is_cancelled: Boolean(c.is_cancelled ?? false),
         sales_member_id: (c.sales_member_id ?? null) as string | null,
         sales_link_status: (c.sales_link_status ?? null) as string | null,
+        happy_call_at: c.happy_call_at ?? null,
         happycall_result: (c.happycall_result ?? null) as string | null,
+        product_type: (c.product_type ?? null) as string | null,
+        item_name: (c.item_name ?? null) as string | null,
+        source_snapshot_json: (c.source_snapshot_json ?? null) as Record<string, string | null> | null,
         invoice_no: (c.invoice_no ?? null) as string | null,
       }),
     )

@@ -9,6 +9,11 @@
  */
 import type { ContractInsert, ContractStatus } from '../types/contract';
 import { hasValidInvoiceNo } from '../utils/invoice-no';
+import {
+  isTyGalaxyCareMuContract,
+  meetsTyGalaxyCareMuJoinCondition,
+  resolveHappycallEligibilityFields,
+} from '../settlement/galaxy-care-mu';
 import { SETTLEMENT_VALID_HAPPYCALL_RESULTS } from '../settlement/settlement-eligibility-v2';
 import { DEFAULT_ITEM_NAME_PLACEHOLDER } from './normalize';
 
@@ -65,11 +70,21 @@ export function resolveTerminalInternalStatus(params: {
 export function meetsInternalJoinCondition(params: {
   invoice_no: string | null | undefined;
   happycall_result: string | null | undefined;
+  happy_call_at?: unknown;
   is_cancelled?: boolean | null;
+  product_type?: string | null;
+  item_name?: string | null;
+  source_snapshot_json?: Record<string, string | null> | null;
 }): boolean {
   if (params.is_cancelled) return false;
+  if (isTyGalaxyCareMuContract(params)) {
+    return meetsTyGalaxyCareMuJoinCondition(params);
+  }
   if (!hasValidInvoiceNo(params.invoice_no)) return false;
-  const hc = String(params.happycall_result ?? '').trim();
+  const { result: hc } = resolveHappycallEligibilityFields(
+    params.happy_call_at,
+    params.happycall_result,
+  );
   return SETTLEMENT_VALID_HAPPYCALL_RESULTS.has(hc);
 }
 
@@ -83,6 +98,10 @@ export function resolveInternalContractStatus(params: {
   existingInternalStatus: ContractStatus | null;
   invoice_no: string | null | undefined;
   happycall_result: string | null | undefined;
+  happy_call_at?: unknown;
+  product_type?: string | null;
+  item_name?: string | null;
+  source_snapshot_json?: Record<string, string | null> | null;
 }): ContractStatus {
   if (
     isTyTerminalClose({
@@ -102,7 +121,11 @@ export function resolveInternalContractStatus(params: {
     meetsInternalJoinCondition({
       invoice_no: params.invoice_no,
       happycall_result: params.happycall_result,
+      happy_call_at: params.happy_call_at,
       is_cancelled: params.isCancelled,
+      product_type: params.product_type,
+      item_name: params.item_name,
+      source_snapshot_json: params.source_snapshot_json,
     })
   ) {
     return '가입';
@@ -156,12 +179,20 @@ export function isEligibleForHqCustomerAttribution(params: {
   is_cancelled?: boolean | null;
   invoice_no?: string | null;
   happycall_result?: string | null;
+  happy_call_at?: unknown;
+  product_type?: string | null;
+  item_name?: string | null;
+  source_snapshot_json?: Record<string, string | null> | null;
 }): boolean {
   const status = (params.status ?? '').trim();
   if (status === '취소' || status === '해약') return false;
   return meetsInternalJoinCondition({
     invoice_no: params.invoice_no,
     happycall_result: params.happycall_result,
+    happy_call_at: params.happy_call_at,
     is_cancelled: params.is_cancelled,
+    product_type: params.product_type,
+    item_name: params.item_name,
+    source_snapshot_json: params.source_snapshot_json,
   });
 }

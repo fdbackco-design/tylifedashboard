@@ -1188,6 +1188,10 @@ async function processItem(
       existingInternalStatus: (ec?.status ?? null) as ContractStatus | null,
       invoice_no: contractFinal.invoice_no,
       happycall_result: contractFinal.happycall_result,
+      happy_call_at: contractFinal.happy_call_at,
+      product_type: contractFinal.product_type,
+      item_name: contractFinal.item_name,
+      source_snapshot_json: contractFinal.source_snapshot_json ?? null,
     });
     contractFinal = {
       ...contractFinal,
