@@ -38,3 +38,40 @@ export async function fetchAllContractsForHqRevenue(
 
   return rows;
 }
+
+/**
+ * 정산 월 구간(join_date) 계약만 로드 — 이번달 매출·구좌 집계용.
+ * 누적 매출(total)은 `fetchAllContractsForHqRevenue`가 필요하다.
+ */
+export async function fetchContractsForHqRevenueInPeriod(
+  db: SupabaseClient,
+  periodStart: string,
+  periodEnd: string,
+): Promise<HqRevenueContractInput[]> {
+  const rows: HqRevenueContractInput[] = [];
+  let offset = 0;
+
+  while (true) {
+    const { data, error } = await db
+      .from('contracts')
+      .select(HQ_REVENUE_CONTRACT_SELECT)
+      .not('sales_member_id', 'is', null)
+      .gte('join_date', periodStart)
+      .lte('join_date', periodEnd)
+      .order('id', { ascending: true })
+      .range(offset, offset + PAGE_SIZE - 1);
+
+    if (error) {
+      throw new Error(`HQ revenue period contracts fetch failed: ${error.message}`);
+    }
+
+    const batch = (data ?? []) as HqRevenueContractInput[];
+    if (batch.length === 0) break;
+
+    rows.push(...batch);
+    if (batch.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
+  }
+
+  return rows;
+}

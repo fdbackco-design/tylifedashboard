@@ -28,6 +28,15 @@ function isSettlementDebugEnabled(): boolean {
   return v === '1' || v === 'true' || v === 'yes';
 }
 
+const DB_ID_CHUNK_SIZE = 500;
+const SETTLEMENT_UPSERT_BATCH_SIZE = 100;
+
+function chunkIds(ids: string[], size: number): string[][] {
+  const out: string[][] = [];
+  for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size));
+  return out;
+}
+
 export async function calculateMonthlySettlement(params: {
   yearMonth: string;
   db: any;
@@ -129,19 +138,21 @@ export async function calculateMonthlySettlement(params: {
   const nextYm = computeNextYearMonth(yearMonth);
   if (deferredContractIds.length > 0) {
     try {
-      const { error: defErr } = await db
-        .from('contracts')
-        .update({
-          settlement_deferred: true,
-          deferred_from_month: yearMonth,
-          deferred_to_month: nextYm,
-          deferred_reason: 'invoice_missing',
-          settlement_status: 'DEFERRED_TO_NEXT_MONTH',
-        })
-        .in('id', deferredContractIds);
-      if (defErr && debug) {
-        // eslint-disable-next-line no-console
-        console.warn('[settlement-debug] deferred update error', defErr);
+      for (const idChunk of chunkIds(deferredContractIds, DB_ID_CHUNK_SIZE)) {
+        const { error: defErr } = await db
+          .from('contracts')
+          .update({
+            settlement_deferred: true,
+            deferred_from_month: yearMonth,
+            deferred_to_month: nextYm,
+            deferred_reason: 'invoice_missing',
+            settlement_status: 'DEFERRED_TO_NEXT_MONTH',
+          })
+          .in('id', idChunk);
+        if (defErr && debug) {
+          // eslint-disable-next-line no-console
+          console.warn('[settlement-debug] deferred update error', defErr);
+        }
       }
     } catch (e) {
       if (debug) {
@@ -153,13 +164,15 @@ export async function calculateMonthlySettlement(params: {
   const eligibleIds = eligibleContractRows.map((r) => String(r.id));
   if (eligibleIds.length > 0) {
     try {
-      const { error: eliErr } = await db
-        .from('contracts')
-        .update({ settlement_status: 'ELIGIBLE_CONFIRMED' })
-        .in('id', eligibleIds);
-      if (eliErr && debug) {
-        // eslint-disable-next-line no-console
-        console.warn('[settlement-debug] eligible update error', eliErr);
+      for (const idChunk of chunkIds(eligibleIds, DB_ID_CHUNK_SIZE)) {
+        const { error: eliErr } = await db
+          .from('contracts')
+          .update({ settlement_status: 'ELIGIBLE_CONFIRMED' })
+          .in('id', idChunk);
+        if (eliErr && debug) {
+          // eslint-disable-next-line no-console
+          console.warn('[settlement-debug] eligible update error', eliErr);
+        }
       }
     } catch (e) {
       if (debug) {
@@ -484,7 +497,7 @@ export async function calculateMonthlySettlement(params: {
 
   leaderOpts.orgNodeByMemberId = nodeById;
 
-  let updatedCount = 0;
+  const settlementRows: Awaited<ReturnType<typeof calculateMemberSettlement>>[] = [];
   for (const member of membersRaw as OrganizationMember[]) {
     const orgNode = nodeById.get(member.id) ?? null;
     if (!orgNode) continue;
@@ -516,8 +529,16 @@ export async function calculateMonthlySettlement(params: {
       });
     }
 
-    const { error: uErr } = await db.from('monthly_settlements').upsert(settlement, { onConflict: 'year_month,member_id' });
-    if (!uErr) updatedCount++;
+    settlementRows.push(settlement);
+  }
+
+  let updatedCount = 0;
+  for (let i = 0; i < settlementRows.length; i += SETTLEMENT_UPSERT_BATCH_SIZE) {
+    const batch = settlementRows.slice(i, i + SETTLEMENT_UPSERT_BATCH_SIZE);
+    const { error: uErr } = await db
+      .from('monthly_settlements')
+      .upsert(batch, { onConflict: 'year_month,member_id' });
+    if (!uErr) updatedCount += batch.length;
   }
 
   if (debug) {

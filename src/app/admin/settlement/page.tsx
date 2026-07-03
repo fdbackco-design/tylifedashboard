@@ -11,7 +11,7 @@ import {
 } from '@/lib/settlement/settlement-window';
 import { sumHqRevenueForContracts } from '@/lib/settlement/hq-revenue';
 import { getHappycallWindowForYearMonth } from '@/lib/settlement/settlement-eligibility-v2';
-import { fetchAllContractsForHqRevenue } from '@/lib/settlement/fetch-contracts-for-hq-revenue';
+import { fetchAllContractsForHqRevenue, fetchContractsForHqRevenueInPeriod } from '@/lib/settlement/fetch-contracts-for-hq-revenue';
 import type { RankType } from '@/lib/types';
 import type { SettlementCalculationDetail } from '@/lib/types/settlement';
 import RecalcButton from './RecalcButton';
@@ -22,11 +22,7 @@ import {
   computeLeaderPromotionThresholds,
   type AttributedJoinContractRow,
 } from '@/lib/settlement/leader-promotion';
-import {
-  loadStatementDownlineSharedData,
-  computeStatementDownlineUnitsWithSharedContext,
-  loadGlobalStatementWindowContractPool,
-} from '@/lib/organization/statement-downline-units';
+import { computeStatementDownlineUnitsByMemberIds } from '@/lib/organization/statement-downline-units';
 
 export const metadata: Metadata = { title: '정산 현황' };
 export const dynamic = 'force-dynamic';
@@ -39,6 +35,12 @@ interface PageProps {
     rank?: string;
     member_id?: string;
   }>;
+}
+
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
 }
 
 function nextDay(dateYmd: string): string {
@@ -71,7 +73,8 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const displayWindow = getSettlementWindowDisplayForYearMonth(yearMonth);
   const hcWindow = getHappycallWindowForYearMonth(yearMonth);
 
-  const [allCountRes, eligibleCountRes, hqRevenueContracts] = await Promise.all([
+  const [allCountRes, eligibleCountRes, periodHqContracts, membersRes, edgesRes, eligibleBaseRes, rulesRes] =
+    await Promise.all([
     db
       .from('contracts')
       .select('id', { head: true, count: 'estimated' })
@@ -83,14 +86,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       .from('v_contract_settlement_base')
       .select('contract_id', { head: true, count: 'estimated' })
       .eq('year_month', yearMonth),
-    fetchAllContractsForHqRevenue(db),
-  ]);
-
-  const allContractsCount = allCountRes.count ?? 0;
-  const eligibleContractsCount = eligibleCountRes.count ?? 0;
-
-  // 조직도 결과(실지급액) → 정산현황 기본수당에 반영
-  const [membersRes, edgesRes, eligibleBaseRes, rulesRes] = await Promise.all([
+    fetchContractsForHqRevenueInPeriod(db, start_date, end_date),
     db
       .from('organization_members')
       .select('id, name, rank, external_id, phone, source_customer_id, leader_rank_effective_at')
@@ -102,6 +98,21 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       .eq('year_month', yearMonth),
     db.from('settlement_rules').select('*'),
   ]);
+
+  const allContractsCount = allCountRes.count ?? 0;
+  const eligibleContractsCount = eligibleCountRes.count ?? 0;
+
+  const hqRevenueOpts = {
+    periodStart: start_date,
+    periodEnd: end_date,
+    eligibility: 'settlement_v2_static' as const,
+    periodEligibility: 'settlement_v2_monthly' as const,
+    yearMonth,
+  };
+  const { periodHqRevenue: periodSales, periodEligibleUnits: periodJoinUnits } = sumHqRevenueForContracts(
+    periodHqContracts,
+    hqRevenueOpts,
+  );
 
   const membersRaw = (((membersRes.data ?? []) as unknown as any[]) ?? []).map((m) =>
     m.name === '안성준' ? { ...m, rank: '본사' as const } : m,
@@ -181,19 +192,23 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     sales_member_id: string;
   }>;
   const contractIds = baseRows.map((r) => r.contract_id);
-  const { data: contractCustomerRows } = await db
-    .from('contracts')
-    .select('id, customer_id, item_name, created_at')
-    .in('id', contractIds);
   const customerIdByContractId = new Map<string, string>();
   const itemNameByContractId = new Map<string, string | null>();
   const createdAtByContractId = new Map<string, string | null>();
-  for (const r of (contractCustomerRows ?? []) as Array<{
+  const contractMetaChunks = chunkArray(contractIds, 400);
+  const contractMetaResults = await Promise.all(
+    contractMetaChunks.map((ids) =>
+      ids.length === 0
+        ? Promise.resolve({ data: [] as Array<{ id: string; customer_id: string; item_name?: string | null; created_at?: string | null }> })
+        : db.from('contracts').select('id, customer_id, item_name, created_at').in('id', ids),
+    ),
+  );
+  for (const r of contractMetaResults.flatMap((res) => (res.data ?? []) as Array<{
     id: string;
     customer_id: string;
     item_name?: string | null;
     created_at?: string | null;
-  }>) {
+  }>)) {
     customerIdByContractId.set(r.id, r.customer_id);
     itemNameByContractId.set(r.id, (r as any).item_name ?? null);
     createdAtByContractId.set(r.id, (r.created_at ?? null) as string | null);
@@ -509,96 +524,77 @@ export default async function SettlementPage({ searchParams }: PageProps) {
 
   const totalAmount = displayLineRows.reduce((sum, r) => sum + (r.total ?? 0), 0);
 
-  // /organization/statement 와 동일: 개인 실적 = 월정산 direct_unit_count, 산하 = 공통 스냅샷 기준 산하 집계
-  const settlementMemberIds = [
-    ...new Set(
-      ((settlements ?? []) as Array<{ member_id?: string | null }>)
-        .map((r) => String(r.member_id ?? '').trim())
-        .filter(Boolean),
-    ),
-  ];
-  const statementDirectUnitsByMemberId: Record<string, number> = {};
+  // 테이블은 본사 직속 라인(topLineId) 단위로 개인/산하 실적을 표시한다 — 해당 라인만 계산.
+  const topLineIdsForStatement = [...new Set(displayLineRows.map((r) => r.topLineId))];
+  const directUnitsBySettlementMemberId = new Map<string, number>();
   for (const r of (settlements ?? []) as Array<{
     member_id?: string | null;
     direct_unit_count?: number | null;
   }>) {
     const mid = String(r.member_id ?? '').trim();
     if (!mid) continue;
-    statementDirectUnitsByMemberId[mid] = Math.max(0, Math.floor(Number(r.direct_unit_count ?? 0) || 0));
+    directUnitsBySettlementMemberId.set(
+      mid,
+      Math.max(0, Math.floor(Number(r.direct_unit_count ?? 0) || 0)),
+    );
   }
-  const statementDownlineUnitsByMemberId: Record<string, number> = {};
-  if (settlementMemberIds.length > 0) {
-    const sharedDownline = await loadStatementDownlineSharedData(db);
-    const window = { start_date, end_date };
-    const preloadedGlobalPool = await loadGlobalStatementWindowContractPool(db, sharedDownline, window);
-    const BATCH = 48;
-    for (let i = 0; i < settlementMemberIds.length; i += BATCH) {
-      const slice = settlementMemberIds.slice(i, i + BATCH);
-      const results = await Promise.all(
-        slice.map((mid) =>
-          computeStatementDownlineUnitsWithSharedContext(
-            db,
-            sharedDownline,
-            mid,
-            window,
-            statementDirectUnitsByMemberId[mid] ?? 0,
-            leaderRankEffectiveAtByMemberId[mid] ?? null,
-            { preloadedGlobalPool },
-          ),
-        ),
-      );
-      slice.forEach((mid, j) => {
-        const res = results[j];
-        statementDownlineUnitsByMemberId[mid] = typeof res === 'number' ? res : res.downline_units;
+  const statementDirectUnitsByMemberId: Record<string, number> = {};
+  for (const topId of topLineIdsForStatement) {
+    statementDirectUnitsByMemberId[topId] = directUnitsBySettlementMemberId.get(topId) ?? 0;
+  }
+
+  const window = { start_date, end_date };
+
+  const [statementDownlineUnitsByMemberId, totalSalesResult, prefResult] = await Promise.all([
+    computeStatementDownlineUnitsByMemberIds(
+      db,
+      topLineIdsForStatement,
+      window,
+      statementDirectUnitsByMemberId,
+      leaderRankEffectiveAtByMemberId,
+    ),
+    (async () => {
+      const allHqContracts = await fetchAllContractsForHqRevenue(db);
+      return sumHqRevenueForContracts(allHqContracts, {
+        ...hqRevenueOpts,
+        unitPriceDateField: 'happy_call_at',
       });
-    }
-  }
-
-  // DB 저장된 "본인 계약 수당 인정" / "산하 분리 보기" 설정 (월/라인 단위)
-  const selfIncludedInitialByTopId: Record<string, boolean> = {};
-  const splitOpenInitialByTopId: Record<string, boolean> = {};
-  try {
-    const [selfRes, splitRes] = await Promise.all([
-      db
-        .from('settlement_self_contract_preferences')
-        .select('top_line_id, included')
-        .eq('year_month', yearMonth),
-      db
-        .from('settlement_line_split_preferences')
-        .select('top_line_id, is_split')
-        .eq('year_month', yearMonth),
-    ]);
-    if (!selfRes.error) {
-      for (const r of (selfRes.data ?? []) as Array<{ top_line_id: string; included: boolean }>) {
-        if (!r?.top_line_id) continue;
-        selfIncludedInitialByTopId[String(r.top_line_id)] = Boolean(r.included);
+    })(),
+    (async () => {
+      const selfIncludedInitialByTopId: Record<string, boolean> = {};
+      const splitOpenInitialByTopId: Record<string, boolean> = {};
+      try {
+        const [selfRes, splitRes] = await Promise.all([
+          db
+            .from('settlement_self_contract_preferences')
+            .select('top_line_id, included')
+            .eq('year_month', yearMonth),
+          db
+            .from('settlement_line_split_preferences')
+            .select('top_line_id, is_split')
+            .eq('year_month', yearMonth),
+        ]);
+        if (!selfRes.error) {
+          for (const r of (selfRes.data ?? []) as Array<{ top_line_id: string; included: boolean }>) {
+            if (!r?.top_line_id) continue;
+            selfIncludedInitialByTopId[String(r.top_line_id)] = Boolean(r.included);
+          }
+        }
+        if (!splitRes.error) {
+          for (const r of (splitRes.data ?? []) as Array<{ top_line_id: string; is_split: boolean }>) {
+            if (!r?.top_line_id) continue;
+            splitOpenInitialByTopId[String(r.top_line_id)] = Boolean(r.is_split);
+          }
+        }
+      } catch {
+        // ignore
       }
-    }
-    if (!splitRes.error) {
-      for (const r of (splitRes.data ?? []) as Array<{ top_line_id: string; is_split: boolean }>) {
-        if (!r?.top_line_id) continue;
-        splitOpenInitialByTopId[String(r.top_line_id)] = Boolean(r.is_split);
-      }
-    }
-  } catch {
-    // ignore
-  }
+      return { selfIncludedInitialByTopId, splitOpenInitialByTopId };
+    })(),
+  ]);
 
-  const {
-    totalHqRevenue: totalSales,
-    periodHqRevenue: periodSales,
-    periodEligibleUnits: periodJoinUnits,
-  } = sumHqRevenueForContracts(
-    hqRevenueContracts,
-    {
-      periodStart: start_date,
-      periodEnd: end_date,
-      eligibility: 'settlement_v2_static',
-      periodEligibility: 'settlement_v2_monthly',
-      yearMonth,
-      unitPriceDateField: 'happy_call_at',
-    },
-  );
+  const totalSales = totalSalesResult.totalHqRevenue;
+  const { selfIncludedInitialByTopId, splitOpenInitialByTopId } = prefResult;
   const profit = periodSales - totalAmount;
 
   const yearsForPicker = (() => {

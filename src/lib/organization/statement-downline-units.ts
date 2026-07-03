@@ -642,6 +642,46 @@ export async function computeStatementDownlineUnitsWithSharedContext(
   return downline;
 }
 
+/** 여러 루트(본사 직속 라인 등)의 산하 실적 구좌를 한 번의 스냅샷 로드로 계산한다. */
+export async function computeStatementDownlineUnitsByMemberIds(
+  db: SupabaseClient,
+  memberIds: string[],
+  window: { start_date: string; end_date: string },
+  directUnitsByMemberId: Record<string, number>,
+  leaderRankEffectiveAtByMemberId: Record<string, string | null>,
+): Promise<Record<string, number>> {
+  const uniqIds = [...new Set(memberIds.map((id) => String(id).trim()).filter(Boolean))];
+  const out: Record<string, number> = {};
+  if (uniqIds.length === 0) return out;
+
+  const shared = await loadStatementDownlineSharedData(db);
+  const preloadedGlobalPool = await loadGlobalStatementWindowContractPool(db, shared, window);
+
+  const BATCH = 48;
+  for (let i = 0; i < uniqIds.length; i += BATCH) {
+    const slice = uniqIds.slice(i, i + BATCH);
+    const results = await Promise.all(
+      slice.map((mid) =>
+        computeStatementDownlineUnitsWithSharedContext(
+          db,
+          shared,
+          mid,
+          window,
+          directUnitsByMemberId[mid] ?? 0,
+          leaderRankEffectiveAtByMemberId[mid] ?? null,
+          { preloadedGlobalPool },
+        ),
+      ),
+    );
+    slice.forEach((mid, j) => {
+      const res = results[j];
+      out[mid] = typeof res === 'number' ? res : res.downline_units;
+    });
+  }
+
+  return out;
+}
+
 /**
  * 지급 명세서용: 정산 윈도우 안에서 귀속 담당자가 `rootMemberId` 서브트리에 속한 계약 구좌 합(본인 포함)에서,
  * 명세서 개인 실적(`directUnitCountFromSettlement`)을 뺀 값을 산하 실적으로 반환한다.
