@@ -13,21 +13,37 @@ const PRICES = {
   lite: 500_000,
 };
 
-function unitPrice(productType, happyCallAt) {
-  const text = (productType ?? '').trim();
+function collectProductTexts(productType, itemName, snapshotProduct) {
+  return [productType, itemName, snapshotProduct].map((t) => String(t ?? '').trim()).filter(Boolean);
+}
+
+function isTyGalaxyCareProductText(text) {
+  const t = text.trim();
+  if (!t) return false;
+  if (t === '무') return true;
+  if (t.includes('TY갤럭시케어_ALL')) return true;
+  if (t.includes('TY갤럭시케어_무')) return true;
+  if (t.includes('TY갤럭시케어')) return true;
+  return false;
+}
+
+function unitPrice(productType, happyCallAt, itemName, snapshotProduct) {
+  const texts = collectProductTexts(productType, itemName, snapshotProduct);
   const ymd = happyCallAt ? String(happyCallAt).slice(0, 10) : null;
 
-  if (text.includes('갤럭시케어 라이트')) return PRICES.lite;
-  if (text.includes('TY갤럭시케어')) {
+  if (texts.some((t) => t.includes('갤럭시케어 라이트'))) return PRICES.lite;
+  if (texts.some(isTyGalaxyCareProductText)) {
     return ymd && ymd >= TY_INCREASE ? PRICES.tyFrom : PRICES.tyBefore;
   }
-  if (text.includes('올라이프케어')) return PRICES.olife;
-  if (text.includes('일반가전')) return PRICES.appliance;
+  for (const text of texts) {
+    if (text.includes('올라이프케어')) return PRICES.olife;
+    if (text.includes('일반가전')) return PRICES.appliance;
+  }
   return ymd && ymd >= TY_INCREASE ? PRICES.tyFrom : PRICES.tyBefore;
 }
 
-function revenue(productType, happyCallAt, units) {
-  return Math.max(0, Number(units ?? 0)) * unitPrice(productType, happyCallAt);
+function revenue(productType, happyCallAt, units, itemName, snapshotProduct) {
+  return Math.max(0, Number(units ?? 0)) * unitPrice(productType, happyCallAt, itemName, snapshotProduct);
 }
 
 const failures = [];
@@ -40,6 +56,8 @@ assertEq('TY 2026-06-26', revenue('TY갤럭시케어', '2026-06-26', 1), 770_000
 assertEq('올라이프케어', revenue('올라이프케어', '2026-06-26', 3), 1_815_000);
 assertEq('일반가전', unitPrice('일반가전', '2026-01-01'), 550_000);
 assertEq('갤럭시케어 라이트', unitPrice('갤럭시케어 라이트', '2026-01-01'), 500_000);
+assertEq('TY갤럭시케어_무', revenue('무', '2026-06-26', 1, null, 'TY갤럭시케어_무'), 770_000);
+assertEq('TY갤럭시케어_ALL', revenue('TY갤럭시케어', '2026-06-26', 1, null, 'TY갤럭시케어_ALL'), 770_000);
 assertEq(
   '기간 합계',
   revenue('TY갤럭시케어', '2026-06-25', 2) +

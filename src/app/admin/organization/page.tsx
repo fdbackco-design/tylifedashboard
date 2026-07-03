@@ -289,6 +289,7 @@ export default async function OrganizationPage({
     sales_link_status?: string | null;
     happy_call_at?: string | null;
     happycall_result?: string | null;
+    source_snapshot_json?: Record<string, string | null> | null;
     customers: { name: string; phone: string | null } | null;
     created_at?: string | null;
   }>;
@@ -650,6 +651,8 @@ export default async function OrganizationPage({
       happycall_result: c.happycall_result ?? null,
       unit_count: c.unit_count,
       product_type: c.product_type,
+      item_name: c.item_name ?? null,
+      source_snapshot_json: (c.source_snapshot_json ?? null) as Record<string, string | null> | null,
     })),
     {
       periodStart: start_date,

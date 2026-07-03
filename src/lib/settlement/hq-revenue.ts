@@ -32,21 +32,65 @@ const PRODUCT_MATCHERS: ReadonlyArray<{ kind: HqProductKind; includes: string }>
   { kind: '일반가전', includes: '일반가전' },
 ];
 
+export type HqProductResolveInput = {
+  product_type?: string | null;
+  item_name?: string | null;
+  source_snapshot_json?: Record<string, string | null> | null;
+};
+
+function collectHqProductTexts(input: HqProductResolveInput): string[] {
+  return [
+    input.product_type,
+    input.item_name,
+    input.source_snapshot_json?.['상품명'],
+  ]
+    .map((t) => String(t ?? '').trim())
+    .filter(Boolean);
+}
+
+/** TY갤럭시케어 / TY갤럭시케어_무 / TY갤럭시케어_ALL 및 product_type=무 */
+export function isTyGalaxyCareProductText(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (t === '무') return true;
+  if (t.includes('TY갤럭시케어_ALL')) return true;
+  if (t.includes('TY갤럭시케어_무')) return true;
+  if (t.includes('TY갤럭시케어')) return true;
+  return false;
+}
+
+export function resolveHqProductKindFromContract(input: HqProductResolveInput): HqProductKind {
+  const texts = collectHqProductTexts(input);
+  if (texts.length === 0) return 'unknown_review';
+
+  if (texts.some((t) => t.includes('갤럭시케어 라이트'))) return '갤럭시케어 라이트';
+  if (texts.some(isTyGalaxyCareProductText)) return 'TY갤럭시케어';
+
+  for (const text of texts) {
+    for (const matcher of PRODUCT_MATCHERS) {
+      if (matcher.kind === 'TY갤럭시케어') continue;
+      if (text.includes(matcher.includes)) return matcher.kind;
+    }
+  }
+
+  return 'unknown_review';
+}
+
 export function normalizeSettlementDateYmd(date: string | null | undefined): string | null {
   if (!date) return null;
   const ymd = String(date).slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(ymd) ? ymd : null;
 }
 
-export function resolveHqProductKind(productTypeText: string | null | undefined): HqProductKind {
+export function resolveHqProductKind(
+  productTypeText: string | HqProductResolveInput | null | undefined,
+): HqProductKind {
+  if (productTypeText != null && typeof productTypeText === 'object') {
+    return resolveHqProductKindFromContract(productTypeText);
+  }
   const text = (productTypeText ?? '').trim();
   if (!text) return 'unknown_review';
-
-  for (const matcher of PRODUCT_MATCHERS) {
-    if (text.includes(matcher.includes)) return matcher.kind;
-  }
-
-  return 'unknown_review';
+  return resolveHqProductKindFromContract({ product_type: text });
 }
 
 /**
@@ -54,10 +98,10 @@ export function resolveHqProductKind(productTypeText: string | null | undefined)
  * TY갤럭시케어 6/26 단가 분기는 해피콜 완료일(happy_call_at) 기준.
  */
 export function getHqRevenueUnitPrice(
-  productTypeText: string | null | undefined,
+  productInput: string | HqProductResolveInput | null | undefined,
   settlementDateYmd: string | null | undefined,
 ): number {
-  const kind = resolveHqProductKind(productTypeText);
+  const kind = resolveHqProductKind(productInput);
   const settlementDate = normalizeSettlementDateYmd(settlementDateYmd);
 
   if (kind === 'TY갤럭시케어') {
@@ -84,6 +128,8 @@ export type HqRevenueContractInput = OrganizationKpiContractInput & {
   join_date: string | null;
   unit_count: number | null;
   product_type: string | null;
+  item_name?: string | null;
+  source_snapshot_json?: Record<string, string | null> | null;
   happycall_result?: string | null;
   happy_call_at?: string | null;
 };
@@ -127,6 +173,8 @@ export function calcContractHqRevenue(
   contract: {
     unit_count: number | null;
     product_type: string | null;
+    item_name?: string | null;
+    source_snapshot_json?: Record<string, string | null> | null;
     join_date: string | null;
     happy_call_at?: string | null;
   },
@@ -137,7 +185,14 @@ export function calcContractHqRevenue(
 
   const unitPriceDateField = options?.unitPriceDateField ?? 'happy_call_at';
   const priceDateYmd = resolveHqUnitPriceDateYmd(contract as HqRevenueContractInput, unitPriceDateField);
-  const unitPrice = getHqRevenueUnitPrice(contract.product_type, priceDateYmd);
+  const unitPrice = getHqRevenueUnitPrice(
+    {
+      product_type: contract.product_type,
+      item_name: contract.item_name ?? null,
+      source_snapshot_json: contract.source_snapshot_json ?? null,
+    },
+    priceDateYmd,
+  );
   return units * unitPrice;
 }
 
@@ -209,6 +264,25 @@ export function runHqRevenueSelfCheck(): { ok: boolean; failures: string[] } {
   assertEq('일반가전', getHqRevenueUnitPrice('일반가전', '2026-01-01'), 550_000);
   assertEq('갤럭시케어 라이트', getHqRevenueUnitPrice('갤럭시케어 라이트', '2026-01-01'), 500_000);
   assertKind('라이트 우선', resolveHqProductKind('갤럭시케어 라이트'), '갤럭시케어 라이트');
+  assertKind('TY갤럭시케어_무', resolveHqProductKindFromContract({ product_type: '무' }), 'TY갤럭시케어');
+  assertKind(
+    'TY갤럭시케어_ALL',
+    resolveHqProductKindFromContract({
+      source_snapshot_json: { 상품명: 'TY갤럭시케어_ALL' },
+    }),
+    'TY갤럭시케어',
+  );
+  assertEq(
+    'TY갤럭시케어_무 단가',
+    calcContractHqRevenue({
+      product_type: '무',
+      source_snapshot_json: { 상품명: 'TY갤럭시케어_무' },
+      join_date: '2026-06-20',
+      happy_call_at: '2026-06-26',
+      unit_count: 1,
+    }),
+    770_000,
+  );
 
   const sample = sumHqRevenueForContracts(
     [
