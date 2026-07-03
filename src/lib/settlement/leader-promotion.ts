@@ -77,17 +77,35 @@ export function promotionOrderTieBreakTs(c: {
   return normalizeCreatedAt(c.created_at);
 }
 
-function compareSameOrderDayOrder(contract: PromotionOrderContractRef, th: SalesMemberPromotionThreshold): number {
-  const cTie = promotionOrderTieBreakTs(contract);
-  const tTie =
-    promotionOrderTieBreakTs({
-      invoice_registered_at: th.threshold_invoice_registered_at,
-      created_at: th.threshold_created_at,
-    }) || normalizeCreatedAt(th.threshold_created_at);
-  if (cTie !== '' && tTie !== '') {
-    const d = cTie.localeCompare(tTie);
+/**
+ * 동일 순서일(해피콜 완료일) 내 정렬.
+ * - 송장 등록 시각이 있는 계약이 없는 계약보다 앞선다.
+ * - 둘 다 있으면 invoice_registered_at 비교.
+ * - 없으면 created_at.
+ */
+function comparePromotionOrderTieBreak(
+  a: { invoice_registered_at?: string | null; created_at?: string | null },
+  b: { invoice_registered_at?: string | null; created_at?: string | null },
+): number {
+  const invA = normalizeCreatedAt(a.invoice_registered_at);
+  const invB = normalizeCreatedAt(b.invoice_registered_at);
+  if (invA && invB) {
+    const d = invA.localeCompare(invB);
     if (d !== 0) return d;
-  }
+  } else if (invA && !invB) return -1;
+  else if (!invA && invB) return 1;
+  const ca = normalizeCreatedAt(a.created_at);
+  const cb = normalizeCreatedAt(b.created_at);
+  if (ca !== cb) return ca.localeCompare(cb);
+  return 0;
+}
+
+function compareSameOrderDayOrder(contract: PromotionOrderContractRef, th: SalesMemberPromotionThreshold): number {
+  const tie = comparePromotionOrderTieBreak(contract, {
+    invoice_registered_at: th.threshold_invoice_registered_at,
+    created_at: th.threshold_created_at,
+  });
+  if (tie !== 0) return tie;
   return contract.id.localeCompare(th.threshold_contract_id);
 }
 
@@ -188,19 +206,70 @@ export function prePromotionUnitsForPreviousLeaderRollup(
 function compareAttributedJoinRows(a: AttributedJoinContractRow, b: AttributedJoinContractRow): number {
   const od = contractJoinOrderYmd(a).localeCompare(contractJoinOrderYmd(b));
   if (od !== 0) return od;
-  const ta = promotionOrderTieBreakTs(a);
-  const tb = promotionOrderTieBreakTs(b);
-  if (ta !== '' && tb !== '') {
-    const t = ta.localeCompare(tb);
-    if (t !== 0) return t;
-  }
-  const ca = normalizeCreatedAt(a.created_at);
-  const cb = normalizeCreatedAt(b.created_at);
-  if (ca !== '' && cb !== '') {
-    const t = ca.localeCompare(cb);
-    if (t !== 0) return t;
-  }
+  const tie = comparePromotionOrderTieBreak(a, b);
+  if (tie !== 0) return tie;
   return a.id.localeCompare(b.id);
+}
+
+/** 리더 승격 20구좌 누적에 포함되는 계약인지 (status === 가입 만) */
+export function isLeaderPromotionJoinContractRow(row: {
+  status?: string | null;
+  is_cancelled?: boolean | null;
+  sales_member_id?: string | null;
+  sales_link_status?: string | null;
+}): boolean {
+  if (row.is_cancelled) return false;
+  if (String(row.status ?? '').trim() !== '가입') return false;
+  if (!row.sales_member_id) return false;
+  if ((row.sales_link_status ?? 'linked') !== 'linked') return false;
+  return true;
+}
+
+/** SETTLEMENT_DEBUG: 멤버 산하 20구좌 달성 경로(누적 순) */
+export function debugPromotionThresholdPath(
+  memberId: string,
+  treeRows: OrgTreeRow[],
+  joinContractsAttributed: AttributedJoinContractRow[],
+  minUnits: number = 20,
+): Array<{
+  contract_id: string;
+  order_ymd: string;
+  invoice_registered_at: string | null;
+  unit_count: number;
+  cum_before: number;
+  cum_after: number;
+  is_threshold: boolean;
+}> {
+  const childrenByParent = buildChildrenByParentFromRows(treeRows);
+  const subtree = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
+  const sorted = [...joinContractsAttributed].sort(compareAttributedJoinRows);
+  const out: Array<{
+    contract_id: string;
+    order_ymd: string;
+    invoice_registered_at: string | null;
+    unit_count: number;
+    cum_before: number;
+    cum_after: number;
+    is_threshold: boolean;
+  }> = [];
+  let cum = 0;
+  for (const c of sorted) {
+    if (!subtree.has(c.sales_member_id)) continue;
+    const units = Math.max(0, c.unit_count ?? 0);
+    const cumBefore = cum;
+    cum += units;
+    out.push({
+      contract_id: c.id,
+      order_ymd: contractJoinOrderYmd(c),
+      invoice_registered_at: c.invoice_registered_at ?? null,
+      unit_count: units,
+      cum_before: cumBefore,
+      cum_after: cum,
+      is_threshold: cum >= minUnits && cumBefore < minUnits,
+    });
+    if (cum >= minUnits) break;
+  }
+  return out;
 }
 
 /**

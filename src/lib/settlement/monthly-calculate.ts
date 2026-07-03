@@ -9,6 +9,8 @@ import {
   computeLeaderPromotionThresholds,
   mergeLeaderPromotionEventThresholds,
   refreshPromotionThresholdsFromJoinAttributed,
+  isLeaderPromotionJoinContractRow,
+  debugPromotionThresholdPath,
   type AttributedJoinContractRow,
   isContractStrictlyAfterPromotionThreshold,
 } from '@/lib/settlement/leader-promotion';
@@ -19,10 +21,7 @@ import {
   evaluateContractEligibility,
   computeNextYearMonth,
   happycallYmdSeoul,
-  SETTLEMENT_VALID_HAPPYCALL_RESULTS,
-  SETTLEMENT_CANCELLED_HAPPYCALL_RESULTS,
 } from '@/lib/settlement/settlement-eligibility-v2';
-import { resolveHappycallEligibilityFields } from '@/lib/settlement/galaxy-care-mu';
 
 function isSettlementDebugEnabled(): boolean {
   const v = process.env.SETTLEMENT_DEBUG;
@@ -265,24 +264,14 @@ export async function calculateMonthlySettlement(params: {
   });
 
   // 리더 승격(20구좌) / 오버라이드 가입 순서 계산용 가입 인정 계약 집합.
-  // - 정산 v2: status='가입' 이 아니어도 해피콜 결과(성공/완료/계약변경)면 가입 인정.
-  // - 송장 미충족(=이월) 건도 가입 인정에는 포함 — 수당만 다음 월로 미뤄지는 것이지 가입 자체는 인정.
+  // - status === '가입' 만 포함 (대기·준비 등 해피콜만 완료된 계약은 제외).
+  // - 조직도 KPI(org-node-metrics)와 동일 기준.
   // - 정렬·승격 전/후 판정: 해피콜 완료일 → 동일일 송장등록시각(invoice_registered_at) → created_at
   const joinAttributed: AttributedJoinContractRow[] = [];
   for (const row of (allContractRows ?? []) as any[]) {
-    if (row.is_cancelled) continue;
-    const st = String(row.status ?? '');
-    if (st === '취소' || st === '해약' || st === '계약취소') continue;
-    if (!row.sales_member_id) continue;
-    if ((row.sales_link_status ?? 'linked') !== 'linked') continue;
-    const { result: hcResult, ymd: hcYmdFromFields } = resolveHappycallEligibilityFields(
-      row.happy_call_at,
-      row.happycall_result,
-    );
-    if (SETTLEMENT_CANCELLED_HAPPYCALL_RESULTS.has(hcResult)) continue;
-    if (!SETTLEMENT_VALID_HAPPYCALL_RESULTS.has(hcResult)) continue;
+    if (!isLeaderPromotionJoinContractRow(row)) continue;
     const sid = row.sales_member_id as string;
-    const hcYmd = hcYmdFromFields || happycallYmdSeoul(row.happy_call_at);
+    const hcYmd = happycallYmdSeoul(row.happy_call_at);
     joinAttributed.push({
       id: row.id,
       join_date: String(row.join_date ?? '').slice(0, 10),
@@ -388,6 +377,7 @@ export async function calculateMonthlySettlement(params: {
       console.log('[settlement-debug] 임태순 promotion threshold', {
         yearMonth,
         threshold: promotionThresholdByMemberId.get(imId) ?? null,
+        path: debugPromotionThresholdPath(imId, treeRows, joinAttributed),
       });
     }
   }
