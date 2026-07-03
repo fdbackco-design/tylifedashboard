@@ -16,6 +16,8 @@ import {
   isLeaderMaintenanceBonusEligible,
   subtreeJoinUnitsForLeaderMaintenanceInWindow,
   subtreeJoinUnitsJoinOnlyAsOf,
+  rollupEligibleUnitsForParentSubtree,
+  prePromotionUnitsForPreviousLeaderRollup,
 } from './leader-promotion';
 import {
   calculateGroupBonusForMember,
@@ -414,26 +416,20 @@ function calcRollupItemsWithLeaderPromotion(
     // - childThreshold: 자식이 승격한 이후 계약은 부모(node) 롤업에서 제외(기존 상위가 못 받음).
     // - nodeThreshold: node 본인이 승격하기 전 산하 계약은 node 롤업에서 제외(이전 상위 리더 귀속).
     const childContractsAllWithOwner = collectSubtreeContractsWithOwner(child, contractsByMember);
-    const childContractsWithOwner =
-      childThreshold || nodeThreshold
-        ? childContractsAllWithOwner.filter(({ contract: c }) => {
-            const ref = contractPromotionRef(c);
-            if (childThreshold && isContractStrictlyAfterPromotionThreshold(ref, childThreshold)) {
-              return false;
-            }
-            if (nodeThreshold && !isContractStrictlyAfterPromotionThreshold(ref, nodeThreshold)) {
-              return false;
-            }
-            return true;
-          })
-        : childContractsAllWithOwner;
 
-    const childUnits = childContractsWithOwner.reduce((s, x) => s + x.contract.unit_count, 0);
-    if (childUnits === 0) continue;
-
+    let childUnits = 0;
     let subtotal = 0;
     const localContractItems: RollupContractItem[] = [];
-    for (const { contract: c, ownerMemberId, ownerName, ownerRank } of childContractsWithOwner) {
+    for (const { contract: c, ownerMemberId, ownerName, ownerRank } of childContractsAllWithOwner) {
+      const ref = contractPromotionRef(c);
+      const eligibleUnits = rollupEligibleUnitsForParentSubtree(
+        { ...ref, unit_count: c.unit_count },
+        nodeThreshold,
+        childThreshold,
+      );
+      if (eligibleUnits <= 0) continue;
+
+      childUnits += eligibleUnits;
       const upper = commissionPerUnitForDirectContract(
         node.id,
         node.rank,
@@ -455,7 +451,7 @@ function calcRollupItemsWithLeaderPromotion(
         leaderRankEffectiveAtByMemberId,
       );
       const diff = Math.max(0, upper - lower);
-      const sub = diff * c.unit_count;
+      const sub = diff * eligibleUnits;
       subtotal += sub;
       if (sub > 0) {
         localContractItems.push({
@@ -467,13 +463,15 @@ function calcRollupItemsWithLeaderPromotion(
           effective_sales_member_id: ownerMemberId,
           effective_sales_member_name: ownerName,
           effective_sales_member_rank: ownerRank,
-          unit_count: c.unit_count,
+          unit_count: eligibleUnits,
           rollup_amount_per_unit: diff,
           subtotal: sub,
           included_reason: childThreshold ? 'direct_child_pre_promotion' : 'direct_child',
         });
       }
     }
+
+    if (childUnits === 0) continue;
 
     if (subtotal > 0) {
       const avg = childUnits ? subtotal / childUnits : 0;
@@ -510,16 +508,19 @@ function calcRollupItemsWithLeaderPromotion(
             ownerName: '(승격자)',
             ownerRank: '영업사원' as RankType,
           }));
-      const preWithOwner = promotedContractsAllWithOwner.filter(
-        ({ contract: c }) =>
-          !isContractStrictlyAfterPromotionThreshold(contractPromotionRef(c), th),
-      );
-      const units = preWithOwner.reduce((s, x) => s + x.contract.unit_count, 0);
-      if (units === 0) continue;
-
+      const preWithOwner = promotedContractsAllWithOwner;
+      let units = 0;
       let subtotal = 0;
       const localContractItems: RollupContractItem[] = [];
       for (const { contract: c, ownerMemberId, ownerName, ownerRank } of preWithOwner) {
+        const ref = contractPromotionRef(c);
+        const eligibleUnits = prePromotionUnitsForPreviousLeaderRollup(
+          { ...ref, unit_count: c.unit_count },
+          th,
+        );
+        if (eligibleUnits <= 0) continue;
+
+        units += eligibleUnits;
         const upper = commissionPerUnitForDirectContract(
           node.id,
           node.rank,
@@ -540,7 +541,7 @@ function calcRollupItemsWithLeaderPromotion(
           leaderRankEffectiveAtByMemberId,
         );
         const diff = Math.max(0, upper - lower);
-        const sub = diff * c.unit_count;
+        const sub = diff * eligibleUnits;
         subtotal += sub;
         if (sub > 0) {
           localContractItems.push({
@@ -552,13 +553,15 @@ function calcRollupItemsWithLeaderPromotion(
             effective_sales_member_id: ownerMemberId,
             effective_sales_member_name: ownerName,
             effective_sales_member_rank: ownerRank,
-            unit_count: c.unit_count,
+            unit_count: eligibleUnits,
             rollup_amount_per_unit: diff,
             subtotal: sub,
             included_reason: 'previous_leader_pre_promotion',
           });
         }
       }
+      if (units === 0) continue;
+
       if (subtotal > 0) {
         items.push({
           from_member_id: promotedId,

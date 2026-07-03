@@ -45,6 +45,11 @@ export type SalesMemberPromotionThreshold = {
   threshold_invoice_registered_at?: string | null;
   /** 승격 계약의 created_at(동일 순서일 tie-break 보조) */
   threshold_created_at?: string | null;
+  /**
+   * 승격 계약 내 20구좌 달성에 포함되는 구좌 수(승격 전·승격 계약 본체).
+   * 나머지(unit_count - 본 값)는 동일 계약 내 승격 후 구좌로 본다.
+   */
+  threshold_pre_promotion_units_on_contract?: number;
 };
 
 function normalizeCreatedAt(s?: string | null): string {
@@ -120,6 +125,66 @@ export function isContractStrictlyAfterPromotionThreshold(
   return compareSameOrderDayOrder(contract, threshold) > 0;
 }
 
+/**
+ * 승격 경계를 걸치는 계약(예: 4구좌 중 18→20 달성)을 승격 전/후 구좌로 분할.
+ */
+export function splitContractUnitsByPromotionThreshold(
+  contract: PromotionOrderContractRef & { unit_count: number },
+  threshold: SalesMemberPromotionThreshold | null,
+): { prePromotionUnits: number; postPromotionUnits: number } {
+  const total = Math.max(0, contract.unit_count ?? 0);
+  if (!threshold || total === 0) {
+    return { prePromotionUnits: total, postPromotionUnits: 0 };
+  }
+
+  const aj = contractJoinOrderYmd(contract);
+  const tj = threshold.threshold_join_date;
+  if (aj < tj) return { prePromotionUnits: total, postPromotionUnits: 0 };
+  if (aj > tj) return { prePromotionUnits: 0, postPromotionUnits: total };
+
+  const cmp = compareSameOrderDayOrder(contract, threshold);
+  if (cmp < 0) return { prePromotionUnits: total, postPromotionUnits: 0 };
+  if (cmp > 0) return { prePromotionUnits: 0, postPromotionUnits: total };
+
+  if (contract.id !== threshold.threshold_contract_id) {
+    return { prePromotionUnits: total, postPromotionUnits: 0 };
+  }
+
+  const preOnContract = Math.min(
+    total,
+    Math.max(0, threshold.threshold_pre_promotion_units_on_contract ?? total),
+  );
+  return {
+    prePromotionUnits: preOnContract,
+    postPromotionUnits: total - preOnContract,
+  };
+}
+
+/** 상위 노드 롤업에 포함할 구좌: 본인 승격 후 + (자식 승격자면) 자식 승격 전 */
+export function rollupEligibleUnitsForParentSubtree(
+  contract: PromotionOrderContractRef & { unit_count: number },
+  nodeThreshold: SalesMemberPromotionThreshold | null,
+  childThreshold: SalesMemberPromotionThreshold | null,
+): number {
+  let units = contract.unit_count;
+  if (nodeThreshold) {
+    units = splitContractUnitsByPromotionThreshold(contract, nodeThreshold).postPromotionUnits;
+  }
+  if (childThreshold) {
+    const preChild = splitContractUnitsByPromotionThreshold(contract, childThreshold).prePromotionUnits;
+    units = Math.min(units, preChild);
+  }
+  return units;
+}
+
+/** 승격자의 이전 리더 보강 롤업에 포함할 구좌(승격 전만) */
+export function prePromotionUnitsForPreviousLeaderRollup(
+  contract: PromotionOrderContractRef & { unit_count: number },
+  promotedThreshold: SalesMemberPromotionThreshold,
+): number {
+  return splitContractUnitsByPromotionThreshold(contract, promotedThreshold).prePromotionUnits;
+}
+
 function compareAttributedJoinRows(a: AttributedJoinContractRow, b: AttributedJoinContractRow): number {
   const od = contractJoinOrderYmd(a).localeCompare(contractJoinOrderYmd(b));
   if (od !== 0) return od;
@@ -153,22 +218,7 @@ export function computeSalesMemberPromotionThreshold(
   for (const [id, rank] of rankById) {
     if (rank !== '영업사원') continue;
     const subtree = collectSubtreeMemberIdsDownstream(id, childrenByParent);
-    let cum = 0;
-    let promo: SalesMemberPromotionThreshold | null = null;
-    for (const c of sorted) {
-      if (!subtree.has(c.sales_member_id)) continue;
-      cum += Math.max(0, c.unit_count ?? 0);
-      if (cum >= 20) {
-        promo = {
-          threshold_contract_id: c.id,
-          threshold_join_date: contractJoinOrderYmd(c),
-          threshold_invoice_registered_at: c.invoice_registered_at ?? null,
-          threshold_created_at: c.created_at ?? null,
-        };
-        break;
-      }
-    }
-    out.set(id, promo);
+    out.set(id, computeThresholdForSubtree(subtree, sorted, LEADER_PROMOTION_MIN_UNITS));
   }
   return out;
 }
@@ -381,13 +431,16 @@ function computeThresholdForSubtree(
   let cum = 0;
   for (const c of sorted) {
     if (!subtree.has(c.sales_member_id)) continue;
-    cum += Math.max(0, c.unit_count ?? 0);
+    const units = Math.max(0, c.unit_count ?? 0);
+    const cumBefore = cum;
+    cum += units;
     if (cum >= minUnits) {
       return {
         threshold_contract_id: c.id,
         threshold_join_date: contractJoinOrderYmd(c),
         threshold_invoice_registered_at: c.invoice_registered_at ?? null,
         threshold_created_at: c.created_at ?? null,
+        threshold_pre_promotion_units_on_contract: minUnits - cumBefore,
       };
     }
   }
