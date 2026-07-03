@@ -9,6 +9,7 @@ import type { OrgTreeRow } from '@/lib/types';
 import {
   computeSalesMemberPromotionThreshold,
   mergeLeaderPromotionEventThresholds,
+  refreshPromotionThresholdsFromJoinAttributed,
   isContractStrictlyAfterPromotionThreshold,
   contractJoinOrderYmd,
   type AttributedJoinContractRow,
@@ -335,6 +336,20 @@ export function calculateOrgNodeMetrics(params: {
     promotionThresholdByMemberId,
     leaderPromotionEventsForThreshold ?? [],
     leaderPromotionThresholdContractMetaById ?? new Map(),
+  );
+
+  const thresholdRefreshIds = new Set<string>(policyPromotedMemberIdSet ?? []);
+  for (const m of members) {
+    if (m.rank === '리더') thresholdRefreshIds.add(m.id);
+  }
+  for (const mid of promotionThresholdByMemberId.keys()) {
+    thresholdRefreshIds.add(mid);
+  }
+  refreshPromotionThresholdsFromJoinAttributed(
+    promotionThresholdByMemberId,
+    treeRowsForThreshold,
+    joinAttributed,
+    thresholdRefreshIds,
   );
 
   const leaderRankEffectiveAtByMemberId = new Map<string, string | null>();

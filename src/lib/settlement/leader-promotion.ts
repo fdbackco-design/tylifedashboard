@@ -461,6 +461,88 @@ export function computePromotionThresholdForMember(
 }
 
 /**
+ * 이벤트 테이블 등에서 threshold_contract_id만 알 때 승격 계약 내 pre 구좌 수를 보강한다.
+ */
+export function enrichThresholdPrePromotionUnits(
+  threshold: SalesMemberPromotionThreshold,
+  memberId: string,
+  treeRows: OrgTreeRow[],
+  joinContractsAttributed: AttributedJoinContractRow[],
+  minUnits: number = LEADER_PROMOTION_MIN_UNITS,
+): SalesMemberPromotionThreshold {
+  if (threshold.threshold_pre_promotion_units_on_contract != null) return threshold;
+
+  const recomputed = computePromotionThresholdForMember(
+    memberId,
+    treeRows,
+    joinContractsAttributed,
+    minUnits,
+  );
+  if (
+    recomputed &&
+    recomputed.threshold_contract_id === threshold.threshold_contract_id &&
+    recomputed.threshold_pre_promotion_units_on_contract != null
+  ) {
+    return {
+      ...threshold,
+      threshold_pre_promotion_units_on_contract: recomputed.threshold_pre_promotion_units_on_contract,
+    };
+  }
+
+  const childrenByParent = buildChildrenByParentFromRows(treeRows);
+  const subtree = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
+  const sorted = [...joinContractsAttributed].sort(compareAttributedJoinRows);
+  let cum = 0;
+  for (const c of sorted) {
+    if (!subtree.has(c.sales_member_id)) continue;
+    const units = Math.max(0, c.unit_count ?? 0);
+    if (c.id === threshold.threshold_contract_id) {
+      const preOnContract = minUnits - cum;
+      return {
+        ...threshold,
+        threshold_pre_promotion_units_on_contract: Math.min(units, Math.max(0, preOnContract)),
+      };
+    }
+    cum += units;
+  }
+  return threshold;
+}
+
+/**
+ * joinAttributed 기준 승격 threshold 재계산·보강.
+ * DB 리더는 computeLeaderPromotionThresholds 대상이 아니므로 별도 refresh가 필요하다.
+ */
+export function refreshPromotionThresholdsFromJoinAttributed(
+  promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>,
+  treeRows: OrgTreeRow[],
+  joinContractsAttributed: AttributedJoinContractRow[],
+  memberIds: Iterable<string>,
+): void {
+  for (const mid of memberIds) {
+    const recomputed = computePromotionThresholdForMember(mid, treeRows, joinContractsAttributed);
+    if (recomputed) {
+      promotionThresholdByMemberId.set(mid, recomputed);
+      continue;
+    }
+    const existing = promotionThresholdByMemberId.get(mid);
+    if (existing) {
+      promotionThresholdByMemberId.set(
+        mid,
+        enrichThresholdPrePromotionUnits(existing, mid, treeRows, joinContractsAttributed),
+      );
+    }
+  }
+
+  for (const [mid, th] of promotionThresholdByMemberId) {
+    if (!th || th.threshold_pre_promotion_units_on_contract != null) continue;
+    promotionThresholdByMemberId.set(
+      mid,
+      enrichThresholdPrePromotionUnits(th, mid, treeRows, joinContractsAttributed),
+    );
+  }
+}
+
+/**
  * DB 승격·leader_promotion_events 기록용 threshold.
  *
  * `computeSalesMemberPromotionThreshold` 와 달리:

@@ -8,7 +8,7 @@ import { buildSettlementTreeRows } from '@/lib/settlement/settlement-org-tree';
 import {
   computeLeaderPromotionThresholds,
   mergeLeaderPromotionEventThresholds,
-  computePromotionThresholdForMember,
+  refreshPromotionThresholdsFromJoinAttributed,
   type AttributedJoinContractRow,
   isContractStrictlyAfterPromotionThreshold,
 } from '@/lib/settlement/leader-promotion';
@@ -364,10 +364,32 @@ export async function calculateMonthlySettlement(params: {
     thresholdContractMetaById,
   );
 
-  // DB 리더(정책 승격자): joinAttributed+송장등록시각 기준 20구좌 — 이벤트보다 우선
-  for (const mid of policyPromotedLeaderIds) {
-    const recomputed = computePromotionThresholdForMember(mid, treeRows, joinAttributed);
-    if (recomputed) promotionThresholdByMemberId.set(mid, recomputed);
+  // DB 리더·이벤트 승격자: joinAttributed 기준 20구좌(+승격계약 내 pre/post 구좌) 재계산
+  const thresholdRefreshIds = new Set<string>(policyPromotedLeaderIds);
+  for (const m of membersRaw as OrganizationMember[]) {
+    if (m.rank === '리더') thresholdRefreshIds.add(m.id);
+  }
+  for (const mid of promotionThresholdByMemberId.keys()) {
+    thresholdRefreshIds.add(mid);
+  }
+  refreshPromotionThresholdsFromJoinAttributed(
+    promotionThresholdByMemberId,
+    treeRows,
+    joinAttributed,
+    thresholdRefreshIds,
+  );
+
+  if (debug) {
+    const imId = (membersRaw as OrganizationMember[]).find(
+      (m) => (m.name ?? '').replace(/^\[고객\]\s*/, '') === '임태순',
+    )?.id;
+    if (imId) {
+      // eslint-disable-next-line no-console
+      console.log('[settlement-debug] 임태순 promotion threshold', {
+        yearMonth,
+        threshold: promotionThresholdByMemberId.get(imId) ?? null,
+      });
+    }
   }
 
   const leaderRankEffectiveAtByMemberId = new Map<string, string | null>();
