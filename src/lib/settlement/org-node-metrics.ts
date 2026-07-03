@@ -45,11 +45,13 @@ function promotionOrderRef(c: {
   join_date: string;
   created_at?: string | null;
   happy_call_at?: string | null;
+  invoice_registered_at?: string | null;
 }): PromotionOrderContractRef {
   return {
     id: String(c.contract_id ?? c.id ?? ''),
     join_date: c.join_date.slice(0, 10),
     happy_call_at: c.happy_call_at ?? null,
+    invoice_registered_at: c.invoice_registered_at ?? null,
     created_at: c.created_at ?? null,
   };
 }
@@ -131,9 +133,7 @@ function effectiveRankForContract(params: {
     const orderYmd = contractJoinOrderYmd(params.contract);
     if (orderYmd > th.threshold_join_date) return '리더';
     if (orderYmd === th.threshold_join_date) {
-      const cAt = (params.contract.created_at ?? '').trim();
-      const tAt = (th.threshold_created_at ?? '').trim();
-      if (cAt && tAt && cAt > tAt) return '리더';
+      if (isContractStrictlyAfterPromotionThreshold(params.contract, th)) return '리더';
     }
   }
   return '영업사원';

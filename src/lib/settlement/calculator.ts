@@ -318,16 +318,8 @@ function commissionPerUnitForDirectContract(
     // DB 직급이 이미 리더: 순서일이 승격 계약일보다 뒤면 리더 단가.
     // 같은 순서일이면 contracts.created_at vs 승격 계약의 created_at(산하 20구좌 시점)으로 순서 보정.
     if (dbRank === '리더') {
-      const orderYmd = contractJoinOrderYmd(contract);
-      if (orderYmd > th.threshold_join_date) {
+      if (isContractStrictlyAfterPromotionThreshold(contract, th)) {
         return getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
-      }
-      if (orderYmd === th.threshold_join_date) {
-        const cAt = (contract.created_at ?? '').trim();
-        const tAt = (th.threshold_created_at ?? '').trim();
-        if (cAt && tAt && cAt > tAt) {
-          return getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
-        }
       }
     }
     return getActiveRuleOrFallback(rules, '영업사원', refDate).commission_per_unit;
@@ -341,6 +333,7 @@ function contractPromotionRef(c: Contract): PromotionOrderContractRef {
     id: c.id,
     join_date: c.join_date,
     happy_call_at: c.happy_call_at ?? null,
+    invoice_registered_at: (c as { invoice_registered_at?: string | null }).invoice_registered_at ?? null,
     created_at: (c as { created_at?: string | null }).created_at ?? null,
   };
 }

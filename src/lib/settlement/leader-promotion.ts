@@ -12,8 +12,10 @@ export type AttributedJoinContractRow = {
   join_date: string; // YYYY-MM-DD
   unit_count: number;
   sales_member_id: string;
-  /** 동일 순서일 tie-break(정산·승격 계약 순서). DB에 없으면 생략 */
+  /** 동일 순서일 tie-break 보조. invoice_registered_at 없을 때만 사용 */
   created_at?: string | null;
+  /** 동일 해피콜 완료일 내 순서: 송장 등록 시각(invoice_registered_at) 우선 */
+  invoice_registered_at?: string | null;
   /**
    * 정산 v2 가입 순서 1순위: 해피콜 완료 일시(서울 YMD 또는 ISO).
    * 없으면 join_date 로 fallback.
@@ -26,20 +28,22 @@ export type PromotionOrderContractRef = {
   id: string;
   join_date: string;
   happy_call_at?: string | null;
+  invoice_registered_at?: string | null;
   created_at?: string | null;
 };
 
 /**
- * 산하 가입 계약을 (순서일 → created_at → id) 순으로 쌓을 때,
+ * 산하 가입 계약을 (순서일 → 송장등록시각 → created_at → id) 순으로 쌓을 때,
  * 누적 구좌가 처음 20 이상이 되는 그 계약(승격 계약).
  * 순서일은 해피콜 완료일(서울 YMD) 우선, 없으면 join_date.
- * 같은 순서일에서 created_at이 없으면 id 문자열 순(레거시).
  */
 export type SalesMemberPromotionThreshold = {
   threshold_contract_id: string;
   /** 승격 계약의 순서일(해피콜 완료 YMD 우선, 없으면 join_date). 컬럼명은 레거시 유지 */
   threshold_join_date: string;
-  /** 승격 계약의 created_at(동일 순서일에서 순서 안정화). 없으면 id만으로 비교 */
+  /** 승격 계약의 invoice_registered_at (동일 순서일 tie-break 1순위) */
+  threshold_invoice_registered_at?: string | null;
+  /** 승격 계약의 created_at(동일 순서일 tie-break 보조) */
   threshold_created_at?: string | null;
 };
 
@@ -58,19 +62,28 @@ export function contractJoinOrderYmd(c: {
   return String(c.join_date ?? '').slice(0, 10);
 }
 
-/** 동일 순서일에서 승격 계약 대비 순서: created_at(둘 다 있을 때) → id */
-function compareSameJoinDayOrder(
-  contractId: string,
-  contractCreatedAt: string | null | undefined,
-  th: SalesMemberPromotionThreshold,
-): number {
-  const tCreated = normalizeCreatedAt(th.threshold_created_at);
-  const cCreated = normalizeCreatedAt(contractCreatedAt);
-  if (tCreated !== '' && cCreated !== '') {
-    const d = cCreated.localeCompare(tCreated);
+/** 동일 순서일 tie-break: invoice_registered_at → created_at → id */
+export function promotionOrderTieBreakTs(c: {
+  invoice_registered_at?: string | null;
+  created_at?: string | null;
+}): string {
+  const inv = normalizeCreatedAt(c.invoice_registered_at);
+  if (inv) return inv;
+  return normalizeCreatedAt(c.created_at);
+}
+
+function compareSameOrderDayOrder(contract: PromotionOrderContractRef, th: SalesMemberPromotionThreshold): number {
+  const cTie = promotionOrderTieBreakTs(contract);
+  const tTie =
+    promotionOrderTieBreakTs({
+      invoice_registered_at: th.threshold_invoice_registered_at,
+      created_at: th.threshold_created_at,
+    }) || normalizeCreatedAt(th.threshold_created_at);
+  if (cTie !== '' && tTie !== '') {
+    const d = cTie.localeCompare(tTie);
     if (d !== 0) return d;
   }
-  return contractId.localeCompare(th.threshold_contract_id);
+  return contract.id.localeCompare(th.threshold_contract_id);
 }
 
 /**
@@ -87,7 +100,7 @@ export function isContractAtOrAfterPromotionThreshold(
   const tj = threshold.threshold_join_date;
   if (aj > tj) return true;
   if (aj < tj) return false;
-  return compareSameJoinDayOrder(contract.id, contract.created_at, threshold) >= 0;
+  return compareSameOrderDayOrder(contract, threshold) >= 0;
 }
 
 /**
@@ -104,12 +117,18 @@ export function isContractStrictlyAfterPromotionThreshold(
   const tj = threshold.threshold_join_date;
   if (aj > tj) return true;
   if (aj < tj) return false;
-  return compareSameJoinDayOrder(contract.id, contract.created_at, threshold) > 0;
+  return compareSameOrderDayOrder(contract, threshold) > 0;
 }
 
 function compareAttributedJoinRows(a: AttributedJoinContractRow, b: AttributedJoinContractRow): number {
   const od = contractJoinOrderYmd(a).localeCompare(contractJoinOrderYmd(b));
   if (od !== 0) return od;
+  const ta = promotionOrderTieBreakTs(a);
+  const tb = promotionOrderTieBreakTs(b);
+  if (ta !== '' && tb !== '') {
+    const t = ta.localeCompare(tb);
+    if (t !== 0) return t;
+  }
   const ca = normalizeCreatedAt(a.created_at);
   const cb = normalizeCreatedAt(b.created_at);
   if (ca !== '' && cb !== '') {
@@ -143,6 +162,7 @@ export function computeSalesMemberPromotionThreshold(
         promo = {
           threshold_contract_id: c.id,
           threshold_join_date: contractJoinOrderYmd(c),
+          threshold_invoice_registered_at: c.invoice_registered_at ?? null,
           threshold_created_at: c.created_at ?? null,
         };
         break;
@@ -166,7 +186,12 @@ export function mergeLeaderPromotionEventThresholds(
   }>,
   thresholdContractMetaById: ReadonlyMap<
     string,
-    { join_date: string; happy_call_at?: string | null; created_at?: string | null }
+    {
+      join_date: string;
+      happy_call_at?: string | null;
+      invoice_registered_at?: string | null;
+      created_at?: string | null;
+    }
   >,
 ): void {
   for (const r of events) {
@@ -178,6 +203,7 @@ export function mergeLeaderPromotionEventThresholds(
       threshold_join_date: meta
         ? contractJoinOrderYmd(meta)
         : String(r.threshold_join_date).slice(0, 10),
+      threshold_invoice_registered_at: meta?.invoice_registered_at ?? null,
       threshold_created_at: meta?.created_at ?? null,
     });
   }
@@ -360,11 +386,25 @@ function computeThresholdForSubtree(
       return {
         threshold_contract_id: c.id,
         threshold_join_date: contractJoinOrderYmd(c),
+        threshold_invoice_registered_at: c.invoice_registered_at ?? null,
         threshold_created_at: c.created_at ?? null,
       };
     }
   }
   return null;
+}
+
+/** 정책 승격자(이미 DB 리더 포함) 산하 20구좌 승격 계약 — joinAttributed 정렬 기준과 동일 */
+export function computePromotionThresholdForMember(
+  memberId: string,
+  treeRows: OrgTreeRow[],
+  joinContractsAttributed: AttributedJoinContractRow[],
+  minUnits: number = LEADER_PROMOTION_MIN_UNITS,
+): SalesMemberPromotionThreshold | null {
+  const childrenByParent = buildChildrenByParentFromRows(treeRows);
+  const subtree = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
+  const sorted = [...joinContractsAttributed].sort(compareAttributedJoinRows);
+  return computeThresholdForSubtree(subtree, sorted, minUnits);
 }
 
 /**

@@ -8,6 +8,7 @@ import { buildSettlementTreeRows } from '@/lib/settlement/settlement-org-tree';
 import {
   computeLeaderPromotionThresholds,
   mergeLeaderPromotionEventThresholds,
+  computePromotionThresholdForMember,
   type AttributedJoinContractRow,
   isContractStrictlyAfterPromotionThreshold,
 } from '@/lib/settlement/leader-promotion';
@@ -191,12 +192,14 @@ export async function calculateMonthlySettlement(params: {
     sales_member_id: (r.sales_member_id ?? null) as string | null,
     happy_call_at: (r.happy_call_at ?? null) as string | null,
     created_at: (r.created_at ?? null) as string | null,
+    invoice_registered_at: (r.invoice_registered_at ?? null) as string | null,
   }));
 
   const itemNameByContractId = new Map<string, string | null>();
   const createdAtByContractId = new Map<string, string | null>();
   const customerIdByContractId = new Map<string, string | null>();
   // 그룹 보너스 해피콜 조건(happy_call_at <= 2026-06-12, result in {성공,완료,계약변경}) 판정용
+  const invoiceRegisteredAtByContractId = new Map<string, string | null>();
   const happyCallAtByContractId = new Map<string, string | null>();
   const happycallResultByContractId = new Map<string, string | null>();
   for (const r of eligibleContractRows) {
@@ -204,6 +207,7 @@ export async function calculateMonthlySettlement(params: {
     const id = String(r.id);
     itemNameByContractId.set(id, (r.item_name ?? null) as string | null);
     createdAtByContractId.set(id, (r.created_at ?? null) as string | null);
+    invoiceRegisteredAtByContractId.set(id, (r.invoice_registered_at ?? null) as string | null);
     customerIdByContractId.set(id, (r.customer_id ?? null) as string | null);
     happyCallAtByContractId.set(id, (r.happy_call_at ?? null) as string | null);
     happycallResultByContractId.set(id, (r.happycall_result ?? null) as string | null);
@@ -256,13 +260,14 @@ export async function calculateMonthlySettlement(params: {
   const normalizedContracts = normalizedContractsBase.map((c) => {
     const item_name = itemNameByContractId.get(c.id) ?? null;
     const created_at = createdAtByContractId.get(c.id) ?? null;
-    return { ...c, item_name, created_at };
+    const invoice_registered_at = invoiceRegisteredAtByContractId.get(c.id) ?? null;
+    return { ...c, item_name, created_at, invoice_registered_at };
   });
 
   // 리더 승격(20구좌) / 오버라이드 가입 순서 계산용 가입 인정 계약 집합.
   // - 정산 v2: status='가입' 이 아니어도 해피콜 결과(성공/완료/계약변경)면 가입 인정.
   // - 송장 미충족(=이월) 건도 가입 인정에는 포함 — 수당만 다음 월로 미뤄지는 것이지 가입 자체는 인정.
-  // - 정렬·승격 전/후 판정 키: 해피콜 완료일(서울 YMD) 우선, 없으면 join_date.
+  // - 정렬·승격 전/후 판정: 해피콜 완료일 → 동일일 송장등록시각(invoice_registered_at) → created_at
   const joinAttributed: AttributedJoinContractRow[] = [];
   for (const row of (allContractRows ?? []) as any[]) {
     if (row.is_cancelled) continue;
@@ -285,6 +290,7 @@ export async function calculateMonthlySettlement(params: {
       sales_member_id: sid,
       created_at: (row.created_at ?? null) as string | null,
       happy_call_at: hcYmd || (row.happy_call_at ?? null),
+      invoice_registered_at: (row.invoice_registered_at ?? null) as string | null,
     });
   }
 
@@ -329,12 +335,17 @@ export async function calculateMonthlySettlement(params: {
   ];
   const thresholdContractMetaById = new Map<
     string,
-    { join_date: string; happy_call_at?: string | null; created_at?: string | null }
+    {
+      join_date: string;
+      happy_call_at?: string | null;
+      invoice_registered_at?: string | null;
+      created_at?: string | null;
+    }
   >();
   if (thresholdContractIds.length > 0) {
     const { data: thContractRows, error: thCErr } = await db
       .from('contracts')
-      .select('id, created_at, join_date, happy_call_at')
+      .select('id, created_at, join_date, happy_call_at, invoice_registered_at')
       .in('id', thresholdContractIds);
     if (thCErr) throw new Error(`승격 계약(created_at) 조회 실패: ${thCErr.message}`);
     for (const row of (thContractRows ?? []) as any[]) {
@@ -342,6 +353,7 @@ export async function calculateMonthlySettlement(params: {
       thresholdContractMetaById.set(String(row.id), {
         join_date: String(row.join_date ?? '').slice(0, 10),
         happy_call_at: (row.happy_call_at ?? null) as string | null,
+        invoice_registered_at: (row.invoice_registered_at ?? null) as string | null,
         created_at: (row.created_at ?? null) as string | null,
       });
     }
@@ -351,6 +363,12 @@ export async function calculateMonthlySettlement(params: {
     (promoEvents ?? []) as any[],
     thresholdContractMetaById,
   );
+
+  // DB 리더(정책 승격자): joinAttributed+송장등록시각 기준 20구좌 — 이벤트보다 우선
+  for (const mid of policyPromotedLeaderIds) {
+    const recomputed = computePromotionThresholdForMember(mid, treeRows, joinAttributed);
+    if (recomputed) promotionThresholdByMemberId.set(mid, recomputed);
+  }
 
   const leaderRankEffectiveAtByMemberId = new Map<string, string | null>();
   for (const m of membersRaw as OrganizationMember[]) {
@@ -424,6 +442,8 @@ export async function calculateMonthlySettlement(params: {
           id: c.id,
           join_date: c.join_date,
           happy_call_at: (c as { happy_call_at?: string | null }).happy_call_at ?? null,
+          invoice_registered_at:
+            (c as { invoice_registered_at?: string | null }).invoice_registered_at ?? null,
           created_at: cCreated,
         },
         th,
