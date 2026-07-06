@@ -59,6 +59,11 @@ export interface Contract {
   sales_member_override_reason?: string | null;
   sales_member_override_by?: string | null;
   sales_member_overridden_at?: string | null;
+  /**
+   * 조기가동 그룹 보너스(2026-06) 가입일 윈도우 판정 전용. NULL이면 join_date 사용.
+   * TY 동기화는 이 컬럼을 갱신하지 않는다.
+   */
+  group_bonus_join_date?: string | null;
   join_date: string; // 'YYYY-MM-DD'
   product_type: ProductType;
   item_name: string;

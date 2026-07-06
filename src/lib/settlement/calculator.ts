@@ -282,6 +282,11 @@ export interface LeaderSettlementOpts {
    * - 보너스 적용 기간/그룹화 규칙은 `lib/settlement/group-bonus.ts` 참고.
    */
   groupBonusContracts?: ReadonlyArray<GroupBonusContractInput>;
+  /**
+   * 멤버별 incentive_amount 고정 override (settlement_statement_overrides.bonus_amount).
+   * 재계산 시에도 유지된다.
+   */
+  incentiveAmountOverrideByMemberId?: Map<string, number>;
   /** 멤버 id → 조직 트리 노드(승격 후 HQ 직속 등 이전 리더 롤업 보강용) */
   orgNodeByMemberId?: Map<string, OrgTreeNode>;
 }
@@ -701,12 +706,19 @@ export function calculateMemberSettlement(
   // 2026-06 한정 그룹 보너스 (2구좌당 5만원, 가입일+고객명+담당사원 그룹화)
   // - 직급 무관, 1구좌 그룹은 0원
   // - 정산월이 2026-06이 아니거나 입력이 없으면 0원
-  const groupBonus = leaderOpts?.groupBonusContracts
+  let groupBonus = leaderOpts?.groupBonusContracts
     ? calculateGroupBonusForMember(member.id, leaderOpts.groupBonusContracts, yearMonth)
     : 0;
 
-  const bonusAmountCombined = ruleIncentiveAmount + leaderMaintenanceBonus + groupBonus;
+  let bonusAmountCombined = ruleIncentiveAmount + leaderMaintenanceBonus + groupBonus;
   let totalAmount = baseCommission + rollupCommission + leaderMaintenanceBonus + groupBonus;
+
+  const incentiveOverride = leaderOpts?.incentiveAmountOverrideByMemberId?.get(member.id);
+  if (incentiveOverride != null && Number.isFinite(incentiveOverride)) {
+    bonusAmountCombined = Math.round(incentiveOverride);
+    groupBonus = Math.max(0, bonusAmountCombined - ruleIncentiveAmount - leaderMaintenanceBonus);
+    totalAmount = baseCommission + rollupCommission + bonusAmountCombined;
+  }
 
   // 수동 예외 차감 규칙은 사용하지 않는다.
   const manualAdjustment = 0;

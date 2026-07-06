@@ -31,6 +31,11 @@ export const GROUP_BONUS_VALID_HAPPYCALL_RESULTS: ReadonlySet<string> = new Set(
 export type GroupBonusContractInput = {
   /** 계약 가입일 (YYYY-MM-DD) */
   join_date: string;
+  /**
+   * 그룹 보너스 가입일 윈도우(5/26~6/10) 판정용 override.
+   * 있으면 join_date 대신 사용한다 (정산·실적 join_date 는 그대로).
+   */
+  group_bonus_join_date?: string | null;
   /** 고객명 (마스킹/접두 제거 등은 호출 측에서 통일해 전달) */
   customer_name: string;
   /** 정산 귀속 담당사원 ID */
@@ -82,7 +87,7 @@ export function calculateGroupBonusForMember(
     const salesMemberId = String(c.sales_member_id ?? '').trim();
     if (salesMemberId !== memberId) continue;
 
-    const joinYmd = normalizeYmd(c.join_date);
+    const joinYmd = normalizeYmd(c.group_bonus_join_date ?? c.join_date);
     if (joinYmd < GROUP_BONUS_WINDOW_START_YMD || joinYmd > GROUP_BONUS_WINDOW_END_YMD) continue;
 
     // 해피콜 추가 조건: 결과는 '성공'/'완료' 이고, 데드라인 이전(포함)에 완료된 계약만.

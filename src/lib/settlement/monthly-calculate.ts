@@ -78,6 +78,7 @@ export async function calculateMonthlySettlement(params: {
         'deferred_from_month',
         'deferred_to_month',
         'settlement_status',
+        'group_bonus_join_date',
       ].join(', '),
     );
   if (cErr) throw new Error(`계약 조회 실패: ${cErr.message}`);
@@ -214,6 +215,7 @@ export async function calculateMonthlySettlement(params: {
   const invoiceRegisteredAtByContractId = new Map<string, string | null>();
   const happyCallAtByContractId = new Map<string, string | null>();
   const happycallResultByContractId = new Map<string, string | null>();
+  const groupBonusJoinDateByContractId = new Map<string, string | null>();
   for (const r of eligibleContractRows) {
     if (!r?.id) continue;
     const id = String(r.id);
@@ -223,6 +225,10 @@ export async function calculateMonthlySettlement(params: {
     customerIdByContractId.set(id, (r.customer_id ?? null) as string | null);
     happyCallAtByContractId.set(id, (r.happy_call_at ?? null) as string | null);
     happycallResultByContractId.set(id, (r.happycall_result ?? null) as string | null);
+    const gbjd = (r as { group_bonus_join_date?: string | null }).group_bonus_join_date ?? null;
+    if (gbjd != null && String(gbjd).trim() !== '') {
+      groupBonusJoinDateByContractId.set(id, String(gbjd).slice(0, 10));
+    }
   }
 
   // 그룹 보너스 산정용 고객명 맵 (2구좌당 5만원, 가입일+고객명+담당사원 그룹화)
@@ -412,12 +418,28 @@ export async function calculateMonthlySettlement(params: {
     if (!customerName) continue;
     groupBonusContracts.push({
       join_date: c.join_date,
+      group_bonus_join_date: groupBonusJoinDateByContractId.get(c.id) ?? null,
       customer_name: customerName,
       sales_member_id: c.sales_member_id,
       unit_count: c.unit_count,
       happy_call_at: happyCallAtByContractId.get(c.id) ?? null,
       happycall_result: happycallResultByContractId.get(c.id) ?? null,
     });
+  }
+
+  const incentiveAmountOverrideByMemberId = new Map<string, number>();
+  const { data: bonusOverrideRows, error: bonusOvErr } = await db
+    .from('settlement_statement_overrides')
+    .select('member_id, bonus_amount')
+    .eq('year_month', yearMonth)
+    .not('bonus_amount', 'is', null);
+  if (bonusOvErr) throw new Error(`보너스 override 조회 실패: ${bonusOvErr.message}`);
+  for (const row of (bonusOverrideRows ?? []) as Array<{ member_id: string; bonus_amount: number }>) {
+    const mid = String(row.member_id ?? '').trim();
+    if (!mid) continue;
+    const amt = Number(row.bonus_amount);
+    if (!Number.isFinite(amt)) continue;
+    incentiveAmountOverrideByMemberId.set(mid, Math.round(amt));
   }
 
   const leaderOpts: LeaderSettlementOpts = {
@@ -429,6 +451,7 @@ export async function calculateMonthlySettlement(params: {
     previousLeaderByPromotedMemberId: prevLeaderByPromotedMemberId,
     leaderRankEffectiveAtByMemberId,
     groupBonusContracts,
+    incentiveAmountOverrideByMemberId,
   };
 
   const contractsByMember = new Map<string, Contract[]>();
