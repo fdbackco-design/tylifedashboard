@@ -773,9 +773,13 @@ export function buildPromotionUnitSplitByMemberIds(
   joinContractsAttributed: AttributedJoinContractRow[],
   minUnits: number = LEADER_PROMOTION_MIN_UNITS,
 ): Map<string, Map<string, PromotionUnitSplit>> {
+  const childrenByParent = buildChildrenByParentFromRows(treeRows);
+  const sorted = [...joinContractsAttributed].sort(compareAttributedJoinRows);
   const out = new Map<string, Map<string, PromotionUnitSplit>>();
   for (const memberId of memberIds) {
-    out.set(memberId, buildPromotionUnitSplitByContractId(memberId, treeRows, joinContractsAttributed, minUnits));
+    const subtree = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
+    const { splitByContractId } = promotionWalkFromCumulative(sorted, subtree, minUnits);
+    out.set(memberId, splitByContractId);
   }
   return out;
 }
