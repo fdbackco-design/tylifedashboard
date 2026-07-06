@@ -10,6 +10,7 @@ import {
   computeSalesMemberPromotionThreshold,
   mergeLeaderPromotionEventThresholds,
   refreshPromotionThresholdsFromJoinAttributed,
+  enrichThresholdPrePromotionUnits,
   isContractStrictlyAfterPromotionThreshold,
   contractJoinOrderYmd,
   type AttributedJoinContractRow,
@@ -340,9 +341,11 @@ export function calculateOrgNodeMetrics(params: {
     leaderPromotionThresholdContractMetaById ?? new Map(),
   );
 
-  const thresholdRefreshIds = new Set<string>(policyPromotedMemberIdSet ?? []);
+  const thresholdRefreshIds = new Set<string>();
   for (const m of members) {
-    if (m.rank === '리더') thresholdRefreshIds.add(m.id);
+    if (m.rank === '리더' && !(policyPromotedMemberIdSet?.has(m.id) ?? false)) {
+      thresholdRefreshIds.add(m.id);
+    }
   }
   refreshPromotionThresholdsFromJoinAttributed(
     promotionThresholdByMemberId,
@@ -350,6 +353,17 @@ export function calculateOrgNodeMetrics(params: {
     joinAttributed,
     thresholdRefreshIds,
   );
+
+  if (policyPromotedMemberIdSet) {
+    for (const mid of policyPromotedMemberIdSet) {
+      const th = promotionThresholdByMemberId.get(mid);
+      if (!th) continue;
+      promotionThresholdByMemberId.set(
+        mid,
+        enrichThresholdPrePromotionUnits(th, mid, treeRowsForThreshold, joinAttributed),
+      );
+    }
+  }
 
   const leaderRankEffectiveAtByMemberId = new Map<string, string | null>();
   for (const m of members) {

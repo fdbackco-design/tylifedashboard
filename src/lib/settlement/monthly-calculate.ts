@@ -11,6 +11,7 @@ import {
   refreshPromotionThresholdsFromJoinAttributed,
   isLeaderPromotionJoinContractRow,
   debugPromotionThresholdPath,
+  enrichThresholdPrePromotionUnits,
   type AttributedJoinContractRow,
   isContractStrictlyAfterPromotionThreshold,
 } from '@/lib/settlement/leader-promotion';
@@ -372,10 +373,14 @@ export async function calculateMonthlySettlement(params: {
     thresholdContractMetaById,
   );
 
-  // DB 리더·이벤트 승격자: joinAttributed 기준 20구좌(+승격계약 내 pre/post 구좌) 재계산
-  const thresholdRefreshIds = new Set<string>(policyPromotedLeaderIds);
+  // DB 리더(정책 승격 제외): joinAttributed 기준 threshold 재계산.
+  // 정책 승격자는 leader_promotion_events 가 SSOT — refresh 로 덮어쓰면 6월 승격계약으로 잡혀
+  // 5월 승격 이후 계약까지 전부 30만원/구좌가 된다.
+  const thresholdRefreshIds = new Set<string>();
   for (const m of membersRaw as OrganizationMember[]) {
-    if (m.rank === '리더') thresholdRefreshIds.add(m.id);
+    if (m.rank === '리더' && !policyPromotedLeaderIds.has(m.id)) {
+      thresholdRefreshIds.add(m.id);
+    }
   }
   refreshPromotionThresholdsFromJoinAttributed(
     promotionThresholdByMemberId,
@@ -383,6 +388,15 @@ export async function calculateMonthlySettlement(params: {
     joinAttributed,
     thresholdRefreshIds,
   );
+
+  for (const mid of policyPromotedLeaderIds) {
+    const th = promotionThresholdByMemberId.get(mid);
+    if (!th) continue;
+    promotionThresholdByMemberId.set(
+      mid,
+      enrichThresholdPrePromotionUnits(th, mid, treeRows, joinAttributed),
+    );
+  }
 
   if (debug) {
     const imId = (membersRaw as OrganizationMember[]).find(
