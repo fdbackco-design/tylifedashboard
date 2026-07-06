@@ -41,16 +41,16 @@ import type { ContractInsert, ContractStatus } from '../types/contract';
 import { buildPerformancePath } from '../organization/performance-path';
 import { resolveSalesMemberByNameOnly } from './sales-resolution';
 import { resolveContractorByNameOnly } from './contractor-resolution';
-import { buildSettlementTreeRows } from '../settlement/settlement-org-tree';
+import { buildOrgStructuralTreeContext } from '../organization/org-structural-tree';
 import {
   computeLeaderPromotionThresholds,
   computeCenterChiefPromotionMemberIds,
   computeCenterChiefDemotionMemberIds,
+  isPromotionAccumulationJoinContractRow,
   type AttributedJoinContractRow,
 } from '../settlement/leader-promotion';
 import type { RankType } from '../types/organization';
 import { hasValidInvoiceNo, normalizeInvoiceNo } from '../utils/invoice-no';
-import { isContractJoinCompleted } from '../utils/contract-display-status';
 import {
   mergeExistingContractFields,
   resolveInternalContractStatus,
@@ -1588,13 +1588,13 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
         const [membersRes, edgesRes, joinContractsRes] = await Promise.all([
           db
             .from('organization_members')
-            .select('id, name, rank, external_id, source_customer_id, lock_center_chief_promotion')
+            .select('id, name, rank, phone, external_id, source_customer_id, lock_center_chief_promotion')
             .eq('is_active', true),
           db.from('organization_edges').select('parent_id, child_id'),
           db
             .from('contracts')
             .select(
-              'id, join_date, unit_count, sales_member_id, customer_id, sales_link_status, status, is_cancelled, rental_request_no, invoice_no, memo, created_at, happy_call_at',
+              'id, join_date, unit_count, sales_member_id, settlement_sales_member_id, customer_id, sales_link_status, status, is_cancelled, rental_request_no, invoice_no, invoice_registered_at, memo, created_at, happy_call_at, happycall_result, contract_code',
             )
             .eq('is_cancelled', false),
         ]);
@@ -1608,6 +1608,7 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
           id: string;
           name: string;
           rank: RankType;
+          phone?: string | null;
           external_id?: string | null;
           source_customer_id?: string | null;
           lock_center_chief_promotion?: boolean | null;
@@ -1615,63 +1616,71 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
 
         const edgesRaw = (edgesRes.data ?? []) as Array<{ parent_id: string | null; child_id: string }>;
 
-        // customer_id → 조직원 id 매핑(정산 계산과 동일)
-        const memberIdByCustomerId = new Map<string, string>();
-        for (const m of membersRaw as any[]) {
-          const sid = (m.source_customer_id ?? null) as string | null;
-          if (sid && m.rank !== '본사') {
-            memberIdByCustomerId.set(sid, m.id as string);
-            continue;
-          }
-          const ext = (m.external_id ?? null) as string | null;
-          if (ext && ext.startsWith('customer:') && m.rank !== '본사') {
-            const customerId = ext.slice('customer:'.length);
-            if (!memberIdByCustomerId.has(customerId)) memberIdByCustomerId.set(customerId, m.id as string);
+        const joinContractRows = (joinContractsRes.data ?? []) as any[];
+        const walkCustomerIds = [
+          ...new Set(
+            joinContractRows
+              .map((r) => (r.customer_id ?? null) as string | null)
+              .filter((v): v is string => !!v),
+          ),
+        ];
+        const customerPhoneById = new Map<string, string | null>();
+        const customerNameById = new Map<string, string>();
+        if (walkCustomerIds.length > 0) {
+          const { data: customerRows, error: cuErr } = await db
+            .from('customers')
+            .select('id, name, phone')
+            .in('id', walkCustomerIds);
+          if (cuErr) throw new Error(`customers(walk) 조회 실패: ${cuErr.message}`);
+          for (const r of (customerRows ?? []) as any[]) {
+            if (!r?.id) continue;
+            const id = String(r.id);
+            customerPhoneById.set(id, (r.phone ?? null) as string | null);
+            customerNameById.set(id, String(r.name ?? '').trim());
           }
         }
 
+        const orgWalkCtx = buildOrgStructuralTreeContext({
+          membersRaw: membersRaw.map((m) => ({
+            id: m.id,
+            name: m.name,
+            rank: m.rank,
+            phone: m.phone ?? null,
+            external_id: m.external_id ?? null,
+            source_customer_id: m.source_customer_id ?? null,
+          })),
+          edgesRaw,
+        });
+        const { treeRows, resolveSettlementWalkSalesMemberId } = orgWalkCtx;
+
         const joinAttributed: AttributedJoinContractRow[] = [];
-        for (const row of (joinContractsRes.data ?? []) as any[]) {
-          if ((row.sales_link_status ?? 'linked') !== 'linked') continue;
-          if (!row.sales_member_id) continue;
-          // 조직도/정산과 동일하게 "가입 인정 기준"으로 필터링
-          if (
-            !isContractJoinCompleted({
-              status: String(row.status ?? ''),
-              rental_request_no: (row.rental_request_no ?? null) as string | null,
-              invoice_no: (row.invoice_no ?? null) as string | null,
-              memo: (row.memo ?? null) as string | null,
-            })
-          ) {
-            continue;
-          }
-          let sid = row.sales_member_id as string;
-          const cid = row.customer_id as string | null;
-          if (cid) {
-            const mapped = memberIdByCustomerId.get(cid);
-            if (mapped) sid = mapped;
-          }
+        for (const row of joinContractRows) {
+          if (!isPromotionAccumulationJoinContractRow(row)) continue;
+          const original = (row.sales_member_id ?? null) as string | null;
+          if (!original) continue;
+          const customerId = (row.customer_id ?? null) as string | null;
+          const sid = resolveSettlementWalkSalesMemberId({
+            sales_member_id: original,
+            settlement_sales_member_id: (row.settlement_sales_member_id ?? null) as string | null,
+            customer_id: customerId ?? '',
+            status: String(row.status ?? ''),
+            rental_request_no: (row.rental_request_no ?? null) as string | null,
+            invoice_no: (row.invoice_no ?? null) as string | null,
+            memo: (row.memo ?? null) as string | null,
+            customer_phone: customerId ? (customerPhoneById.get(customerId) ?? null) : null,
+            contract_code: (row.contract_code ?? null) as string | null,
+            customer_name: customerId ? (customerNameById.get(customerId) ?? '') : '',
+          });
           joinAttributed.push({
             id: row.id,
             join_date: String(row.join_date ?? '').slice(0, 10),
             unit_count: row.unit_count ?? 0,
             sales_member_id: sid,
             created_at: (row.created_at ?? null) as string | null,
-            // 리더 승격(20구좌) 가입 순서 v2 기준: happy_call_at 우선
             happy_call_at: (row.happy_call_at ?? null) as string | null,
+            invoice_registered_at: (row.invoice_registered_at ?? null) as string | null,
           });
         }
-
-        const treeRows = buildSettlementTreeRows(
-          membersRaw as Array<{
-            id: string;
-            name: string;
-            rank: RankType;
-            source_customer_id?: string | null;
-            external_id?: string | null;
-          }>,
-          edgesRaw,
-        );
 
         const rankById = new Map<string, RankType>();
         for (const m of membersRaw) rankById.set(m.id as string, m.rank as RankType);

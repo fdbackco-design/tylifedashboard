@@ -4,7 +4,7 @@ import {
   buildOrgTree,
   type LeaderSettlementOpts,
 } from '@/lib/settlement/calculator';
-import { buildSettlementTreeRows } from '@/lib/settlement/settlement-org-tree';
+import { buildOrgStructuralTreeContext } from '@/lib/organization/org-structural-tree';
 import {
   computeLeaderPromotionThresholds,
   mergeLeaderPromotionEventThresholds,
@@ -105,6 +105,32 @@ export async function calculateMonthlySettlement(params: {
       sales_member_id: effective,
     };
   });
+
+  // 승격 walk 조직도 귀속(HQ→고객노드 등)용 고객 연락처
+  const walkCustomerIds = [
+    ...new Set(
+      ((allContractRows ?? []) as any[])
+        .map((r) => (r.customer_id ?? null) as string | null)
+        .filter((v): v is string => !!v),
+    ),
+  ];
+  const customerPhoneById = new Map<string, string | null>();
+  const customerNameByIdEarly = new Map<string, string>();
+  if (walkCustomerIds.length > 0) {
+    for (const idChunk of chunkIds(walkCustomerIds, DB_ID_CHUNK_SIZE)) {
+      const { data: customerRows, error: cuWalkErr } = await db
+        .from('customers')
+        .select('id, name, phone')
+        .in('id', idChunk);
+      if (cuWalkErr) throw new Error(`customers(walk) 조회 실패: ${cuWalkErr.message}`);
+      for (const r of (customerRows ?? []) as any[]) {
+        if (!r?.id) continue;
+        const id = String(r.id);
+        customerPhoneById.set(id, (r.phone ?? null) as string | null);
+        customerNameByIdEarly.set(id, String(r.name ?? '').trim());
+      }
+    }
+  }
 
   // 정산 후보 / 이월 / 제외 판정
   const eligibleContractRows: any[] = [];
@@ -281,8 +307,43 @@ export async function calculateMonthlySettlement(params: {
   }
   const edgesRaw = (edgesRes.data ?? []) as Array<{ parent_id: string | null; child_id: string }>;
 
-  // 월정산 직접 계약 귀속은 v_contract_settlement_base의 sales_member_id와 동일하게 둔다.
-  // customer_id → 조직원 치환을 하면 Supabase 뷰와 정산 결과가 어긋날 수 있다.
+  const orgWalkCtx = buildOrgStructuralTreeContext({
+    membersRaw: (membersRaw as unknown as Array<{
+      id: string;
+      name: string;
+      rank: string;
+      phone: string | null;
+      external_id: string | null;
+      source_customer_id: string | null;
+    }>).map((m) => ({
+      ...m,
+      phone: m.phone ?? null,
+      external_id: m.external_id ?? null,
+      source_customer_id: m.source_customer_id ?? null,
+    })),
+    edgesRaw,
+  });
+  const { treeRows, resolveSettlementWalkSalesMemberId } = orgWalkCtx;
+
+  const resolveWalkAttributedMemberId = (row: any): string | null => {
+    const original = (row.original_sales_member_id ?? row.sales_member_id ?? null) as string | null;
+    if (!original) return null;
+    const customerId = (row.customer_id ?? null) as string | null;
+    return resolveSettlementWalkSalesMemberId({
+      sales_member_id: original,
+      settlement_sales_member_id: (row.settlement_sales_member_id ?? null) as string | null,
+      customer_id: customerId ?? '',
+      status: String(row.status ?? ''),
+      rental_request_no: (row.rental_request_no ?? null) as string | null,
+      invoice_no: (row.invoice_no ?? null) as string | null,
+      memo: (row.memo ?? null) as string | null,
+      customer_phone: customerId ? (customerPhoneById.get(customerId) ?? null) : null,
+      contract_code: (row.contract_code ?? null) as string | null,
+      customer_name: customerId ? (customerNameByIdEarly.get(customerId) ?? '') : '',
+    });
+  };
+
+  // 월정산 직접 계약 귀속은 v_contract_settlement_base의 sales_member_id(effective)와 동일하게 둔다.
   const normalizedContracts = normalizedContractsBase.map((c) => {
     const item_name = itemNameByContractId.get(c.id) ?? null;
     const created_at = createdAtByContractId.get(c.id) ?? null;
@@ -291,13 +352,13 @@ export async function calculateMonthlySettlement(params: {
   });
 
   // 리더 승격(20구좌) walk: 가입 인정 계약만 누적.
-  // - status=가입 → 포함
-  // - status=준비/대기 → happycall_result=성공 + 송장번호 있을 때만 포함
-  // - 정렬: happy_call_at → invoice_registered_at → created_at → id
+  // - 조직도와 동일: settlement override → resolveContractSalesMemberId(HQ/고객노드 치환)
+  // - status=가입 → 포함 / 준비·대기 → happycall 성공+송장
   const joinAttributed: AttributedJoinContractRow[] = [];
   for (const row of (allContractRows ?? []) as any[]) {
     if (!isPromotionAccumulationJoinContractRow(row)) continue;
-    const sid = row.sales_member_id as string;
+    const sid = resolveWalkAttributedMemberId(row);
+    if (!sid) continue;
     joinAttributed.push({
       id: row.id,
       contract_code: (row.contract_code ?? null) as string | null,
@@ -315,11 +376,6 @@ export async function calculateMonthlySettlement(params: {
       source_snapshot_json: (row.source_snapshot_json ?? null) as Record<string, string | null> | null,
     });
   }
-
-  const treeRows = buildSettlementTreeRows(
-    membersRaw as Array<{ id: string; name: string; rank: RankType; source_customer_id?: string | null }>,
-    edgesRaw,
-  );
 
   const { data: promoEvents } = await db
     .from('leader_promotion_events')
@@ -409,12 +465,13 @@ export async function calculateMonthlySettlement(params: {
   for (const row of (allContractRows ?? []) as any[]) {
     const st = String(row.status ?? '').trim();
     if (st !== '가입' && st !== '준비' && st !== '대기') continue;
-    if (!row.sales_member_id) continue;
+    const sid = resolveWalkAttributedMemberId(row);
+    if (!sid) continue;
     joinStatusCandidates.push({
       id: row.id,
       contract_code: (row.contract_code ?? null) as string | null,
       unit_count: row.unit_count ?? 0,
-      sales_member_id: row.sales_member_id as string,
+      sales_member_id: sid,
       join_date: String(row.join_date ?? '').slice(0, 10),
       status: String(row.status ?? ''),
       is_cancelled: row.is_cancelled ?? null,

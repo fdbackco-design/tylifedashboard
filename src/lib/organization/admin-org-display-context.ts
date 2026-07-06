@@ -1,9 +1,9 @@
 import { buildOrgTree } from '@/lib/settlement/calculator';
 import {
-  buildOrgContractSalesRemap,
   type ContractSalesRemapInput,
   type OrgMemberForContractRemap,
 } from '@/lib/organization/org-contract-sales-remap';
+import { buildOrgStructuralTreeContext } from '@/lib/organization/org-structural-tree';
 import {
   computeLeaderPromotionThresholds,
   computeCenterChiefPromotionMemberIds,
@@ -57,17 +57,20 @@ export function buildAdminOrgDisplayContext(params: {
 }): AdminOrgDisplayContext {
   const { membersRaw, edgesRaw, rawContractRows } = params;
 
-  const remapCtx = buildOrgContractSalesRemap(membersRaw as unknown as OrgMemberForContractRemap[]);
+  const orgStructural = buildOrgStructuralTreeContext({
+    membersRaw: membersRaw as unknown as OrgMemberForContractRemap[],
+    edgesRaw,
+  });
   const {
+    treeRows: treeRowsBase,
     remapMemberId,
     resolveContractSalesMemberId,
     remapCustomerMemberId,
     hqIds: hqIdsRaw,
     membersFiltered,
-  } = remapCtx;
+  } = orgStructural;
 
   const members = membersFiltered as unknown as OrganizationMember[];
-  const memberIdSet = new Set(members.map((m) => m.id));
   const memberNameById = new Map(members.map((m) => [m.id, (m.name ?? '').replace(/^\[고객\]\s*/, '').trim()]));
 
   const hqIdForTree =
@@ -79,44 +82,9 @@ export function buildAdminOrgDisplayContext(params: {
       .map((m) => m.id),
   );
 
-  const edges = edgesRaw.map((e) => ({
-    parent_id: e.parent_id ? remapMemberId(e.parent_id) : null,
-    child_id: remapMemberId(e.child_id),
-  }));
-
-  const bestByChild = new Map<string, { parent_id: string | null; child_id: string }>();
-  const isBetter = (
-    next: { parent_id: string | null; child_id: string },
-    prev: { parent_id: string | null; child_id: string },
-  ): boolean => {
-    const nextIsHq = next.parent_id != null && hqIdsRaw.has(next.parent_id);
-    const prevIsHq = prev.parent_id != null && hqIdsRaw.has(prev.parent_id);
-    if (nextIsHq !== prevIsHq) return nextIsHq;
-    if ((next.parent_id != null) !== (prev.parent_id != null)) return next.parent_id != null;
-    return false;
-  };
-
-  for (const e of edges) {
-    const parent_id = e.parent_id && memberIdSet.has(e.parent_id) ? e.parent_id : null;
-    const child_id = e.child_id;
-    if (!memberIdSet.has(child_id)) continue;
-    const next = { parent_id, child_id };
-    const prev = bestByChild.get(child_id);
-    if (!prev || isBetter(next, prev)) bestByChild.set(child_id, next);
-  }
-
-  const dedupedEdges = [...bestByChild.values()];
-  const edgeMap = new Map<string, string | null>();
-  for (const e of dedupedEdges) {
-    edgeMap.set(e.child_id, e.parent_id);
-  }
-
-  const treeRowsBase: OrgTreeRow[] = members.map((m) => ({
-    id: m.id,
-    name: m.name,
-    rank: m.rank,
-    parent_id: m.rank === '본사' ? null : (edgeMap.get(m.id) ?? null),
-    depth: 0,
+  const dedupedEdges = treeRowsBase.map((r) => ({
+    parent_id: r.parent_id,
+    child_id: r.id,
   }));
 
   let treeRows: OrgTreeRow[] = treeRowsBase;
