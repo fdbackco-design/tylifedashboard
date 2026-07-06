@@ -4,9 +4,12 @@ import type { OrgTreeRow } from '@/lib/types';
 import {
   buildPromotionCommissionWalkForMember,
   buildPromotionUnitSplitByContractId,
+  auditPromotionEventWalkMismatch,
   isPromotionAccumulationJoinContractRow,
   resolvePromotionUnitSplit,
   type AttributedJoinContractRow,
+  type SalesMemberPromotionThreshold,
+  type LeaderPromotionEventRecord,
 } from './leader-promotion';
 
 const MEMBER = 'member-1';
@@ -133,5 +136,95 @@ describe('leader promotion commission (cumulative walk SSOT)', () => {
     const { splitByContractId } = walk(rows);
     assert.equal(splitByContractId.get('june')?.postPromotionUnits, 1);
     assert.equal(splitByContractId.get('june')?.prePromotionUnits, 0);
+  });
+
+  it('8) leader_promotion_events threshold 이후 — walk 누적 20 미만이어도 40만', () => {
+    const thresholdId = 'threshold-may';
+    const threshold: SalesMemberPromotionThreshold = {
+      threshold_contract_id: thresholdId,
+      threshold_join_date: '2026-05-21',
+      threshold_pre_promotion_units_on_contract: 1,
+    };
+    const rows: AttributedJoinContractRow[] = [
+      row('early-1', 1, { happy_call_at: '2026-05-01' }),
+      row('early-2', 1, { happy_call_at: '2026-05-10' }),
+      { ...row(thresholdId, 2, { happy_call_at: '2026-05-21' }), id: thresholdId },
+      row('june-a', 1, { happy_call_at: '2026-06-10' }),
+      row('june-b', 1, { happy_call_at: '2026-06-11' }),
+    ];
+    const eventIds = new Set([MEMBER]);
+    const thresholdMap = new Map([[MEMBER, threshold]]);
+    const eventsMap = new Map<string, LeaderPromotionEventRecord>([
+      [
+        MEMBER,
+        {
+          member_id: MEMBER,
+          threshold_contract_id: thresholdId,
+          threshold_join_date: '2026-05-21',
+          created_at: '2026-05-21T00:00:00Z',
+        },
+      ],
+    ]);
+    const { splitByContractId, audit } = buildPromotionCommissionWalkForMember(
+      MEMBER,
+      treeRows,
+      rows,
+      20,
+      {
+        promotionThresholdByMemberId: thresholdMap,
+        promotionEventsByMemberId: eventsMap,
+        treeRows,
+      },
+    );
+    assert.equal(splitByContractId.get('june-a')?.postPromotionUnits, 1);
+    assert.equal(splitByContractId.get('june-a')?.prePromotionUnits, 0);
+    assert.equal(audit.find((a) => a.contractId === 'june-a')?.promotionReason, 'AFTER_PROMOTION');
+    assert.equal(audit.find((a) => a.contractId === 'june-b')?.promotionReason, 'AFTER_PROMOTION');
+  });
+
+  it('9) 이벤트 있음 + walk 20 미만 → PROMOTION_EVENT_WALK_MISMATCH (수당은 40만 유지)', () => {
+    const thresholdId = 'threshold-may';
+    const threshold: SalesMemberPromotionThreshold = {
+      threshold_contract_id: thresholdId,
+      threshold_join_date: '2026-05-21',
+    };
+    const rows: AttributedJoinContractRow[] = [
+      row('early-1', 1, { happy_call_at: '2026-05-01' }),
+      { ...row(thresholdId, 1, { happy_call_at: '2026-05-21' }), id: thresholdId },
+      row('june-a', 1, { happy_call_at: '2026-06-10' }),
+    ];
+    const mismatches: import('./leader-promotion').PromotionEventWalkMismatch[] = [];
+    const { splitByContractId } = buildPromotionCommissionWalkForMember(MEMBER, treeRows, rows, 20, {
+      promotionThresholdByMemberId: new Map([[MEMBER, threshold]]),
+      promotionEventsByMemberId: new Map([
+        [
+          MEMBER,
+          {
+            member_id: MEMBER,
+            threshold_contract_id: thresholdId,
+            threshold_join_date: '2026-05-21',
+            created_at: '2026-05-21T00:00:00Z',
+          },
+        ],
+      ]),
+      joinStatusCandidates: [
+        {
+          id: 'excluded-1',
+          contract_code: 'EX1',
+          unit_count: 5,
+          sales_member_id: MEMBER,
+          status: '가입',
+          happycall_result: '부재',
+          invoice_no: null,
+        },
+      ],
+      walkMismatchOut: mismatches,
+      treeRows,
+    });
+    assert.equal(splitByContractId.get('june-a')?.postPromotionUnits, 1);
+    assert.equal(mismatches.length, 1);
+    assert.equal(mismatches[0]?.type, 'PROMOTION_EVENT_WALK_MISMATCH');
+    assert.equal(mismatches[0]?.walk_total_join_units, 3);
+    assert.equal(mismatches[0]?.excluded_join_contracts.length, 1);
   });
 });

@@ -14,7 +14,11 @@ import {
   enrichThresholdPrePromotionUnits,
   buildPromotionUnitSplitByMemberIds,
   buildPromotionCommissionWalkForMember,
+  LEADER_PROMOTION_MIN_UNITS,
   type AttributedJoinContractRow,
+  type LeaderPromotionEventRecord,
+  type PromotionEventWalkMismatch,
+  type JoinStatusContractCandidate,
   isContractStrictlyAfterPromotionThreshold,
 } from '@/lib/settlement/leader-promotion';
 import type { Contract, OrganizationMember, SettlementRule } from '@/lib/types';
@@ -320,12 +324,13 @@ export async function calculateMonthlySettlement(params: {
   const { data: promoEvents } = await db
     .from('leader_promotion_events')
     .select(
-      'member_id, previous_parent_id, leader_maintenance_bonus_paid_year_month, threshold_contract_id, threshold_join_date',
+      'member_id, previous_parent_id, leader_maintenance_bonus_paid_year_month, threshold_contract_id, threshold_join_date, created_at',
     );
   const prevParentByMemberId = new Map<string, string | null>();
   const leaderMaintBlockByMemberId = new Map<string, boolean>();
   const prevLeaderByPromotedMemberId = new Map<string, string | null>();
   const policyPromotedLeaderIds = new Set<string>();
+  const promotionEventsByMemberId = new Map<string, LeaderPromotionEventRecord>();
   for (const r of (promoEvents ?? []) as any[]) {
     const mid = r.member_id as string;
     policyPromotedLeaderIds.add(mid);
@@ -333,6 +338,92 @@ export async function calculateMonthlySettlement(params: {
     prevLeaderByPromotedMemberId.set(mid, (r.previous_parent_id ?? null) as string | null);
     const paidYm = (r.leader_maintenance_bonus_paid_year_month ?? null) as string | null;
     leaderMaintBlockByMemberId.set(mid, paidYm != null && paidYm !== yearMonth);
+    if (r?.threshold_contract_id && r?.threshold_join_date) {
+      promotionEventsByMemberId.set(mid, {
+        member_id: mid,
+        threshold_contract_id: String(r.threshold_contract_id),
+        threshold_join_date: String(r.threshold_join_date).slice(0, 10),
+        previous_parent_id: (r.previous_parent_id ?? null) as string | null,
+        created_at: (r.created_at ?? null) as string | null,
+      });
+    }
+  }
+
+  // 신규 승급 자동화(A): walk 누적 20구좌 최초 도달 시 leader_promotion_events 생성
+  const walkThresholdsForNewEvents = computeLeaderPromotionThresholds(
+    treeRows,
+    joinAttributed,
+    (membersRaw as OrganizationMember[]).map((m) => ({
+      id: m.id,
+      rank: m.rank as RankType,
+      external_id: m.external_id ?? null,
+    })),
+  );
+  const parentByChildForPromo = new Map<string, string | null>();
+  for (const e of edgesRaw) parentByChildForPromo.set(e.child_id, e.parent_id ?? null);
+  const newPromoRows: Array<{
+    member_id: string;
+    previous_parent_id: string | null;
+    threshold_contract_id: string;
+    threshold_join_date: string;
+  }> = [];
+  const newPromoMemberIds: string[] = [];
+  for (const m of membersRaw as OrganizationMember[]) {
+    if (promotionEventsByMemberId.has(m.id)) continue;
+    const th = walkThresholdsForNewEvents.get(m.id) ?? null;
+    if (!th) continue;
+    if (m.rank !== '영업사원' && m.rank !== '리더') continue;
+    newPromoRows.push({
+      member_id: m.id,
+      previous_parent_id: parentByChildForPromo.get(m.id) ?? null,
+      threshold_contract_id: th.threshold_contract_id,
+      threshold_join_date: th.threshold_join_date,
+    });
+    newPromoMemberIds.push(m.id);
+    promotionEventsByMemberId.set(m.id, {
+      member_id: m.id,
+      threshold_contract_id: th.threshold_contract_id,
+      threshold_join_date: th.threshold_join_date,
+      previous_parent_id: parentByChildForPromo.get(m.id) ?? null,
+      created_at: null,
+    });
+    policyPromotedLeaderIds.add(m.id);
+  }
+  if (newPromoRows.length > 0) {
+    const { error: newPromoErr } = await db
+      .from('leader_promotion_events')
+      .upsert(newPromoRows as any, { onConflict: 'member_id' });
+    if (newPromoErr) {
+      throw new Error(`walk 기반 leader_promotion_events 생성 실패: ${newPromoErr.message}`);
+    }
+    const toRankUp = newPromoMemberIds.filter((id) => {
+      const m = (membersRaw as OrganizationMember[]).find((x) => x.id === id);
+      return m?.rank === '영업사원';
+    });
+    if (toRankUp.length > 0) {
+      await db.from('organization_members').update({ rank: '리더' }).in('id', toRankUp).eq('rank', '영업사원');
+    }
+  }
+
+  const joinStatusCandidates: JoinStatusContractCandidate[] = [];
+  for (const row of (allContractRows ?? []) as any[]) {
+    if (String(row.status ?? '').trim() !== '가입') continue;
+    if (!row.sales_member_id) continue;
+    joinStatusCandidates.push({
+      id: row.id,
+      contract_code: (row.contract_code ?? null) as string | null,
+      unit_count: row.unit_count ?? 0,
+      sales_member_id: row.sales_member_id as string,
+      status: String(row.status ?? ''),
+      is_cancelled: row.is_cancelled ?? null,
+      sales_link_status: (row.sales_link_status ?? null) as string | null,
+      happy_call_at: row.happy_call_at ?? null,
+      happycall_result: (row.happycall_result ?? null) as string | null,
+      invoice_no: (row.invoice_no ?? null) as string | null,
+      product_type: (row.product_type ?? null) as string | null,
+      item_name: (row.item_name ?? null) as string | null,
+      source_snapshot_json: (row.source_snapshot_json ?? null) as Record<string, string | null> | null,
+    });
   }
 
   const promotionThresholdByMemberId = computeLeaderPromotionThresholds(
@@ -410,17 +501,38 @@ export async function calculateMonthlySettlement(params: {
   const promotionCommissionMemberIds = (membersRaw as OrganizationMember[])
     .filter((m) => m.rank === '영업사원' || m.rank === '리더')
     .map((m) => m.id);
+
+  const promotionEventWalkMismatches: PromotionEventWalkMismatch[] = [];
+  const splitBuildOptions = {
+    promotionThresholdByMemberId,
+    promotionEventsByMemberId,
+    joinStatusCandidates,
+    walkMismatchOut: promotionEventWalkMismatches,
+    treeRows,
+  };
+
   const promotionUnitSplitByMemberId = buildPromotionUnitSplitByMemberIds(
     promotionCommissionMemberIds,
     treeRows,
     joinAttributed,
+    splitBuildOptions,
   );
 
   const promotionCommissionAuditByMemberId = new Map(
     promotionCommissionMemberIds.map((mid) => [
       mid,
-      buildPromotionCommissionWalkForMember(mid, treeRows, joinAttributed).audit,
+      buildPromotionCommissionWalkForMember(
+        mid,
+        treeRows,
+        joinAttributed,
+        LEADER_PROMOTION_MIN_UNITS,
+        splitBuildOptions,
+      ).audit,
     ]),
+  );
+
+  const promotionEventWalkMismatchByMemberId = new Map(
+    promotionEventWalkMismatches.map((m) => [m.member_id, m]),
   );
 
   if (debug) {
@@ -486,6 +598,7 @@ export async function calculateMonthlySettlement(params: {
     promotionThresholdByMemberId,
     promotionUnitSplitByMemberId,
     promotionCommissionAuditByMemberId,
+    promotionEventWalkMismatchByMemberId,
     joinOnlyAttributed: joinAttributed,
     settlementEndDate: end_date,
     leaderMaintenanceBonusAlreadyPaidByMemberId: leaderMaintBlockByMemberId,

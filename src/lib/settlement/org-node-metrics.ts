@@ -12,6 +12,7 @@ import {
   refreshPromotionThresholdsFromJoinAttributed,
   enrichThresholdPrePromotionUnits,
   buildPromotionUnitSplitByMemberIds,
+  type LeaderPromotionEventRecord,
   buildPromotionCommissionWalkForMember,
   isContractStrictlyAfterPromotionThreshold,
   type AttributedJoinContractRow,
@@ -376,10 +377,26 @@ export function calculateOrgNodeMetrics(params: {
   const promotionCommissionMemberIds = members
     .filter((m) => m.rank === '영업사원' || m.rank === '리더')
     .map((m) => m.id);
+
+  const promotionEventsByMemberId = new Map<string, LeaderPromotionEventRecord>();
+  for (const r of leaderPromotionEventsForThreshold ?? []) {
+    if (!r?.member_id || !r?.threshold_contract_id || !r?.threshold_join_date) continue;
+    promotionEventsByMemberId.set(String(r.member_id), {
+      member_id: String(r.member_id),
+      threshold_contract_id: String(r.threshold_contract_id),
+      threshold_join_date: String(r.threshold_join_date).slice(0, 10),
+    });
+  }
+
   const promotionUnitSplitByMemberId = buildPromotionUnitSplitByMemberIds(
     promotionCommissionMemberIds,
     treeRowsForThreshold,
     joinAttributed,
+    {
+      promotionThresholdByMemberId,
+      promotionEventsByMemberId,
+      treeRows: treeRowsForThreshold,
+    },
   );
 
   return calculateOrgNodeMetricsAlignedToSettlement({

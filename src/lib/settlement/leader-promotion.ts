@@ -284,6 +284,291 @@ function promotionWalkFromCumulative(
   return { splitByContractId, audit };
 }
 
+function explainPromotionWalkJoinExclusion(
+  row: JoinStatusContractCandidate,
+): { exclusion_reason: string; excluded_by_v2_eligibility: boolean } {
+  if (row.is_cancelled) {
+    return { exclusion_reason: 'CANCELLED', excluded_by_v2_eligibility: false };
+  }
+  if ((row.sales_link_status ?? 'linked') !== 'linked') {
+    return { exclusion_reason: 'SALES_NOT_LINKED', excluded_by_v2_eligibility: false };
+  }
+  if (!isV2EligibleStatic(row)) {
+    return { exclusion_reason: 'V2_ELIGIBILITY_FAILED', excluded_by_v2_eligibility: true };
+  }
+  return { exclusion_reason: 'NOT_IN_JOIN_ATTRIBUTED', excluded_by_v2_eligibility: false };
+}
+
+/** 산하 walk 누적 통계 (이벤트 불일치 감사용) */
+export function computeWalkJoinStatsForMember(
+  memberId: string,
+  treeRows: OrgTreeRow[],
+  joinContractsAttributed: AttributedJoinContractRow[],
+  thresholdContractId?: string | null,
+): { walk_total_join_units: number; walk_cumulative_units_at_threshold: number | null } {
+  const childrenByParent = buildChildrenByParentFromRows(treeRows);
+  const subtree = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
+  const sorted = [...joinContractsAttributed].sort(compareAttributedJoinRows);
+  let cum = 0;
+  let walkTotal = 0;
+  let walkCumAtThreshold: number | null = null;
+  const thId = thresholdContractId ?? null;
+
+  for (const c of sorted) {
+    if (!subtree.has(c.sales_member_id)) continue;
+    const units = Math.max(0, c.unit_count ?? 0);
+    if (units === 0) continue;
+    if (thId && c.id === thId) {
+      walkCumAtThreshold = cum;
+    }
+    cum += units;
+    walkTotal += units;
+  }
+
+  return {
+    walk_total_join_units: walkTotal,
+    walk_cumulative_units_at_threshold: walkCumAtThreshold,
+  };
+}
+
+/**
+ * 승급 이벤트가 있는데 walk 누적이 20구좌 미만(또는 승격 계약이 walk에 없음)이면 감사 로그 생성.
+ * 수당은 이벤트 기준을 유지한다.
+ */
+export function auditPromotionEventWalkMismatch(params: {
+  memberId: string;
+  treeRows: OrgTreeRow[];
+  joinAttributed: AttributedJoinContractRow[];
+  joinStatusCandidates: ReadonlyArray<JoinStatusContractCandidate>;
+  event: LeaderPromotionEventRecord;
+  threshold: SalesMemberPromotionThreshold;
+}): PromotionEventWalkMismatch | null {
+  const { memberId, treeRows, joinAttributed, joinStatusCandidates, event, threshold } = params;
+  const childrenByParent = buildChildrenByParentFromRows(treeRows);
+  const subtree = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
+  const { walk_total_join_units, walk_cumulative_units_at_threshold } = computeWalkJoinStatsForMember(
+    memberId,
+    treeRows,
+    joinAttributed,
+    threshold.threshold_contract_id,
+  );
+
+  const isMismatch =
+    walk_total_join_units < LEADER_PROMOTION_MIN_UNITS || walk_cumulative_units_at_threshold === null;
+  if (!isMismatch) return null;
+
+  const joinAttributedIds = new Set(joinAttributed.map((c) => c.id));
+  const excluded_join_contracts: PromotionEventWalkMismatch['excluded_join_contracts'] = [];
+  for (const c of joinStatusCandidates) {
+    if (!subtree.has(c.sales_member_id)) continue;
+    if (String(c.status ?? '').trim() !== '가입') continue;
+    if (joinAttributedIds.has(c.id)) continue;
+    const { exclusion_reason, excluded_by_v2_eligibility } = explainPromotionWalkJoinExclusion(c);
+    excluded_join_contracts.push({
+      contract_id: c.id,
+      contract_code: c.contract_code ?? null,
+      unit_count: Math.max(0, c.unit_count ?? 0),
+      exclusion_reason,
+      excluded_by_v2_eligibility,
+    });
+  }
+
+  return {
+    type: 'PROMOTION_EVENT_WALK_MISMATCH',
+    member_id: memberId,
+    promotion_event_id: memberId,
+    threshold_contract_id: threshold.threshold_contract_id,
+    event_created_at: event.created_at ?? null,
+    walk_cumulative_units_at_threshold,
+    walk_total_join_units,
+    excluded_join_contracts,
+  };
+}
+
+function memberUsesEventThresholdSplit(
+  memberId: string,
+  options?: PromotionUnitSplitBuildOptions,
+): { event: LeaderPromotionEventRecord; threshold: SalesMemberPromotionThreshold } | null {
+  const threshold = options?.promotionThresholdByMemberId?.get(memberId) ?? null;
+  if (!threshold?.threshold_contract_id) return null;
+
+  const eventFromMap = options?.promotionEventsByMemberId?.get(memberId);
+  if (eventFromMap?.threshold_contract_id) {
+    return { event: eventFromMap, threshold };
+  }
+  if (options?.eventThresholdMemberIds?.has(memberId)) {
+    return {
+      event: {
+        member_id: memberId,
+        threshold_contract_id: threshold.threshold_contract_id,
+        threshold_join_date: threshold.threshold_join_date,
+        created_at: null,
+      },
+      threshold,
+    };
+  }
+  return null;
+}
+
+function resolvePromotionSplitForMember(
+  memberId: string,
+  subtree: Set<string>,
+  sorted: AttributedJoinContractRow[],
+  minUnits: number,
+  options?: PromotionUnitSplitBuildOptions,
+): { splitByContractId: Map<string, PromotionUnitSplit>; audit: PromotionCommissionSplit[] } {
+  const eventCtx = memberUsesEventThresholdSplit(memberId, options);
+  if (eventCtx) {
+    const { event, threshold } = eventCtx;
+    if (options?.walkMismatchOut && options.joinStatusCandidates && options.treeRows) {
+      const mismatch = auditPromotionEventWalkMismatch({
+        memberId,
+        treeRows: options.treeRows,
+        joinAttributed: sorted,
+        joinStatusCandidates: options.joinStatusCandidates,
+        event,
+        threshold,
+      });
+      if (mismatch) options.walkMismatchOut.push(mismatch);
+    }
+    return promotionSplitFromRecordedThreshold(subtree, sorted, threshold);
+  }
+  return promotionWalkFromCumulative(sorted, subtree, minUnits);
+}
+
+function promotionReasonFromThresholdSplit(
+  contractId: string,
+  split: PromotionUnitSplit,
+  threshold: SalesMemberPromotionThreshold,
+): PromotionCommissionReason {
+  if (contractId === threshold.threshold_contract_id) {
+    return 'PROMOTION_CONTRACT';
+  }
+  if (split.postPromotionUnits > 0 && split.prePromotionUnits === 0) {
+    return 'AFTER_PROMOTION';
+  }
+  if (split.prePromotionUnits > 0 && split.postPromotionUnits > 0) {
+    return 'PROMOTION_CONTRACT';
+  }
+  return 'BEFORE_PROMOTION';
+}
+
+/**
+ * `leader_promotion_events`에 기록된 승격 계약(threshold) 기준 분할.
+ * joinAttributed walk 누적이 20구좌에 못 미치더라도(귀속·인정 필터 차이) 승격 이후 계약은 40만원.
+ */
+function promotionSplitFromRecordedThreshold(
+  subtree: Set<string>,
+  sorted: AttributedJoinContractRow[],
+  threshold: SalesMemberPromotionThreshold,
+): { splitByContractId: Map<string, PromotionUnitSplit>; audit: PromotionCommissionSplit[] } {
+  const splitByContractId = new Map<string, PromotionUnitSplit>();
+  const audit: PromotionCommissionSplit[] = [];
+  let cum = 0;
+
+  for (const c of sorted) {
+    if (!subtree.has(c.sales_member_id)) continue;
+    const units = Math.max(0, c.unit_count ?? 0);
+    if (units === 0) continue;
+
+    const cumBefore = cum;
+    cum += units;
+
+    const split = splitContractUnitsByPromotionThreshold(
+      {
+        id: c.id,
+        join_date: c.join_date,
+        unit_count: units,
+        happy_call_at: c.happy_call_at ?? null,
+        invoice_registered_at: c.invoice_registered_at ?? null,
+        created_at: c.created_at ?? null,
+      },
+      threshold,
+    );
+    splitByContractId.set(c.id, split);
+
+    const promotionReason = promotionReasonFromThresholdSplit(c.id, split, threshold);
+    const commissionPerUnit: 300_000 | 400_000 =
+      split.postPromotionUnits > 0 && split.prePromotionUnits === 0
+        ? PROMOTION_LEADER_COMMISSION_PER_UNIT
+        : PROMOTION_SALES_COMMISSION_PER_UNIT;
+
+    audit.push({
+      contractId: c.id,
+      contractCode: String(c.contract_code ?? c.id),
+      unitCount: units,
+      cumulativeUnitsBefore: cumBefore,
+      cumulativeUnitsAfter: cum,
+      isPromotionContract: promotionReason === 'PROMOTION_CONTRACT',
+      commissionPerUnit,
+      promotionReason,
+      prePromotionUnits: split.prePromotionUnits,
+      postPromotionUnits: split.postPromotionUnits,
+    });
+  }
+
+  return { splitByContractId, audit };
+}
+
+export type LeaderPromotionEventRecord = {
+  member_id: string;
+  threshold_contract_id: string;
+  threshold_join_date: string;
+  previous_parent_id?: string | null;
+  created_at?: string | null;
+};
+
+/** 승급 이벤트 vs walk 누적 불일치 감사 (수당은 이벤트 기준 유지) */
+export type PromotionEventWalkMismatch = {
+  type: 'PROMOTION_EVENT_WALK_MISMATCH';
+  member_id: string;
+  /** leader_promotion_events PK (= member_id) */
+  promotion_event_id: string;
+  threshold_contract_id: string;
+  event_created_at: string | null;
+  walk_cumulative_units_at_threshold: number | null;
+  walk_total_join_units: number;
+  excluded_join_contracts: Array<{
+    contract_id: string;
+    contract_code: string | null;
+    unit_count: number;
+    exclusion_reason: string;
+    excluded_by_v2_eligibility: boolean;
+  }>;
+};
+
+/** walk 제외 감사용: status=가입 후보 계약 */
+export type JoinStatusContractCandidate = {
+  id: string;
+  contract_code?: string | null;
+  unit_count: number;
+  sales_member_id: string;
+  status?: string | null;
+  is_cancelled?: boolean | null;
+  sales_link_status?: string | null;
+  happy_call_at?: unknown;
+  happycall_result?: string | null;
+  invoice_no?: string | null;
+  product_type?: string | null;
+  item_name?: string | null;
+  source_snapshot_json?: Record<string, string | null> | null;
+};
+
+export type PromotionUnitSplitBuildOptions = {
+  minUnits?: number;
+  promotionThresholdByMemberId?: Map<string, SalesMemberPromotionThreshold | null>;
+  /** 유효한 leader_promotion_events (threshold_contract_id 포함) */
+  promotionEventsByMemberId?: ReadonlyMap<string, LeaderPromotionEventRecord>;
+  /** @deprecated {@link promotionEventsByMemberId} 사용 */
+  eventThresholdMemberIds?: ReadonlySet<string>;
+  /** status=가입 이지만 joinAttributed 에 없는 계약 — 불일치 감사용 */
+  joinStatusCandidates?: ReadonlyArray<JoinStatusContractCandidate>;
+  /** 불일치 감지 시 누적 */
+  walkMismatchOut?: PromotionEventWalkMismatch[];
+  /** 내부: 불일치 감사용 treeRows */
+  treeRows?: OrgTreeRow[];
+};
+
 export type PromotionUnitSplit = {
   prePromotionUnits: number;
   postPromotionUnits: number;
@@ -748,9 +1033,15 @@ export function buildPromotionUnitSplitByContractId(
   treeRows: OrgTreeRow[],
   joinContractsAttributed: AttributedJoinContractRow[],
   minUnits: number = LEADER_PROMOTION_MIN_UNITS,
+  options?: PromotionUnitSplitBuildOptions,
 ): Map<string, PromotionUnitSplit> {
-  return buildPromotionCommissionWalkForMember(memberId, treeRows, joinContractsAttributed, minUnits)
-    .splitByContractId;
+  return buildPromotionCommissionWalkForMember(
+    memberId,
+    treeRows,
+    joinContractsAttributed,
+    minUnits,
+    options,
+  ).splitByContractId;
 }
 
 /** 멤버 산하 가입 누적 walk + 검증용 audit */
@@ -759,26 +1050,48 @@ export function buildPromotionCommissionWalkForMember(
   treeRows: OrgTreeRow[],
   joinContractsAttributed: AttributedJoinContractRow[],
   minUnits: number = LEADER_PROMOTION_MIN_UNITS,
+  options?: PromotionUnitSplitBuildOptions,
 ): { splitByContractId: Map<string, PromotionUnitSplit>; audit: PromotionCommissionSplit[] } {
   const childrenByParent = buildChildrenByParentFromRows(treeRows);
   const subtree = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
   const sorted = [...joinContractsAttributed].sort(compareAttributedJoinRows);
-  return promotionWalkFromCumulative(sorted, subtree, minUnits);
+  const resolvedOptions: PromotionUnitSplitBuildOptions = {
+    ...options,
+    treeRows: options?.treeRows ?? treeRows,
+  };
+  return resolvePromotionSplitForMember(memberId, subtree, sorted, minUnits, resolvedOptions);
 }
 
-/** 영업사원·리더 전원에 대해 walk split 맵 일괄 생성 (threshold/event 무관) */
+/** 영업사원·리더 전원에 대해 split 맵 일괄 생성 (정책 승격자는 이벤트 threshold 우선) */
 export function buildPromotionUnitSplitByMemberIds(
   memberIds: Iterable<string>,
   treeRows: OrgTreeRow[],
   joinContractsAttributed: AttributedJoinContractRow[],
-  minUnits: number = LEADER_PROMOTION_MIN_UNITS,
+  minUnitsOrOptions: number | PromotionUnitSplitBuildOptions = LEADER_PROMOTION_MIN_UNITS,
+  maybeOptions?: PromotionUnitSplitBuildOptions,
 ): Map<string, Map<string, PromotionUnitSplit>> {
+  const options: PromotionUnitSplitBuildOptions =
+    typeof minUnitsOrOptions === 'number'
+      ? { minUnits: minUnitsOrOptions, ...maybeOptions }
+      : minUnitsOrOptions;
+  const minUnits = options.minUnits ?? LEADER_PROMOTION_MIN_UNITS;
+  const resolvedOptions: PromotionUnitSplitBuildOptions = {
+    ...options,
+    treeRows: options.treeRows ?? treeRows,
+  };
+
   const childrenByParent = buildChildrenByParentFromRows(treeRows);
   const sorted = [...joinContractsAttributed].sort(compareAttributedJoinRows);
   const out = new Map<string, Map<string, PromotionUnitSplit>>();
   for (const memberId of memberIds) {
     const subtree = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
-    const { splitByContractId } = promotionWalkFromCumulative(sorted, subtree, minUnits);
+    const { splitByContractId } = resolvePromotionSplitForMember(
+      memberId,
+      subtree,
+      sorted,
+      minUnits,
+      resolvedOptions,
+    );
     out.set(memberId, splitByContractId);
   }
   return out;

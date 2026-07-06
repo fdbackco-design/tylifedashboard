@@ -1,5 +1,5 @@
 import type { RankType } from './organization';
-import type { PromotionCommissionSplit } from '@/lib/settlement/leader-promotion';
+import type { PromotionCommissionSplit, PromotionEventWalkMismatch } from '@/lib/settlement/leader-promotion';
 
 export interface SettlementRule {
   id: string;
@@ -95,6 +95,8 @@ export interface LeaderPromotionSettlementDetail {
   leader_maintenance_bonus_eligible: boolean;
   /** 산하 전체 가입 누적 walk 기준 수당 판정 근거 (검증용) */
   promotion_commission_audit?: PromotionCommissionSplit[];
+  /** 승급 이벤트 vs walk 누적 불일치 감사 (수당은 이벤트 기준 유지) */
+  promotion_event_walk_mismatch?: PromotionEventWalkMismatch | null;
 }
 
 export interface SettlementCalculationDetail {
