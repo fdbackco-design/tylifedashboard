@@ -147,15 +147,19 @@ export function isContractAtOrAfterPromotionThreshold(
  * 순서일은 해피콜 완료일 우선.
  */
 export function isContractStrictlyAfterPromotionThreshold(
-  contract: PromotionOrderContractRef,
+  contract: PromotionOrderContractRef & { unit_count?: number },
   threshold: SalesMemberPromotionThreshold | null,
+  walkSplitByContractId?: Map<string, PromotionUnitSplit> | null,
 ): boolean {
   if (!threshold) return false;
-  const aj = contractJoinOrderYmd(contract);
-  const tj = threshold.threshold_join_date;
-  if (aj > tj) return true;
-  if (aj < tj) return false;
-  return compareSameOrderDayOrder(contract, threshold) > 0;
+  const total = Math.max(0, contract.unit_count ?? 0);
+  const units = total > 0 ? total : 1;
+  const split = resolvePromotionUnitSplit(
+    { ...contract, unit_count: units },
+    threshold,
+    walkSplitByContractId,
+  );
+  return split.postPromotionUnits > 0 && split.prePromotionUnits === 0;
 }
 
 /**
@@ -200,13 +204,18 @@ export function rollupEligibleUnitsForParentSubtree(
   contract: PromotionOrderContractRef & { unit_count: number },
   nodeThreshold: SalesMemberPromotionThreshold | null,
   childThreshold: SalesMemberPromotionThreshold | null,
+  promotionUnitSplitByMemberId?: Map<string, Map<string, PromotionUnitSplit>>,
+  nodeMemberId?: string,
+  childMemberId?: string,
 ): number {
   let units = contract.unit_count;
   if (nodeThreshold) {
-    units = splitContractUnitsByPromotionThreshold(contract, nodeThreshold).postPromotionUnits;
+    const nodeWalk = nodeMemberId ? promotionUnitSplitByMemberId?.get(nodeMemberId) : undefined;
+    units = resolvePromotionUnitSplit(contract, nodeThreshold, nodeWalk).postPromotionUnits;
   }
   if (childThreshold) {
-    const preChild = splitContractUnitsByPromotionThreshold(contract, childThreshold).prePromotionUnits;
+    const childWalk = childMemberId ? promotionUnitSplitByMemberId?.get(childMemberId) : undefined;
+    const preChild = resolvePromotionUnitSplit(contract, childThreshold, childWalk).prePromotionUnits;
     units = Math.min(units, preChild);
   }
   return units;
@@ -216,8 +225,11 @@ export function rollupEligibleUnitsForParentSubtree(
 export function prePromotionUnitsForPreviousLeaderRollup(
   contract: PromotionOrderContractRef & { unit_count: number },
   promotedThreshold: SalesMemberPromotionThreshold,
+  promotionUnitSplitByMemberId?: Map<string, Map<string, PromotionUnitSplit>>,
+  promotedMemberId?: string,
 ): number {
-  return splitContractUnitsByPromotionThreshold(contract, promotedThreshold).prePromotionUnits;
+  const walk = promotedMemberId ? promotionUnitSplitByMemberId?.get(promotedMemberId) : undefined;
+  return resolvePromotionUnitSplit(contract, promotedThreshold, walk).prePromotionUnits;
 }
 
 function compareAttributedJoinRows(a: AttributedJoinContractRow, b: AttributedJoinContractRow): number {
@@ -549,6 +561,11 @@ export function computePromotionThresholdForMember(
 /**
  * 이벤트 테이블 등에서 threshold_contract_id만 알 때 승격 계약 내 pre 구좌 수를 보강한다.
  */
+export type PromotionUnitSplit = {
+  prePromotionUnits: number;
+  postPromotionUnits: number;
+};
+
 function prePromotionUnitsOnThresholdContract(
   units: number,
   cumBeforeThreshold: number,
@@ -608,6 +625,88 @@ export function enrichThresholdPrePromotionUnits(
     cum += units;
   }
   return threshold;
+}
+
+/**
+ * joinAttributed 정렬·누적 walk 기준으로 계약별 승격 전/후 구좌를 산출한다.
+ * 정책 승격 이벤트의 threshold_contract_id(SSOT)까지는 전부 승격 전(30만), 이후만 승격 후(40만).
+ * 날짜만 비교하면 같은 승급일·동일 송장 배치 계약이 잘못 40만원이 되는 문제를 방지한다.
+ */
+export function buildPromotionUnitSplitByContractId(
+  memberId: string,
+  threshold: SalesMemberPromotionThreshold,
+  treeRows: OrgTreeRow[],
+  joinContractsAttributed: AttributedJoinContractRow[],
+  minUnits: number = LEADER_PROMOTION_MIN_UNITS,
+): Map<string, PromotionUnitSplit> {
+  const childrenByParent = buildChildrenByParentFromRows(treeRows);
+  const subtree = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
+  const sorted = [...joinContractsAttributed].sort(compareAttributedJoinRows);
+  const out = new Map<string, PromotionUnitSplit>();
+
+  let cum = 0;
+  let pastThreshold = false;
+
+  for (const c of sorted) {
+    if (!subtree.has(c.sales_member_id)) continue;
+    const units = Math.max(0, c.unit_count ?? 0);
+    if (units === 0) continue;
+
+    if (pastThreshold) {
+      out.set(c.id, { prePromotionUnits: 0, postPromotionUnits: units });
+      continue;
+    }
+
+    if (c.id === threshold.threshold_contract_id) {
+      const pre = prePromotionUnitsOnThresholdContract(units, cum, minUnits);
+      out.set(c.id, {
+        prePromotionUnits: pre,
+        postPromotionUnits: units - pre,
+      });
+      cum += units;
+      pastThreshold = true;
+      continue;
+    }
+
+    out.set(c.id, { prePromotionUnits: units, postPromotionUnits: 0 });
+    cum += units;
+  }
+
+  return out;
+}
+
+/** threshold가 있는 멤버별 walk split 맵 일괄 생성 */
+export function buildPromotionUnitSplitByMemberId(
+  promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>,
+  treeRows: OrgTreeRow[],
+  joinContractsAttributed: AttributedJoinContractRow[],
+): Map<string, Map<string, PromotionUnitSplit>> {
+  const out = new Map<string, Map<string, PromotionUnitSplit>>();
+  for (const [memberId, threshold] of promotionThresholdByMemberId) {
+    if (!threshold) continue;
+    out.set(
+      memberId,
+      buildPromotionUnitSplitByContractId(memberId, threshold, treeRows, joinContractsAttributed),
+    );
+  }
+  return out;
+}
+
+/** walk 맵이 있으면 우선 사용, 없으면 날짜·tie-break 기반 split 으로 fallback */
+export function resolvePromotionUnitSplit(
+  contract: PromotionOrderContractRef & { unit_count: number },
+  threshold: SalesMemberPromotionThreshold | null,
+  walkSplitByContractId?: Map<string, PromotionUnitSplit> | null,
+): PromotionUnitSplit {
+  const total = Math.max(0, contract.unit_count ?? 0);
+  if (!threshold || total === 0) {
+    return { prePromotionUnits: total, postPromotionUnits: 0 };
+  }
+  const fromWalk = walkSplitByContractId?.get(contract.id);
+  if (fromWalk && fromWalk.prePromotionUnits + fromWalk.postPromotionUnits === total) {
+    return fromWalk;
+  }
+  return splitContractUnitsByPromotionThreshold(contract, threshold);
 }
 
 /**

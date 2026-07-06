@@ -12,6 +12,7 @@ import {
   isLeaderPromotionJoinContractRow,
   debugPromotionThresholdPath,
   enrichThresholdPrePromotionUnits,
+  buildPromotionUnitSplitByMemberId,
   type AttributedJoinContractRow,
   isContractStrictlyAfterPromotionThreshold,
 } from '@/lib/settlement/leader-promotion';
@@ -398,6 +399,12 @@ export async function calculateMonthlySettlement(params: {
     );
   }
 
+  const promotionUnitSplitByMemberId = buildPromotionUnitSplitByMemberId(
+    promotionThresholdByMemberId,
+    treeRows,
+    joinAttributed,
+  );
+
   if (debug) {
     const imId = (membersRaw as OrganizationMember[]).find(
       (m) => (m.name ?? '').replace(/^\[고객\]\s*/, '') === '임태순',
@@ -459,6 +466,7 @@ export async function calculateMonthlySettlement(params: {
   const leaderOpts: LeaderSettlementOpts = {
     treeRows,
     promotionThresholdByMemberId,
+    promotionUnitSplitByMemberId,
     joinOnlyAttributed: joinAttributed,
     settlementEndDate: end_date,
     leaderMaintenanceBonusAlreadyPaidByMemberId: leaderMaintBlockByMemberId,
@@ -504,8 +512,10 @@ export async function calculateMonthlySettlement(params: {
           invoice_registered_at:
             (c as { invoice_registered_at?: string | null }).invoice_registered_at ?? null,
           created_at: cCreated,
+          unit_count: c.unit_count ?? 0,
         },
         th,
+        promotionUnitSplitByMemberId.get(origin),
       )
     ) {
       const recordedPrev = prevParentByMemberId.get(origin) ?? null;
