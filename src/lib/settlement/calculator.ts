@@ -18,6 +18,7 @@ import {
   subtreeJoinUnitsJoinOnlyAsOf,
   rollupEligibleUnitsForParentSubtree,
   prePromotionUnitsForPreviousLeaderRollup,
+  splitContractUnitsByPromotionThreshold,
 } from './leader-promotion';
 import {
   calculateGroupBonusForMember,
@@ -353,26 +354,65 @@ function calcDirectContractsWithLeaderPromotion(
   promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>,
   leaderRankEffectiveAtByMemberId?: Map<string, string | null>,
 ): { items: ContractSettlementItem[]; total: number } {
+  const salesRate = getActiveRuleOrFallback(rules, '영업사원', refDate).commission_per_unit;
+  const leaderRate = getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
+
   const items: ContractSettlementItem[] = eligible.map((c) => {
     const originMemberId = (c as any).__attributed_origin_member_id as string | undefined;
     const originRank = (c as any).__attributed_origin_rank as RankType | undefined;
     const rateMemberId = originMemberId ?? member.id;
-    const rate = commissionPerUnitForDirectContract(
-      rateMemberId,
-      originRank ?? member.rank,
-      contractPromotionRef(c),
-      rules,
-      refDate,
-      promotionThresholdByMemberId,
-      leaderRankEffectiveAtByMemberId,
-    );
-    const base = c.unit_count * rate;
+    const dbRank = originRank ?? member.rank;
+    const ref = contractPromotionRef(c);
+    const th = promotionThresholdByMemberId.get(rateMemberId) ?? null;
+
+    let commissionPerUnit: number;
+    let base: number;
+
+    const effectiveAtRaw = leaderRankEffectiveAtByMemberId?.get(rateMemberId) ?? null;
+    const effectiveAt = (effectiveAtRaw ?? '').trim();
+    if (dbRank === '리더' && effectiveAt) {
+      const cAt = (ref.created_at ?? '').trim();
+      if (cAt && cAt >= effectiveAt) {
+        commissionPerUnit = leaderRate;
+        base = c.unit_count * commissionPerUnit;
+        const penalty = commissionPenaltyWonForItemName((c as { item_name?: string }).item_name, c.unit_count);
+        return {
+          contract_id: c.id,
+          contract_code: c.contract_code,
+          unit_count: c.unit_count,
+          commission_per_unit: commissionPerUnit,
+          subtotal: base - penalty,
+        };
+      }
+    }
+
+    if (th && (dbRank === '영업사원' || dbRank === '리더')) {
+      const { prePromotionUnits, postPromotionUnits } = splitContractUnitsByPromotionThreshold(
+        { ...ref, unit_count: c.unit_count },
+        th,
+      );
+      base = prePromotionUnits * salesRate + postPromotionUnits * leaderRate;
+      commissionPerUnit =
+        c.unit_count > 0 ? Math.round(base / c.unit_count) : salesRate;
+    } else {
+      commissionPerUnit = commissionPerUnitForDirectContract(
+        rateMemberId,
+        dbRank,
+        ref,
+        rules,
+        refDate,
+        promotionThresholdByMemberId,
+        leaderRankEffectiveAtByMemberId,
+      );
+      base = c.unit_count * commissionPerUnit;
+    }
+
     const penalty = commissionPenaltyWonForItemName((c as { item_name?: string }).item_name, c.unit_count);
     return {
       contract_id: c.id,
       contract_code: c.contract_code,
       unit_count: c.unit_count,
-      commission_per_unit: rate,
+      commission_per_unit: commissionPerUnit,
       subtotal: base - penalty,
     };
   });

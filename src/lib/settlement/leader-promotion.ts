@@ -623,8 +623,7 @@ export function refreshPromotionThresholdsFromJoinAttributed(
  * DB 승격·leader_promotion_events 기록용 threshold.
  *
  * `computeSalesMemberPromotionThreshold` 와 달리:
- * - DB rank 가 **영업사원** 인 멤버만 대상 (이미 리더인 사람 재계산/백필 없음)
- * - `customer:*` 가상 노드 제외
+ * - DB rank 가 **영업사원** 또는 **리더** 인 멤버 대상 (customer 가상 노드 제외)
  * - 승격 계약의 귀속 `sales_member_id` 가 해당 멤버 subtree 에 포함되는 경우만 허용
  */
 export function computeLeaderPromotionThresholds(
@@ -638,9 +637,8 @@ export function computeLeaderPromotionThresholds(
   const out = new Map<string, SalesMemberPromotionThreshold | null>();
 
   for (const m of members) {
-    if (!isLeaderPromotionEligibleMember({ rank: m.rank, externalId: m.external_id })) {
-      continue;
-    }
+    if (isCustomerVirtualOrgMember(m.external_id)) continue;
+    if (m.rank !== '영업사원' && m.rank !== '리더') continue;
     const subtree = collectSubtreeMemberIdsDownstream(m.id, childrenByParent);
     const promo = computeThresholdForSubtree(subtree, sorted, minUnits);
     if (!promo) {
