@@ -1,18 +1,19 @@
 /**
- * 승급 이벤트 감사 (DB 연동).
+ * 승급 walk 감사 (DB 연동).
  *
- * 실행:
- *   SUPABASE_SERVICE_ROLE_KEY=... NEXT_PUBLIC_SUPABASE_URL=... \
- *     npx vitest run src/lib/settlement/promotion-event-audit.integration.test.ts
+ *   npm run audit:promotion-event
  *
- * 기본 멤버: 김세영 3940bcfe-4971-4298-b55c-06cc6da15c9c
- * 다른 멤버: AUDIT_MEMBER_ID=<uuid> 환경변수
+ * 기본: 김세영 + 조자양
+ *   AUDIT_MEMBER_IDS=uuid1,uuid2 npm run audit:promotion-event
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it } from 'vitest';
 import { createClient } from '@supabase/supabase-js';
 import { buildSettlementTreeRows } from '@/lib/settlement/settlement-org-tree';
 import {
+  auditPromotionWalkExclusionsForMember,
+  buildPromotionCommissionWalkForMember,
   formatPromotionEventAuditReport,
+  formatPromotionWalkCommissionReport,
   isPromotionAccumulationJoinContractRow,
   validatePromotionEvent,
   type AttributedJoinContractRow,
@@ -20,53 +21,39 @@ import {
   type LeaderPromotionEventRecord,
   type SalesMemberPromotionThreshold,
 } from './leader-promotion';
-import { happycallYmdSeoul } from './settlement-eligibility-v2';
 import type { RankType } from '@/lib/types/organization';
 
-const DEFAULT_MEMBER_ID = '3940bcfe-4971-4298-b55c-06cc6da15c9c';
+const KIM = '3940bcfe-4971-4298-b55c-06cc6da15c9c';
+const JO = '12b5230b-68e9-498a-98ea-1285e1a3cd00';
+
 const hasDb =
   Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY) &&
   Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL);
 
-describe.skipIf(!hasDb)('promotion event audit (integration)', () => {
-  it('김세영 승급 이벤트·walk·누락 계약 감사 출력', async () => {
-    const memberId = process.env.AUDIT_MEMBER_ID ?? DEFAULT_MEMBER_ID;
+describe.skipIf(!hasDb)('promotion walk audit (integration)', () => {
+  it('김세영·조자양 walk·제외 계약 출력', async () => {
+    const memberIds = (process.env.AUDIT_MEMBER_IDS ?? `${KIM},${JO}`).split(',').map((s) => s.trim());
     const db = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
       { auth: { autoRefreshToken: false, persistSession: false } },
     );
 
-    const [{ data: promoEvent }, { data: member }, membersRes, edgesRes, { data: contracts }] =
-      await Promise.all([
-        db
-          .from('leader_promotion_events')
-          .select('*')
-          .eq('member_id', memberId)
-          .maybeSingle(),
-        db.from('organization_members').select('id, name, rank').eq('id', memberId).maybeSingle(),
-        db
-          .from('organization_members')
-          .select('id, name, rank, source_customer_id')
-          .eq('is_active', true),
-        db.from('organization_edges').select('parent_id, child_id'),
-        db
-          .from('contracts')
-          .select(
-            'id, contract_code, status, join_date, unit_count, sales_member_id, is_cancelled, sales_link_status, happy_call_at, happycall_result, invoice_no, invoice_registered_at, created_at, product_type, item_name, source_snapshot_json',
-          ),
-      ]);
+    const [{ data: members }, membersRes, edgesRes, { data: contracts }] = await Promise.all([
+      db.from('organization_members').select('id, name').in('id', memberIds),
+      db
+        .from('organization_members')
+        .select('id, name, rank, source_customer_id')
+        .eq('is_active', true),
+      db.from('organization_edges').select('parent_id, child_id'),
+      db
+        .from('contracts')
+        .select(
+          'id, contract_code, status, join_date, unit_count, sales_member_id, is_cancelled, sales_link_status, happy_call_at, happycall_result, invoice_no, invoice_registered_at, created_at, product_type, item_name, source_snapshot_json',
+        ),
+    ]);
 
-    if (!promoEvent) {
-      // eslint-disable-next-line no-console
-      console.warn(`leader_promotion_events 없음: member_id=${memberId}`);
-      return;
-    }
-    if (!member) {
-      // eslint-disable-next-line no-console
-      console.warn(`organization_members 없음: member_id=${memberId}`);
-      return;
-    }
+    const nameById = new Map((members ?? []).map((m) => [m.id, m.name]));
 
     const treeRows = buildSettlementTreeRows(
       (membersRes.data ?? []).map((m) => ({
@@ -81,7 +68,8 @@ describe.skipIf(!hasDb)('promotion event audit (integration)', () => {
     const joinAttributed: AttributedJoinContractRow[] = [];
     const joinStatusCandidates: JoinStatusContractCandidate[] = [];
     for (const row of contracts ?? []) {
-      if (String(row.status ?? '').trim() !== '가입') continue;
+      const st = String(row.status ?? '').trim();
+      if (st !== '가입' && st !== '준비' && st !== '대기') continue;
       if (!row.sales_member_id) continue;
       const base = {
         id: row.id,
@@ -89,7 +77,7 @@ describe.skipIf(!hasDb)('promotion event audit (integration)', () => {
         unit_count: row.unit_count ?? 0,
         sales_member_id: row.sales_member_id as string,
         join_date: String(row.join_date ?? '').slice(0, 10),
-        status: String(row.status ?? ''),
+        status: st,
         is_cancelled: row.is_cancelled ?? null,
         sales_link_status: (row.sales_link_status ?? null) as string | null,
         happy_call_at: row.happy_call_at ?? null,
@@ -103,40 +91,60 @@ describe.skipIf(!hasDb)('promotion event audit (integration)', () => {
       };
       joinStatusCandidates.push(base);
       if (!isPromotionAccumulationJoinContractRow(row)) continue;
-      const hcYmd = happycallYmdSeoul(row.happy_call_at);
       joinAttributed.push({
         ...base,
-        happy_call_at: hcYmd || (row.happy_call_at ?? null),
+        happy_call_at: (row.happy_call_at ?? null) as string | null,
       });
     }
 
-    const threshold: SalesMemberPromotionThreshold = {
-      threshold_contract_id: String(promoEvent!.threshold_contract_id),
-      threshold_join_date: String(promoEvent!.threshold_join_date).slice(0, 10),
-    };
-    const event: LeaderPromotionEventRecord = {
-      member_id: memberId,
-      threshold_contract_id: threshold.threshold_contract_id,
-      threshold_join_date: threshold.threshold_join_date,
-      previous_parent_id: (promoEvent!.previous_parent_id ?? null) as string | null,
-      created_at: (promoEvent!.created_at ?? null) as string | null,
-    };
+    for (const memberId of memberIds) {
+      const name = nameById.get(memberId) ?? memberId;
+      const { audit } = buildPromotionCommissionWalkForMember(memberId, treeRows, joinAttributed);
+      // eslint-disable-next-line no-console
+      console.log('\n' + formatPromotionWalkCommissionReport(name, memberId, audit));
 
-    const validation = validatePromotionEvent({
-      memberId,
-      treeRows,
-      joinAttributed,
-      joinStatusCandidates,
-      event,
-      threshold,
-    });
+      const excluded = auditPromotionWalkExclusionsForMember(
+        memberId,
+        treeRows,
+        joinAttributed,
+        joinStatusCandidates,
+      );
+      if (excluded.length > 0) {
+        // eslint-disable-next-line no-console
+        console.log(`\n--- ${name} walk 제외 계약 ---`);
+        for (const e of excluded) {
+          // eslint-disable-next-line no-console
+          console.log(`  ${e.contract_code} units=${e.unit_count} reason=${e.exclusion_reason}`);
+        }
+      }
 
-    const report = formatPromotionEventAuditReport(validation);
-    // eslint-disable-next-line no-console
-    console.log('\n' + report);
-    // eslint-disable-next-line no-console
-    console.log('\n멤버:', member?.name, memberId);
+      const { data: promoEvent } = await db
+        .from('leader_promotion_events')
+        .select('*')
+        .eq('member_id', memberId)
+        .maybeSingle();
+      if (!promoEvent?.threshold_contract_id) continue;
 
-    expect(validation.threshold_contract_id).toBeTruthy();
+      const threshold: SalesMemberPromotionThreshold = {
+        threshold_contract_id: String(promoEvent.threshold_contract_id),
+        threshold_join_date: String(promoEvent.threshold_join_date).slice(0, 10),
+      };
+      const event: LeaderPromotionEventRecord = {
+        member_id: memberId,
+        threshold_contract_id: threshold.threshold_contract_id,
+        threshold_join_date: threshold.threshold_join_date,
+        created_at: (promoEvent.created_at ?? null) as string | null,
+      };
+      const validation = validatePromotionEvent({
+        memberId,
+        treeRows,
+        joinAttributed,
+        joinStatusCandidates,
+        event,
+        threshold,
+      });
+      // eslint-disable-next-line no-console
+      console.log('\n' + formatPromotionEventAuditReport(validation));
+    }
   });
 });

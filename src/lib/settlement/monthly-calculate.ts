@@ -290,15 +290,14 @@ export async function calculateMonthlySettlement(params: {
     return { ...c, item_name, created_at, invoice_registered_at };
   });
 
-  // 리더 승격(20구좌) / 오버라이드 가입 순서 계산용 가입 인정 계약 집합.
-  // - status === '가입' 만 포함 (대기·준비 등 해피콜만 완료된 계약은 제외).
-  // - 조직도 KPI(org-node-metrics)와 동일 기준.
-  // - 정렬·승격 전/후 판정: 해피콜 완료일 → 송장등록일(초) → created_at → id (산하 전체 가입 누적 20구좌)
+  // 리더 승격(20구좌) walk: 가입 인정 계약만 누적.
+  // - status=가입 → 포함
+  // - status=준비/대기 → happycall_result=성공 + 송장번호 있을 때만 포함
+  // - 정렬: happy_call_at → invoice_registered_at → created_at → id
   const joinAttributed: AttributedJoinContractRow[] = [];
   for (const row of (allContractRows ?? []) as any[]) {
     if (!isPromotionAccumulationJoinContractRow(row)) continue;
     const sid = row.sales_member_id as string;
-    const hcYmd = happycallYmdSeoul(row.happy_call_at);
     joinAttributed.push({
       id: row.id,
       contract_code: (row.contract_code ?? null) as string | null,
@@ -307,7 +306,7 @@ export async function calculateMonthlySettlement(params: {
       unit_count: row.unit_count ?? 0,
       sales_member_id: sid,
       created_at: (row.created_at ?? null) as string | null,
-      happy_call_at: hcYmd || (row.happy_call_at ?? null),
+      happy_call_at: (row.happy_call_at ?? null) as string | null,
       invoice_registered_at: (row.invoice_registered_at ?? null) as string | null,
       happycall_result: (row.happycall_result ?? null) as string | null,
       invoice_no: (row.invoice_no ?? null) as string | null,
@@ -408,7 +407,8 @@ export async function calculateMonthlySettlement(params: {
 
   const joinStatusCandidates: JoinStatusContractCandidate[] = [];
   for (const row of (allContractRows ?? []) as any[]) {
-    if (String(row.status ?? '').trim() !== '가입') continue;
+    const st = String(row.status ?? '').trim();
+    if (st !== '가입' && st !== '준비' && st !== '대기') continue;
     if (!row.sales_member_id) continue;
     joinStatusCandidates.push({
       id: row.id,
