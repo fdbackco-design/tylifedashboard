@@ -168,10 +168,12 @@ export function splitContractUnitsByPromotionThreshold(
     return { prePromotionUnits: total, postPromotionUnits: 0 };
   }
 
-  const preOnContract = Math.min(
-    total,
-    Math.max(0, threshold.threshold_pre_promotion_units_on_contract ?? total),
-  );
+  // 승격 계약 본체는 승격 전 단가. enrich가 joinAttributed 누적 차이로 0을 넣는 경우 전량 승격 전.
+  const explicitPre = threshold.threshold_pre_promotion_units_on_contract;
+  const preOnContract =
+    explicitPre != null && explicitPre > 0
+      ? Math.min(total, explicitPre)
+      : total;
   return {
     prePromotionUnits: preOnContract,
     postPromotionUnits: total - preOnContract,
@@ -532,6 +534,17 @@ export function computePromotionThresholdForMember(
 /**
  * 이벤트 테이블 등에서 threshold_contract_id만 알 때 승격 계약 내 pre 구좌 수를 보강한다.
  */
+function prePromotionUnitsOnThresholdContract(
+  units: number,
+  cumBeforeThreshold: number,
+  minUnits: number,
+): number {
+  const preOnContract = minUnits - cumBeforeThreshold;
+  if (preOnContract > 0) return Math.min(units, preOnContract);
+  // joinAttributed가 이벤트 시점보다 많아 누적이 이미 20 이상인 경우, 승격 계약 본체는 전량 승격 전
+  return units;
+}
+
 export function enrichThresholdPrePromotionUnits(
   threshold: SalesMemberPromotionThreshold,
   memberId: string,
@@ -539,7 +552,8 @@ export function enrichThresholdPrePromotionUnits(
   joinContractsAttributed: AttributedJoinContractRow[],
   minUnits: number = LEADER_PROMOTION_MIN_UNITS,
 ): SalesMemberPromotionThreshold {
-  if (threshold.threshold_pre_promotion_units_on_contract != null) return threshold;
+  const existingPre = threshold.threshold_pre_promotion_units_on_contract;
+  if (existingPre != null && existingPre > 0) return threshold;
 
   const recomputed = computePromotionThresholdForMember(
     memberId,
@@ -550,7 +564,8 @@ export function enrichThresholdPrePromotionUnits(
   if (
     recomputed &&
     recomputed.threshold_contract_id === threshold.threshold_contract_id &&
-    recomputed.threshold_pre_promotion_units_on_contract != null
+    recomputed.threshold_pre_promotion_units_on_contract != null &&
+    recomputed.threshold_pre_promotion_units_on_contract > 0
   ) {
     return {
       ...threshold,
@@ -566,10 +581,13 @@ export function enrichThresholdPrePromotionUnits(
     if (!subtree.has(c.sales_member_id)) continue;
     const units = Math.max(0, c.unit_count ?? 0);
     if (c.id === threshold.threshold_contract_id) {
-      const preOnContract = minUnits - cum;
       return {
         ...threshold,
-        threshold_pre_promotion_units_on_contract: Math.min(units, Math.max(0, preOnContract)),
+        threshold_pre_promotion_units_on_contract: prePromotionUnitsOnThresholdContract(
+          units,
+          cum,
+          minUnits,
+        ),
       };
     }
     cum += units;
