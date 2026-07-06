@@ -9,6 +9,7 @@
     "lint": "next lint",
     "type-check": "tsc --noEmit",
     "test": "vitest run",
+    "audit:promotion-event": "vitest run --config vitest.integration.config.ts",
     "verify:hq-revenue": "node scripts/verify-hq-revenue.mjs",
     "bench:api": "node scripts/api-bench.mjs",
     "cleanup:recruitment-nodes": "node scripts/cleanup-recruitment-nodes.mjs"

@@ -8,7 +8,7 @@ import type {
   LeaderPromotionSettlementDetail,
 } from '../types/settlement';
 import type { RankType, OrgTreeNode, OrgTreeRow } from '../types/organization';
-import type { AttributedJoinContractRow, PromotionOrderContractRef, PromotionUnitSplit, PromotionCommissionSplit, SalesMemberPromotionThreshold, LeaderPromotionEventRecord, PromotionEventWalkMismatch, JoinStatusContractCandidate } from './leader-promotion';
+import type { AttributedJoinContractRow, PromotionOrderContractRef, PromotionUnitSplit, PromotionCommissionSplit, SalesMemberPromotionThreshold, LeaderPromotionEventRecord, PromotionEventWalkMismatch, PromotionEventValidation, JoinStatusContractCandidate } from './leader-promotion';
 import {
   contractJoinOrderYmd,
   isLeaderMaintenanceBonusEligible,
@@ -295,8 +295,10 @@ export interface LeaderSettlementOpts {
   promotionUnitSplitByMemberId?: Map<string, Map<string, PromotionUnitSplit>>;
   /** 검증용: 산하 전체 가입 누적 walk audit */
   promotionCommissionAuditByMemberId?: Map<string, PromotionCommissionSplit[]>;
-  /** 승급 이벤트 vs walk 불일치 감사 (멤버별) */
+  /** 승급 이벤트 vs walk 불일치 감사 (멤버별, 하위 호환 요약) */
   promotionEventWalkMismatchByMemberId?: Map<string, PromotionEventWalkMismatch>;
+  /** 승급 이벤트 신뢰도·감사 전체 (멤버별) */
+  promotionEventValidationByMemberId?: Map<string, PromotionEventValidation>;
 }
 
 const LEADER_MAINTENANCE_BONUS_WON = 1_000_000;
@@ -849,6 +851,8 @@ export function calculateMemberSettlement(
       promotion_commission_audit: promotionCommissionAuditByMemberId?.get(member.id) ?? undefined,
       promotion_event_walk_mismatch:
         leaderOpts?.promotionEventWalkMismatchByMemberId?.get(member.id) ?? undefined,
+      promotion_event_validation:
+        leaderOpts?.promotionEventValidationByMemberId?.get(member.id) ?? undefined,
     };
   }
 

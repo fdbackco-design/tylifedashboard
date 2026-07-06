@@ -362,39 +362,331 @@ export function thresholdCrossesPromotionBoundaryInWalk(
   return false;
 }
 
-function earliestWalkOrderYmdInSubtree(
-  memberId: string,
-  treeRows: OrgTreeRow[],
-  joinAttributed: AttributedJoinContractRow[],
-): string | null {
-  const sorted = [...joinAttributed].sort(compareAttributedJoinRows);
-  const rows = collectMemberSubtreeWalkRows(memberId, treeRows, sorted);
-  let min: string | null = null;
-  for (const c of rows) {
-    const ymd = contractJoinOrderYmd(c);
-    if (min === null || ymd < min) min = ymd;
+export type PromotionEventValidationStatus =
+  | 'VERIFIED_BY_WALK'
+  | 'LEGACY_VERIFIED'
+  | 'MISSING_HISTORY'
+  | 'EARLY_OR_INVALID'
+  | 'NEEDS_REVIEW';
+
+export type PromotionCommissionStrategy = 'WALK_SSOT' | 'EVENT_THRESHOLD' | 'REVIEW_PENDING';
+
+export type PromotionWalkContractAuditRow = {
+  contract_id: string;
+  contract_code: string | null;
+  unit_count: number;
+  order_ymd: string;
+  cumulative_units_before: number;
+  cumulative_units_after: number;
+  is_threshold: boolean;
+};
+
+/** leader_promotion_events 신뢰도·수당 전략 판정 결과 */
+export type PromotionEventValidation = {
+  status: PromotionEventValidationStatus;
+  member_id: string;
+  threshold_contract_id: string;
+  threshold_join_date: string;
+  event_created_at: string | null;
+  walk_total_join_units: number;
+  walk_cumulative_units_at_threshold: number | null;
+  legacy_total_join_units: number;
+  legacy_cumulative_units_at_threshold: number | null;
+  threshold_units_on_contract: number | null;
+  canonical_walk_contracts: PromotionWalkContractAuditRow[];
+  legacy_walk_contracts: PromotionWalkContractAuditRow[];
+  excluded_from_canonical_walk: PromotionEventWalkMismatch['excluded_join_contracts'];
+  commission_strategy: PromotionCommissionStrategy;
+  requires_review: boolean;
+  status_reason: string;
+};
+
+function findContractUnitsById(
+  contractId: string,
+  ...sources: ReadonlyArray<AttributedJoinContractRow | JoinStatusContractCandidate>[]
+): number | null {
+  for (const src of sources) {
+    for (const c of src) {
+      if (c.id === contractId) return Math.max(0, c.unit_count ?? 0);
+    }
   }
-  return min;
+  return null;
 }
 
-function latestWalkOrderYmdInSubtree(
+/** status=가입·미해약·linked 기준 legacy walk (V2 필터 없음) */
+export function buildLegacyJoinAttributedFromCandidates(
+  candidates: ReadonlyArray<JoinStatusContractCandidate>,
+  subtree: Set<string>,
+): AttributedJoinContractRow[] {
+  const rows: AttributedJoinContractRow[] = [];
+  for (const c of candidates) {
+    if (!subtree.has(c.sales_member_id)) continue;
+    if (String(c.status ?? '').trim() !== '가입') continue;
+    if (c.is_cancelled) continue;
+    if ((c.sales_link_status ?? 'linked') !== 'linked') continue;
+    const units = Math.max(0, c.unit_count ?? 0);
+    if (units === 0) continue;
+    const hcYmd = happycallYmdSeoul(c.happy_call_at);
+    rows.push({
+      id: c.id,
+      contract_code: c.contract_code ?? null,
+      status: '가입',
+      join_date: String(c.join_date ?? '').slice(0, 10),
+      unit_count: units,
+      sales_member_id: c.sales_member_id,
+      created_at: (c.created_at ?? null) as string | null,
+      happy_call_at: hcYmd || (c.happy_call_at != null ? String(c.happy_call_at) : null),
+      invoice_registered_at: (c.invoice_registered_at ?? null) as string | null,
+      happycall_result: (c.happycall_result ?? null) as string | null,
+      invoice_no: (c.invoice_no ?? null) as string | null,
+      product_type: (c.product_type ?? null) as string | null,
+      item_name: (c.item_name ?? null) as string | null,
+      source_snapshot_json: (c.source_snapshot_json ?? null) as Record<string, string | null> | null,
+    });
+  }
+  return rows;
+}
+
+function collectWalkAuditRows(
   memberId: string,
   treeRows: OrgTreeRow[],
-  joinAttributed: AttributedJoinContractRow[],
-): string | null {
-  const sorted = [...joinAttributed].sort(compareAttributedJoinRows);
+  joinRows: AttributedJoinContractRow[],
+  thresholdContractId: string,
+): PromotionWalkContractAuditRow[] {
+  const sorted = [...joinRows].sort(compareAttributedJoinRows);
   const rows = collectMemberSubtreeWalkRows(memberId, treeRows, sorted);
-  let max: string | null = null;
+  const out: PromotionWalkContractAuditRow[] = [];
+  let cum = 0;
   for (const c of rows) {
-    const ymd = contractJoinOrderYmd(c);
-    if (max === null || ymd > max) max = ymd;
+    const units = Math.max(0, c.unit_count ?? 0);
+    const cumBefore = cum;
+    cum += units;
+    out.push({
+      contract_id: c.id,
+      contract_code: c.contract_code ?? null,
+      unit_count: units,
+      order_ymd: contractJoinOrderYmd(c),
+      cumulative_units_before: cumBefore,
+      cumulative_units_after: cum,
+      is_threshold: c.id === thresholdContractId,
+    });
   }
-  return max;
+  return out;
+}
+
+function collectExcludedFromCanonicalWalk(
+  subtree: Set<string>,
+  joinAttributed: AttributedJoinContractRow[],
+  joinStatusCandidates: ReadonlyArray<JoinStatusContractCandidate>,
+): PromotionEventWalkMismatch['excluded_join_contracts'] {
+  const joinAttributedIds = new Set(joinAttributed.map((c) => c.id));
+  const excluded: PromotionEventWalkMismatch['excluded_join_contracts'] = [];
+  for (const c of joinStatusCandidates) {
+    if (!subtree.has(c.sales_member_id)) continue;
+    if (String(c.status ?? '').trim() !== '가입') continue;
+    if (joinAttributedIds.has(c.id)) continue;
+    const { exclusion_reason, excluded_by_v2_eligibility } = explainPromotionWalkJoinExclusion(c);
+    excluded.push({
+      contract_id: c.id,
+      contract_code: c.contract_code ?? null,
+      unit_count: Math.max(0, c.unit_count ?? 0),
+      exclusion_reason,
+      excluded_by_v2_eligibility,
+    });
+  }
+  return excluded;
+}
+
+/** threshold 계약 시점에 walk 기준 20구좌 달성이 입증되는지 (날짜 비교 없음) */
+export function promotionProvenAtThreshold(
+  memberId: string,
+  treeRows: OrgTreeRow[],
+  joinRows: AttributedJoinContractRow[],
+  thresholdContractId: string,
+  minUnits: number = LEADER_PROMOTION_MIN_UNITS,
+): boolean {
+  const stats = computeWalkJoinStatsForMember(memberId, treeRows, joinRows, thresholdContractId);
+  if (stats.walk_cumulative_units_at_threshold === null) return false;
+  if (
+    thresholdCrossesPromotionBoundaryInWalk(
+      memberId,
+      treeRows,
+      joinRows,
+      thresholdContractId,
+      minUnits,
+    )
+  ) {
+    return true;
+  }
+  const units = findContractUnitsById(thresholdContractId, joinRows) ?? 0;
+  return stats.walk_cumulative_units_at_threshold + units >= minUnits;
 }
 
 /**
- * 승급 이벤트가 있는데 walk 누적이 20구좌 미만(또는 승격 계약이 walk에 없음)이면 감사 로그 생성.
- * 수당은 이벤트 기준을 유지한다.
+ * leader_promotion_events 신뢰도 판정 (수당 SSOT).
+ * 날짜 비교는 사용하지 않으며, canonical walk·legacy walk·제외 계약 근거만 본다.
+ */
+export function validatePromotionEvent(params: {
+  memberId: string;
+  treeRows: OrgTreeRow[];
+  joinAttributed: AttributedJoinContractRow[];
+  joinStatusCandidates: ReadonlyArray<JoinStatusContractCandidate>;
+  event: LeaderPromotionEventRecord;
+  threshold: SalesMemberPromotionThreshold;
+  minUnits?: number;
+}): PromotionEventValidation {
+  const minUnits = params.minUnits ?? LEADER_PROMOTION_MIN_UNITS;
+  const { memberId, treeRows, joinAttributed, joinStatusCandidates, event, threshold } = params;
+  const childrenByParent = buildChildrenByParentFromRows(treeRows);
+  const subtree = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
+
+  const canonicalStats = computeWalkJoinStatsForMember(
+    memberId,
+    treeRows,
+    joinAttributed,
+    threshold.threshold_contract_id,
+  );
+  const thresholdInCanonical = canonicalStats.walk_cumulative_units_at_threshold !== null;
+  const canonicalWalkRows = collectWalkAuditRows(
+    memberId,
+    treeRows,
+    joinAttributed,
+    threshold.threshold_contract_id,
+  );
+
+  const legacyAttributed = buildLegacyJoinAttributedFromCandidates(joinStatusCandidates, subtree);
+  const legacyStats = computeWalkJoinStatsForMember(
+    memberId,
+    treeRows,
+    legacyAttributed,
+    threshold.threshold_contract_id,
+  );
+  const legacyWalkRows = collectWalkAuditRows(
+    memberId,
+    treeRows,
+    legacyAttributed,
+    threshold.threshold_contract_id,
+  );
+  const excluded = collectExcludedFromCanonicalWalk(subtree, joinAttributed, joinStatusCandidates);
+
+  const verifiedByWalk =
+    canonicalStats.walk_total_join_units >= minUnits ||
+    (thresholdInCanonical &&
+      promotionProvenAtThreshold(
+        memberId,
+        treeRows,
+        joinAttributed,
+        threshold.threshold_contract_id,
+        minUnits,
+      ));
+
+  const legacyProven = promotionProvenAtThreshold(
+    memberId,
+    treeRows,
+    legacyAttributed,
+    threshold.threshold_contract_id,
+    minUnits,
+  );
+  const hasCanonicalGap = excluded.length > 0 || !thresholdInCanonical;
+  const thresholdUnits = findContractUnitsById(
+    threshold.threshold_contract_id,
+    joinAttributed,
+    legacyAttributed,
+  );
+
+  let status: PromotionEventValidationStatus;
+  let commission_strategy: PromotionCommissionStrategy;
+  let requires_review: boolean;
+  let status_reason: string;
+
+  if (verifiedByWalk) {
+    status = 'VERIFIED_BY_WALK';
+    commission_strategy = 'WALK_SSOT';
+    requires_review = false;
+    status_reason = 'canonical walk 기준 20구좌 달성 확인';
+  } else if (legacyProven && hasCanonicalGap) {
+    status = 'LEGACY_VERIFIED';
+    commission_strategy = 'EVENT_THRESHOLD';
+    requires_review = false;
+    status_reason = `canonical walk 누락 ${excluded.length}건·legacy walk로 승급 20구좌 재현`;
+  } else if (thresholdInCanonical && canonicalStats.walk_total_join_units < minUnits && !legacyProven) {
+    status = 'EARLY_OR_INVALID';
+    commission_strategy = 'WALK_SSOT';
+    requires_review = false;
+    status_reason = 'threshold가 walk에 있으나 20구좌 달성 근거 없음';
+  } else if (!legacyProven) {
+    status = 'MISSING_HISTORY';
+    commission_strategy = 'REVIEW_PENDING';
+    requires_review = true;
+    status_reason = '과거 계약 데이터 부족으로 승급 20구좌 재현 불가';
+  } else {
+    status = 'NEEDS_REVIEW';
+    commission_strategy = 'REVIEW_PENDING';
+    requires_review = true;
+    status_reason = 'legacy walk에서 승급 재현되나 canonical 누락 근거 부족·데이터 충돌';
+  }
+
+  return {
+    status,
+    member_id: memberId,
+    threshold_contract_id: threshold.threshold_contract_id,
+    threshold_join_date: threshold.threshold_join_date,
+    event_created_at: event.created_at ?? null,
+    walk_total_join_units: canonicalStats.walk_total_join_units,
+    walk_cumulative_units_at_threshold: canonicalStats.walk_cumulative_units_at_threshold,
+    legacy_total_join_units: legacyStats.walk_total_join_units,
+    legacy_cumulative_units_at_threshold: legacyStats.walk_cumulative_units_at_threshold,
+    threshold_units_on_contract: thresholdUnits,
+    canonical_walk_contracts: canonicalWalkRows,
+    legacy_walk_contracts: legacyWalkRows,
+    excluded_from_canonical_walk: excluded,
+    commission_strategy,
+    requires_review,
+    status_reason,
+  };
+}
+
+/** 운영 감사·스크립트용 사람이 읽기 쉬운 요약 */
+export function formatPromotionEventAuditReport(validation: PromotionEventValidation): string {
+  const lines: string[] = [
+    `=== 승급 이벤트 감사: ${validation.member_id} ===`,
+    `status: ${validation.status}`,
+    `commission_strategy: ${validation.commission_strategy}`,
+    `requires_review: ${validation.requires_review}`,
+    `reason: ${validation.status_reason}`,
+    '',
+    `threshold_contract_id: ${validation.threshold_contract_id}`,
+    `threshold_join_date: ${validation.threshold_join_date}`,
+    `event_created_at: ${validation.event_created_at ?? '(없음)'}`,
+    `threshold_units_on_contract: ${validation.threshold_units_on_contract ?? '(미확인)'}`,
+    '',
+    `canonical walk: total=${validation.walk_total_join_units}, cum_at_threshold=${validation.walk_cumulative_units_at_threshold ?? 'null'}`,
+    `legacy walk: total=${validation.legacy_total_join_units}, cum_at_threshold=${validation.legacy_cumulative_units_at_threshold ?? 'null'}`,
+    '',
+    '--- canonical walk 계약 ---',
+    ...validation.canonical_walk_contracts.map(
+      (c) =>
+        `  ${c.contract_code ?? c.contract_id} units=${c.unit_count} order=${c.order_ymd} cum=${c.cumulative_units_before}→${c.cumulative_units_after}${c.is_threshold ? ' [THRESHOLD]' : ''}`,
+    ),
+    '',
+    '--- legacy walk 계약 (가입·미해약·linked, V2 필터 없음) ---',
+    ...validation.legacy_walk_contracts.map(
+      (c) =>
+        `  ${c.contract_code ?? c.contract_id} units=${c.unit_count} order=${c.order_ymd} cum=${c.cumulative_units_before}→${c.cumulative_units_after}${c.is_threshold ? ' [THRESHOLD]' : ''}`,
+    ),
+    '',
+    `--- canonical walk 제외 계약 (${validation.excluded_from_canonical_walk.length}건) ---`,
+    ...validation.excluded_from_canonical_walk.map(
+      (e) =>
+        `  ${e.contract_code ?? e.contract_id} units=${e.unit_count} reason=${e.exclusion_reason} v2=${e.excluded_by_v2_eligibility}`,
+    ),
+  ];
+  return lines.join('\n');
+}
+
+/**
+ * 승급 이벤트 vs walk 불일치 감사 (하위 호환).
+ * {@link validatePromotionEvent} 결과를 요약한다.
  */
 export function auditPromotionEventWalkMismatch(params: {
   memberId: string;
@@ -404,45 +696,23 @@ export function auditPromotionEventWalkMismatch(params: {
   event: LeaderPromotionEventRecord;
   threshold: SalesMemberPromotionThreshold;
 }): PromotionEventWalkMismatch | null {
-  const { memberId, treeRows, joinAttributed, joinStatusCandidates, event, threshold } = params;
-  const childrenByParent = buildChildrenByParentFromRows(treeRows);
-  const subtree = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
-  const { walk_total_join_units, walk_cumulative_units_at_threshold } = computeWalkJoinStatsForMember(
-    memberId,
-    treeRows,
-    joinAttributed,
-    threshold.threshold_contract_id,
-  );
-
-  const isMismatch =
-    walk_total_join_units < LEADER_PROMOTION_MIN_UNITS || walk_cumulative_units_at_threshold === null;
-  if (!isMismatch) return null;
-
-  const joinAttributedIds = new Set(joinAttributed.map((c) => c.id));
-  const excluded_join_contracts: PromotionEventWalkMismatch['excluded_join_contracts'] = [];
-  for (const c of joinStatusCandidates) {
-    if (!subtree.has(c.sales_member_id)) continue;
-    if (String(c.status ?? '').trim() !== '가입') continue;
-    if (joinAttributedIds.has(c.id)) continue;
-    const { exclusion_reason, excluded_by_v2_eligibility } = explainPromotionWalkJoinExclusion(c);
-    excluded_join_contracts.push({
-      contract_id: c.id,
-      contract_code: c.contract_code ?? null,
-      unit_count: Math.max(0, c.unit_count ?? 0),
-      exclusion_reason,
-      excluded_by_v2_eligibility,
-    });
-  }
+  const validation = validatePromotionEvent(params);
+  if (validation.status === 'VERIFIED_BY_WALK') return null;
 
   return {
     type: 'PROMOTION_EVENT_WALK_MISMATCH',
-    member_id: memberId,
-    promotion_event_id: memberId,
-    threshold_contract_id: threshold.threshold_contract_id,
-    event_created_at: event.created_at ?? null,
-    walk_cumulative_units_at_threshold,
-    walk_total_join_units,
-    excluded_join_contracts,
+    validation_status: validation.status,
+    member_id: validation.member_id,
+    promotion_event_id: validation.member_id,
+    threshold_contract_id: validation.threshold_contract_id,
+    event_created_at: validation.event_created_at,
+    walk_cumulative_units_at_threshold: validation.walk_cumulative_units_at_threshold,
+    walk_total_join_units: validation.walk_total_join_units,
+    legacy_total_join_units: validation.legacy_total_join_units,
+    legacy_cumulative_units_at_threshold: validation.legacy_cumulative_units_at_threshold,
+    excluded_join_contracts: validation.excluded_from_canonical_walk,
+    requires_review: validation.requires_review,
+    status_reason: validation.status_reason,
   };
 }
 
@@ -472,14 +742,7 @@ function memberUsesEventThresholdSplit(
 }
 
 /**
- * 수당 계산에 이벤트 threshold 분할을 적용할지 판단.
- *
- * 1. threshold 가 walk 에 없음 → 이벤트 (김세영: 과거 승격·귀속 누락)
- * 2. threshold 가 walk 에서 누적 20 경계를 가로지름 → walk SSOT
- * 3. walk 누적 ≥ 20 (경계는 다른 계약) → walk SSOT
- * 4. threshold 가 walk 에 있으나 경계 아님 + walk < 20:
- *    - threshold 순서일이 walk 최신 계약 순서일보다 이전 → 이벤트 (김세영: 과거 승격·walk 일부만 포함)
- *    - 그 외 → walk SSOT 전량 30만 (조자양)
+ * @deprecated {@link validatePromotionEvent} 의 commission_strategy 를 사용한다.
  */
 export function shouldUseEventThresholdSplitForCommission(
   memberId: string,
@@ -487,41 +750,22 @@ export function shouldUseEventThresholdSplitForCommission(
   joinAttributed: AttributedJoinContractRow[],
   threshold: SalesMemberPromotionThreshold,
   minUnits: number = LEADER_PROMOTION_MIN_UNITS,
+  joinStatusCandidates: ReadonlyArray<JoinStatusContractCandidate> = [],
 ): boolean {
-  const stats = computeWalkJoinStatsForMember(
+  const validation = validatePromotionEvent({
     memberId,
     treeRows,
     joinAttributed,
-    threshold.threshold_contract_id,
-  );
-
-  if (stats.walk_cumulative_units_at_threshold === null) {
-    return true;
-  }
-
-  if (
-    thresholdCrossesPromotionBoundaryInWalk(
-      memberId,
-      treeRows,
-      joinAttributed,
-      threshold.threshold_contract_id,
-      minUnits,
-    )
-  ) {
-    return false;
-  }
-
-  if (stats.walk_total_join_units >= minUnits) {
-    return false;
-  }
-
-  const latest = latestWalkOrderYmdInSubtree(memberId, treeRows, joinAttributed);
-  const thYmd = threshold.threshold_join_date.slice(0, 10);
-  if (latest && thYmd < latest) {
-    return true;
-  }
-
-  return false;
+    joinStatusCandidates,
+    event: {
+      member_id: memberId,
+      threshold_contract_id: threshold.threshold_contract_id,
+      threshold_join_date: threshold.threshold_join_date,
+    },
+    threshold,
+    minUnits,
+  });
+  return validation.commission_strategy === 'EVENT_THRESHOLD';
 }
 
 function resolvePromotionSplitForMember(
@@ -534,13 +778,19 @@ function resolvePromotionSplitForMember(
   const eventCtx = memberUsesEventThresholdSplit(memberId, options);
   if (eventCtx && options?.treeRows) {
     const { event, threshold } = eventCtx;
-    const useEventSplit = shouldUseEventThresholdSplitForCommission(
+    const validation = validatePromotionEvent({
       memberId,
-      options.treeRows,
-      sorted,
+      treeRows: options.treeRows,
+      joinAttributed: sorted,
+      joinStatusCandidates: options.joinStatusCandidates ?? [],
+      event,
       threshold,
-    );
-    if (options?.walkMismatchOut) {
+      minUnits,
+    });
+    if (options.validationOut) {
+      options.validationOut.push(validation);
+    }
+    if (options.walkMismatchOut) {
       const mismatch = auditPromotionEventWalkMismatch({
         memberId,
         treeRows: options.treeRows,
@@ -551,9 +801,10 @@ function resolvePromotionSplitForMember(
       });
       if (mismatch) options.walkMismatchOut.push(mismatch);
     }
-    if (useEventSplit) {
+    if (validation.commission_strategy === 'EVENT_THRESHOLD') {
       return promotionSplitFromRecordedThreshold(subtree, sorted, threshold);
     }
+    return promotionWalkFromCumulative(sorted, subtree, minUnits);
   } else if (eventCtx) {
     return promotionSplitFromRecordedThreshold(subtree, sorted, eventCtx.threshold);
   }
@@ -642,9 +893,10 @@ export type LeaderPromotionEventRecord = {
   created_at?: string | null;
 };
 
-/** 승급 이벤트 vs walk 누적 불일치 감사 (수당은 이벤트 기준 유지) */
+/** 승급 이벤트 vs walk 불일치 감사 (하위 호환 요약) */
 export type PromotionEventWalkMismatch = {
   type: 'PROMOTION_EVENT_WALK_MISMATCH';
+  validation_status: PromotionEventValidationStatus;
   member_id: string;
   /** leader_promotion_events PK (= member_id) */
   promotion_event_id: string;
@@ -652,6 +904,10 @@ export type PromotionEventWalkMismatch = {
   event_created_at: string | null;
   walk_cumulative_units_at_threshold: number | null;
   walk_total_join_units: number;
+  legacy_total_join_units: number;
+  legacy_cumulative_units_at_threshold: number | null;
+  requires_review: boolean;
+  status_reason: string;
   excluded_join_contracts: Array<{
     contract_id: string;
     contract_code: string | null;
@@ -667,12 +923,15 @@ export type JoinStatusContractCandidate = {
   contract_code?: string | null;
   unit_count: number;
   sales_member_id: string;
+  join_date?: string | null;
   status?: string | null;
   is_cancelled?: boolean | null;
   sales_link_status?: string | null;
   happy_call_at?: unknown;
   happycall_result?: string | null;
   invoice_no?: string | null;
+  invoice_registered_at?: string | null;
+  created_at?: string | null;
   product_type?: string | null;
   item_name?: string | null;
   source_snapshot_json?: Record<string, string | null> | null;
@@ -685,10 +944,12 @@ export type PromotionUnitSplitBuildOptions = {
   promotionEventsByMemberId?: ReadonlyMap<string, LeaderPromotionEventRecord>;
   /** @deprecated {@link promotionEventsByMemberId} 사용 */
   eventThresholdMemberIds?: ReadonlySet<string>;
-  /** status=가입 이지만 joinAttributed 에 없는 계약 — 불일치 감사용 */
+  /** status=가입 이지만 joinAttributed 에 없는 계약 — 불일치·legacy walk 감사용 */
   joinStatusCandidates?: ReadonlyArray<JoinStatusContractCandidate>;
-  /** 불일치 감지 시 누적 */
+  /** 불일치 감지 시 누적 (하위 호환) */
   walkMismatchOut?: PromotionEventWalkMismatch[];
+  /** 승급 이벤트 신뢰도 판정 전체 감사 */
+  validationOut?: PromotionEventValidation[];
   /** 내부: 불일치 감사용 treeRows */
   treeRows?: OrgTreeRow[];
 };

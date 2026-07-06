@@ -4,11 +4,12 @@ import type { OrgTreeRow } from '@/lib/types';
 import {
   buildPromotionCommissionWalkForMember,
   buildPromotionUnitSplitByContractId,
-  shouldUseEventThresholdSplitForCommission,
+  validatePromotionEvent,
   thresholdCrossesPromotionBoundaryInWalk,
   isPromotionAccumulationJoinContractRow,
   resolvePromotionUnitSplit,
   type AttributedJoinContractRow,
+  type JoinStatusContractCandidate,
   type SalesMemberPromotionThreshold,
   type LeaderPromotionEventRecord,
 } from './leader-promotion';
@@ -42,8 +43,51 @@ function row(
   };
 }
 
-function walk(rows: AttributedJoinContractRow[]) {
-  return buildPromotionCommissionWalkForMember(MEMBER, treeRows, rows);
+function candidate(
+  id: string,
+  units: number,
+  order: {
+    happy_call_at?: string;
+    join_date?: string;
+    invoice_registered_at?: string;
+    created_at?: string;
+  },
+  opts?: { v2Eligible?: boolean },
+): JoinStatusContractCandidate {
+  const v2 = opts?.v2Eligible !== false;
+  return {
+    id,
+    contract_code: id,
+    unit_count: units,
+    sales_member_id: MEMBER,
+    join_date: order.join_date ?? '2026-06-01',
+    status: '가입',
+    happy_call_at: order.happy_call_at ?? '2026-06-01',
+    invoice_registered_at: order.invoice_registered_at ?? null,
+    created_at: order.created_at ?? `2026-06-01T00:00:00.${id.slice(-3)}Z`,
+    happycall_result: v2 ? '성공' : '부재',
+    invoice_no: v2 ? 'INV-1' : null,
+  };
+}
+
+function walk(
+  rows: AttributedJoinContractRow[],
+  options?: Parameters<typeof buildPromotionCommissionWalkForMember>[4],
+) {
+  return buildPromotionCommissionWalkForMember(MEMBER, treeRows, rows, 20, options);
+}
+
+function eventRecord(
+  thresholdId: string,
+  thresholdDate: string,
+  createdAt?: string,
+): LeaderPromotionEventRecord {
+  return {
+    member_id: MEMBER,
+    threshold_contract_id: thresholdId,
+    threshold_join_date: thresholdDate,
+    created_at: createdAt ?? null,
+  };
 }
 
 describe('leader promotion commission (cumulative walk SSOT)', () => {
@@ -139,46 +183,7 @@ describe('leader promotion commission (cumulative walk SSOT)', () => {
     assert.equal(splitByContractId.get('june')?.prePromotionUnits, 0);
   });
 
-  it('8) threshold 계약이 walk에 없고 walk<20 — 이벤트 기준으로 승격 이후 40만', () => {
-    const thresholdId = 'threshold-may-not-in-walk';
-    const threshold: SalesMemberPromotionThreshold = {
-      threshold_contract_id: thresholdId,
-      threshold_join_date: '2026-05-21',
-    };
-    // walk에는 6월 계약만 (과거 승격 계약은 joinAttributed 에 없음)
-    const rows: AttributedJoinContractRow[] = [
-      row('june-a', 1, { happy_call_at: '2026-06-10' }),
-      row('june-b', 1, { happy_call_at: '2026-06-11' }),
-    ];
-    const thresholdMap = new Map([[MEMBER, threshold]]);
-    const eventsMap = new Map<string, LeaderPromotionEventRecord>([
-      [
-        MEMBER,
-        {
-          member_id: MEMBER,
-          threshold_contract_id: thresholdId,
-          threshold_join_date: '2026-05-21',
-          created_at: '2026-05-21T00:00:00Z',
-        },
-      ],
-    ]);
-    const { splitByContractId, audit } = buildPromotionCommissionWalkForMember(
-      MEMBER,
-      treeRows,
-      rows,
-      20,
-      {
-        promotionThresholdByMemberId: thresholdMap,
-        promotionEventsByMemberId: eventsMap,
-        treeRows,
-      },
-    );
-    assert.equal(splitByContractId.get('june-a')?.postPromotionUnits, 1);
-    assert.equal(audit.find((a) => a.contractId === 'june-a')?.promotionReason, 'AFTER_PROMOTION');
-    assert.equal(audit.find((a) => a.contractId === 'june-b')?.promotionReason, 'AFTER_PROMOTION');
-  });
-
-  it('9) threshold 계약이 walk에 포함 + walk<20 — 조자양 케이스, 이벤트 있어도 전량 30만', () => {
+  it('8) 조자양 — threshold walk 포함·누적 18구좌 → EARLY_OR_INVALID·전량 30만', () => {
     const thresholdId = 'ty021-threshold';
     const threshold: SalesMemberPromotionThreshold = {
       threshold_contract_id: thresholdId,
@@ -192,33 +197,152 @@ describe('leader promotion commission (cumulative walk SSOT)', () => {
       row('after-1', 1, { happy_call_at: '2026-06-25', invoice_registered_at: '2026-06-25T12:00:01.000Z' }),
       row('after-2', 1, { happy_call_at: '2026-06-25', invoice_registered_at: '2026-06-25T12:00:02.000Z' }),
     ];
-    const mismatches: import('./leader-promotion').PromotionEventWalkMismatch[] = [];
-    const { splitByContractId, audit } = buildPromotionCommissionWalkForMember(MEMBER, treeRows, rows, 20, {
+    const candidates = rows.map((r) =>
+      candidate(r.id, r.unit_count, { happy_call_at: r.happy_call_at ?? undefined }),
+    );
+    const validation = validatePromotionEvent({
+      memberId: MEMBER,
+      treeRows,
+      joinAttributed: rows,
+      joinStatusCandidates: candidates,
+      event: eventRecord(thresholdId, '2026-06-25', '2026-07-01T00:00:00Z'),
+      threshold,
+    });
+    assert.equal(validation.status, 'EARLY_OR_INVALID');
+    assert.equal(validation.commission_strategy, 'WALK_SSOT');
+    const { splitByContractId, audit } = walk(rows, {
       promotionThresholdByMemberId: new Map([[MEMBER, threshold]]),
-      promotionEventsByMemberId: new Map([
-        [
-          MEMBER,
-          {
-            member_id: MEMBER,
-            threshold_contract_id: thresholdId,
-            threshold_join_date: '2026-06-25',
-            created_at: '2026-07-01T00:00:00Z',
-          },
-        ],
-      ]),
-      walkMismatchOut: mismatches,
+      promotionEventsByMemberId: new Map([[MEMBER, eventRecord(thresholdId, '2026-06-25', '2026-07-01T00:00:00Z')]]),
+      joinStatusCandidates: candidates,
       treeRows,
     });
     assert.equal(splitByContractId.get('after-1')?.postPromotionUnits, 0);
-    assert.equal(splitByContractId.get('after-2')?.postPromotionUnits, 0);
     assert.equal(audit.find((a) => a.contractId === 'after-1')?.promotionReason, 'BEFORE_PROMOTION');
-    assert.equal(audit.find((a) => a.contractId === 'after-2')?.promotionReason, 'BEFORE_PROMOTION');
-    assert.equal(mismatches.length, 1);
-    assert.equal(mismatches[0]?.walk_total_join_units, 14);
-    assert.equal(shouldUseEventThresholdSplitForCommission(MEMBER, treeRows, rows, threshold), false);
   });
 
-  it('10) threshold 계약이 walk에 포함 + walk≥20 — walk SSOT, 이벤트 threshold 무시', () => {
+  it('9) 김세영 — legacy walk로 20구좌 검증 → LEGACY_VERIFIED·이후 40만', () => {
+    const thresholdId = 'may-threshold-legacy';
+    const threshold: SalesMemberPromotionThreshold = {
+      threshold_contract_id: thresholdId,
+      threshold_join_date: '2026-05-21',
+    };
+    const pastLegacy = Array.from({ length: 19 }, (_, i) =>
+      candidate(`past-${i}`, 1, {
+        happy_call_at: `2026-05-${String(i + 1).padStart(2, '0')}`,
+        join_date: `2026-05-${String(i + 1).padStart(2, '0')}`,
+      }, { v2Eligible: false }),
+    );
+    const thresholdCandidate = candidate(thresholdId, 1, {
+      happy_call_at: '2026-05-21',
+      join_date: '2026-05-21',
+    }, { v2Eligible: false });
+    const juneRows: AttributedJoinContractRow[] = Array.from({ length: 4 }, (_, i) =>
+      row(`june-${i}`, 1, { happy_call_at: `2026-06-${String(10 + i)}` }),
+    );
+    const juneCandidates = juneRows.map((r) =>
+      candidate(r.id, r.unit_count, { happy_call_at: r.happy_call_at ?? undefined }),
+    );
+    const joinStatusCandidates = [...pastLegacy, thresholdCandidate, ...juneCandidates];
+
+    const validation = validatePromotionEvent({
+      memberId: MEMBER,
+      treeRows,
+      joinAttributed: juneRows,
+      joinStatusCandidates,
+      event: eventRecord(thresholdId, '2026-05-21', '2026-06-11T00:00:00Z'),
+      threshold,
+    });
+    assert.equal(validation.status, 'LEGACY_VERIFIED');
+    assert.equal(validation.commission_strategy, 'EVENT_THRESHOLD');
+    assert.ok(validation.excluded_from_canonical_walk.length >= 19);
+    assert.equal(validation.legacy_cumulative_units_at_threshold, 19);
+
+    const { splitByContractId, audit } = walk(juneRows, {
+      promotionThresholdByMemberId: new Map([[MEMBER, threshold]]),
+      promotionEventsByMemberId: new Map([[MEMBER, eventRecord(thresholdId, '2026-05-21')]]),
+      joinStatusCandidates,
+      treeRows,
+    });
+    assert.equal(splitByContractId.get('june-0')?.postPromotionUnits, 1);
+    assert.equal(audit.find((a) => a.contractId === 'june-0')?.promotionReason, 'AFTER_PROMOTION');
+  });
+
+  it('10) 이벤트 날짜만 과거·20구좌 근거 없음 → MISSING_HISTORY·날짜로 40만 금지', () => {
+    const thresholdId = 'ghost-threshold';
+    const threshold: SalesMemberPromotionThreshold = {
+      threshold_contract_id: thresholdId,
+      threshold_join_date: '2026-05-21',
+    };
+    const rows: AttributedJoinContractRow[] = [
+      row('june-a', 1, { happy_call_at: '2026-06-10' }),
+      row('june-b', 1, { happy_call_at: '2026-06-11' }),
+    ];
+    const candidates = rows.map((r) =>
+      candidate(r.id, r.unit_count, { happy_call_at: r.happy_call_at ?? undefined }),
+    );
+    const validation = validatePromotionEvent({
+      memberId: MEMBER,
+      treeRows,
+      joinAttributed: rows,
+      joinStatusCandidates: candidates,
+      event: eventRecord(thresholdId, '2026-05-21', '2026-05-21T00:00:00Z'),
+      threshold,
+    });
+    assert.equal(validation.status, 'MISSING_HISTORY');
+    assert.equal(validation.commission_strategy, 'REVIEW_PENDING');
+    assert.equal(validation.requires_review, true);
+
+    const { splitByContractId } = walk(rows, {
+      promotionThresholdByMemberId: new Map([[MEMBER, threshold]]),
+      promotionEventsByMemberId: new Map([[MEMBER, eventRecord(thresholdId, '2026-05-21')]]),
+      joinStatusCandidates: candidates,
+      treeRows,
+    });
+    assert.equal(splitByContractId.get('june-a')?.postPromotionUnits, 0);
+    assert.equal(splitByContractId.get('june-b')?.postPromotionUnits, 0);
+  });
+
+  it('11) 동일 날짜 이벤트·계약 — 날짜 비교가 수당에 영향 없음 (조자양)', () => {
+    const thresholdId = 'same-day-threshold';
+    const threshold: SalesMemberPromotionThreshold = {
+      threshold_contract_id: thresholdId,
+      threshold_join_date: '2026-06-25',
+    };
+    const rows: AttributedJoinContractRow[] = [
+      ...Array.from({ length: 11 }, (_, i) =>
+        row(`before-${i}`, 1, { happy_call_at: `2026-06-${String(i + 1).padStart(2, '0')}` }),
+      ),
+      { ...row(thresholdId, 1, { happy_call_at: '2026-06-25' }), id: thresholdId },
+      row('after', 1, { happy_call_at: '2026-06-25', invoice_registered_at: '2026-06-25T12:00:01.000Z' }),
+    ];
+    const candidates = rows.map((r) =>
+      candidate(r.id, r.unit_count, {
+        happy_call_at: r.happy_call_at ?? undefined,
+        join_date: '2026-06-25',
+      }),
+    );
+    const validationSameDay = validatePromotionEvent({
+      memberId: MEMBER,
+      treeRows,
+      joinAttributed: rows,
+      joinStatusCandidates: candidates,
+      event: eventRecord(thresholdId, '2026-06-25', '2026-06-25T00:00:00Z'),
+      threshold,
+    });
+    const validationLateEvent = validatePromotionEvent({
+      memberId: MEMBER,
+      treeRows,
+      joinAttributed: rows,
+      joinStatusCandidates: candidates,
+      event: eventRecord(thresholdId, '2026-06-25', '2026-07-01T00:00:00Z'),
+      threshold,
+    });
+    assert.equal(validationSameDay.status, validationLateEvent.status);
+    assert.equal(validationSameDay.commission_strategy, validationLateEvent.commission_strategy);
+    assert.equal(validationSameDay.status, 'EARLY_OR_INVALID');
+  });
+
+  it('12) threshold walk 포함 + walk≥20 — VERIFIED_BY_WALK', () => {
     const thresholdId = 'wrong-early-threshold';
     const threshold: SalesMemberPromotionThreshold = {
       threshold_contract_id: thresholdId,
@@ -234,61 +358,21 @@ describe('leader promotion commission (cumulative walk SSOT)', () => {
       ),
       row('after-21', 1, { happy_call_at: '2026-06-25' }),
     ];
-    const { splitByContractId, audit } = buildPromotionCommissionWalkForMember(MEMBER, treeRows, rows, 20, {
-      promotionThresholdByMemberId: new Map([[MEMBER, threshold]]),
-      promotionEventsByMemberId: new Map([
-        [
-          MEMBER,
-          {
-            member_id: MEMBER,
-            threshold_contract_id: thresholdId,
-            threshold_join_date: '2026-06-05',
-          },
-        ],
-      ]),
+    const validation = validatePromotionEvent({
+      memberId: MEMBER,
       treeRows,
+      joinAttributed: rows,
+      joinStatusCandidates: rows.map((r) => candidate(r.id, r.unit_count, { happy_call_at: r.happy_call_at ?? undefined })),
+      event: eventRecord(thresholdId, '2026-06-05'),
+      threshold,
     });
-    assert.equal(shouldUseEventThresholdSplitForCommission(MEMBER, treeRows, rows, threshold), false);
-    assert.equal(splitByContractId.get(thresholdId)?.prePromotionUnits, 1);
-    assert.equal(splitByContractId.get(thresholdId)?.postPromotionUnits, 0);
-    assert.equal(splitByContractId.get('after-21')?.postPromotionUnits, 1);
-    assert.equal(audit.find((a) => a.contractId === 'after-21')?.promotionReason, 'AFTER_PROMOTION');
-    assert.equal(
-      audit.find((a) => a.contractId === thresholdId)?.promotionReason,
-      'BEFORE_PROMOTION',
-    );
-  });
-
-  it('11) 김세영 — threshold가 walk에 있으나 20경계 아님 + walk<20 + threshold일이 walk보다 이전 → 이벤트 40만', () => {
-    const thresholdId = 'may-threshold-in-walk';
-    const threshold: SalesMemberPromotionThreshold = {
-      threshold_contract_id: thresholdId,
-      threshold_join_date: '2026-05-21',
-    };
-    const rows: AttributedJoinContractRow[] = [
-      { ...row(thresholdId, 1, { happy_call_at: '2026-05-21' }), id: thresholdId },
-      ...Array.from({ length: 4 }, (_, i) =>
-        row(`june-${i}`, 1, { happy_call_at: `2026-06-${String(10 + i)}` }),
-      ),
-    ];
+    assert.equal(validation.status, 'VERIFIED_BY_WALK');
     assert.equal(thresholdCrossesPromotionBoundaryInWalk(MEMBER, treeRows, rows, thresholdId), false);
-    assert.equal(shouldUseEventThresholdSplitForCommission(MEMBER, treeRows, rows, threshold), true);
-    const { splitByContractId, audit } = buildPromotionCommissionWalkForMember(MEMBER, treeRows, rows, 20, {
+    const { splitByContractId } = walk(rows, {
       promotionThresholdByMemberId: new Map([[MEMBER, threshold]]),
-      promotionEventsByMemberId: new Map([
-        [
-          MEMBER,
-          {
-            member_id: MEMBER,
-            threshold_contract_id: thresholdId,
-            threshold_join_date: '2026-05-21',
-            created_at: '2026-06-11T00:00:00Z',
-          },
-        ],
-      ]),
+      promotionEventsByMemberId: new Map([[MEMBER, eventRecord(thresholdId, '2026-06-05')]]),
       treeRows,
     });
-    assert.equal(splitByContractId.get('june-0')?.postPromotionUnits, 1);
-    assert.equal(audit.find((a) => a.contractId === 'june-0')?.promotionReason, 'AFTER_PROMOTION');
+    assert.equal(splitByContractId.get('after-21')?.postPromotionUnits, 1);
   });
 });

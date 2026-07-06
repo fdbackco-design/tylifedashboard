@@ -18,6 +18,7 @@ import {
   type AttributedJoinContractRow,
   type LeaderPromotionEventRecord,
   type PromotionEventWalkMismatch,
+  type PromotionEventValidation,
   type JoinStatusContractCandidate,
   isContractStrictlyAfterPromotionThreshold,
 } from '@/lib/settlement/leader-promotion';
@@ -414,12 +415,15 @@ export async function calculateMonthlySettlement(params: {
       contract_code: (row.contract_code ?? null) as string | null,
       unit_count: row.unit_count ?? 0,
       sales_member_id: row.sales_member_id as string,
+      join_date: String(row.join_date ?? '').slice(0, 10),
       status: String(row.status ?? ''),
       is_cancelled: row.is_cancelled ?? null,
       sales_link_status: (row.sales_link_status ?? null) as string | null,
       happy_call_at: row.happy_call_at ?? null,
       happycall_result: (row.happycall_result ?? null) as string | null,
       invoice_no: (row.invoice_no ?? null) as string | null,
+      invoice_registered_at: (row.invoice_registered_at ?? null) as string | null,
+      created_at: (row.created_at ?? null) as string | null,
       product_type: (row.product_type ?? null) as string | null,
       item_name: (row.item_name ?? null) as string | null,
       source_snapshot_json: (row.source_snapshot_json ?? null) as Record<string, string | null> | null,
@@ -503,11 +507,13 @@ export async function calculateMonthlySettlement(params: {
     .map((m) => m.id);
 
   const promotionEventWalkMismatches: PromotionEventWalkMismatch[] = [];
+  const promotionEventValidations: PromotionEventValidation[] = [];
   const splitBuildOptions = {
     promotionThresholdByMemberId,
     promotionEventsByMemberId,
     joinStatusCandidates,
     walkMismatchOut: promotionEventWalkMismatches,
+    validationOut: promotionEventValidations,
     treeRows,
   };
 
@@ -533,6 +539,9 @@ export async function calculateMonthlySettlement(params: {
 
   const promotionEventWalkMismatchByMemberId = new Map(
     promotionEventWalkMismatches.map((m) => [m.member_id, m]),
+  );
+  const promotionEventValidationByMemberId = new Map(
+    promotionEventValidations.map((v) => [v.member_id, v]),
   );
 
   if (debug) {
@@ -599,6 +608,7 @@ export async function calculateMonthlySettlement(params: {
     promotionUnitSplitByMemberId,
     promotionCommissionAuditByMemberId,
     promotionEventWalkMismatchByMemberId,
+    promotionEventValidationByMemberId,
     joinOnlyAttributed: joinAttributed,
     settlementEndDate: end_date,
     leaderMaintenanceBonusAlreadyPaidByMemberId: leaderMaintBlockByMemberId,
