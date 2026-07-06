@@ -9,10 +9,11 @@ import {
   computeLeaderPromotionThresholds,
   mergeLeaderPromotionEventThresholds,
   refreshPromotionThresholdsFromJoinAttributed,
-  isLeaderPromotionJoinContractRow,
+  isPromotionAccumulationJoinContractRow,
   debugPromotionThresholdPath,
   enrichThresholdPrePromotionUnits,
-  buildPromotionUnitSplitByMemberId,
+  buildPromotionUnitSplitByMemberIds,
+  buildPromotionCommissionWalkForMember,
   type AttributedJoinContractRow,
   isContractStrictlyAfterPromotionThreshold,
 } from '@/lib/settlement/leader-promotion';
@@ -287,20 +288,27 @@ export async function calculateMonthlySettlement(params: {
   // 리더 승격(20구좌) / 오버라이드 가입 순서 계산용 가입 인정 계약 집합.
   // - status === '가입' 만 포함 (대기·준비 등 해피콜만 완료된 계약은 제외).
   // - 조직도 KPI(org-node-metrics)와 동일 기준.
-  // - 정렬·승격 전/후 판정: 해피콜 완료일 → 송장등록일(초) → id (누적 20구좌 경계)
+  // - 정렬·승격 전/후 판정: 해피콜 완료일 → 송장등록일(초) → created_at → id (산하 전체 가입 누적 20구좌)
   const joinAttributed: AttributedJoinContractRow[] = [];
   for (const row of (allContractRows ?? []) as any[]) {
-    if (!isLeaderPromotionJoinContractRow(row)) continue;
+    if (!isPromotionAccumulationJoinContractRow(row)) continue;
     const sid = row.sales_member_id as string;
     const hcYmd = happycallYmdSeoul(row.happy_call_at);
     joinAttributed.push({
       id: row.id,
+      contract_code: (row.contract_code ?? null) as string | null,
+      status: String(row.status ?? ''),
       join_date: String(row.join_date ?? '').slice(0, 10),
       unit_count: row.unit_count ?? 0,
       sales_member_id: sid,
       created_at: (row.created_at ?? null) as string | null,
       happy_call_at: hcYmd || (row.happy_call_at ?? null),
       invoice_registered_at: (row.invoice_registered_at ?? null) as string | null,
+      happycall_result: (row.happycall_result ?? null) as string | null,
+      invoice_no: (row.invoice_no ?? null) as string | null,
+      product_type: (row.product_type ?? null) as string | null,
+      item_name: (row.item_name ?? null) as string | null,
+      source_snapshot_json: (row.source_snapshot_json ?? null) as Record<string, string | null> | null,
     });
   }
 
@@ -399,10 +407,20 @@ export async function calculateMonthlySettlement(params: {
     );
   }
 
-  const promotionUnitSplitByMemberId = buildPromotionUnitSplitByMemberId(
-    promotionThresholdByMemberId,
+  const promotionCommissionMemberIds = (membersRaw as OrganizationMember[])
+    .filter((m) => m.rank === '영업사원' || m.rank === '리더')
+    .map((m) => m.id);
+  const promotionUnitSplitByMemberId = buildPromotionUnitSplitByMemberIds(
+    promotionCommissionMemberIds,
     treeRows,
     joinAttributed,
+  );
+
+  const promotionCommissionAuditByMemberId = new Map(
+    promotionCommissionMemberIds.map((mid) => [
+      mid,
+      buildPromotionCommissionWalkForMember(mid, treeRows, joinAttributed).audit,
+    ]),
   );
 
   if (debug) {
@@ -467,6 +485,7 @@ export async function calculateMonthlySettlement(params: {
     treeRows,
     promotionThresholdByMemberId,
     promotionUnitSplitByMemberId,
+    promotionCommissionAuditByMemberId,
     joinOnlyAttributed: joinAttributed,
     settlementEndDate: end_date,
     leaderMaintenanceBonusAlreadyPaidByMemberId: leaderMaintBlockByMemberId,
@@ -514,7 +533,7 @@ export async function calculateMonthlySettlement(params: {
           created_at: cCreated,
           unit_count: c.unit_count ?? 0,
         },
-        th,
+        null,
         promotionUnitSplitByMemberId.get(origin),
       )
     ) {

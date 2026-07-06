@@ -1,4 +1,5 @@
 import type { RankType } from './organization';
+import type { PromotionCommissionSplit } from '@/lib/settlement/leader-promotion';
 
 export interface SettlementRule {
   id: string;
@@ -23,6 +24,11 @@ export interface ContractSettlementItem {
   unit_count: number;
   commission_per_unit: number;
   subtotal: number;
+  /** 승격 누적 walk 검증용 (리더/영업사원 직접 계약) */
+  promotion_cumulative_units_before?: number;
+  promotion_cumulative_units_after?: number;
+  promotion_is_promotion_contract?: boolean;
+  promotion_reason?: string;
 }
 
 export interface RollupItem {
@@ -87,6 +93,8 @@ export interface LeaderPromotionSettlementDetail {
   /** 리더 유지(당월 25일까지 20구좌 이상) 1회성 장려금 */
   leader_maintenance_bonus_amount: number;
   leader_maintenance_bonus_eligible: boolean;
+  /** 산하 전체 가입 누적 walk 기준 수당 판정 근거 (검증용) */
+  promotion_commission_audit?: PromotionCommissionSplit[];
 }
 
 export interface SettlementCalculationDetail {

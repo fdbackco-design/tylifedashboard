@@ -11,7 +11,8 @@ import {
   mergeLeaderPromotionEventThresholds,
   refreshPromotionThresholdsFromJoinAttributed,
   enrichThresholdPrePromotionUnits,
-  buildPromotionUnitSplitByMemberId,
+  buildPromotionUnitSplitByMemberIds,
+  buildPromotionCommissionWalkForMember,
   isContractStrictlyAfterPromotionThreshold,
   type AttributedJoinContractRow,
   type PromotionOrderContractRef,
@@ -134,7 +135,7 @@ function effectiveRankForContract(params: {
   const walk = params.promotionUnitSplitByMemberId?.get(params.memberId);
   const after = isContractStrictlyAfterPromotionThreshold(
     { ...params.contract, unit_count: 1 },
-    th,
+    null,
     walk,
   );
   if (after) return '리더';
@@ -372,8 +373,11 @@ export function calculateOrgNodeMetrics(params: {
     }
   }
 
-  const promotionUnitSplitByMemberId = buildPromotionUnitSplitByMemberId(
-    promotionThresholdByMemberId,
+  const promotionCommissionMemberIds = members
+    .filter((m) => m.rank === '영업사원' || m.rank === '리더')
+    .map((m) => m.id);
+  const promotionUnitSplitByMemberId = buildPromotionUnitSplitByMemberIds(
+    promotionCommissionMemberIds,
     treeRowsForThreshold,
     joinAttributed,
   );
@@ -463,13 +467,12 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
   const effectiveParent = (childId: string, contract: PromotionOrderContractRef): string | null => {
     const prev = previousLeaderByPromotedMemberId?.get(childId) ?? null;
     if (prev) {
-      const th = promotionThresholdByMemberId.get(childId) ?? null;
       const walk = promotionUnitSplitByMemberId.get(childId);
       if (
-        th &&
+        walk &&
         !isContractStrictlyAfterPromotionThreshold(
           { ...contract, unit_count: 1 },
-          th,
+          null,
           walk,
         )
       ) {
@@ -516,14 +519,14 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
     }
 
     const prev = previousLeaderByPromotedMemberId?.get(origin) ?? null;
-    const th = promotionThresholdByMemberId.get(origin) ?? null;
+    const walk = promotionUnitSplitByMemberId.get(origin);
     if (
       prev &&
-      th &&
+      walk &&
       !isContractStrictlyAfterPromotionThreshold(
         promotionOrderRef(c),
-        th,
-        promotionUnitSplitByMemberId.get(origin),
+        null,
+        walk,
       )
     ) {
       const originChain = new Set<string>([
@@ -554,14 +557,14 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
     // 기본수당 귀속: 승격 전(승격 계약 포함)은 이전 리더에게 귀속(단가=영업사원), 승격 후만 본인
     let baseRecipient = origin;
     const prev = previousLeaderByPromotedMemberId?.get(origin) ?? null;
-    const th = promotionThresholdByMemberId.get(origin) ?? null;
+    const walkOrigin = promotionUnitSplitByMemberId.get(origin);
     if (
       prev &&
-      th &&
+      walkOrigin &&
       !isContractStrictlyAfterPromotionThreshold(
         contractKey,
-        th,
-        promotionUnitSplitByMemberId.get(origin),
+        null,
+        walkOrigin,
       )
     ) {
       const prevRank = rankById.get(prev) ?? null;

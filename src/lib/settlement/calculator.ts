@@ -8,10 +8,8 @@ import type {
   LeaderPromotionSettlementDetail,
 } from '../types/settlement';
 import type { RankType, OrgTreeNode, OrgTreeRow } from '../types/organization';
-import type { AttributedJoinContractRow, PromotionOrderContractRef, PromotionUnitSplit, SalesMemberPromotionThreshold } from './leader-promotion';
+import type { AttributedJoinContractRow, PromotionOrderContractRef, PromotionUnitSplit, PromotionCommissionSplit, SalesMemberPromotionThreshold } from './leader-promotion';
 import {
-  isContractAtOrAfterPromotionThreshold,
-  isContractStrictlyAfterPromotionThreshold,
   contractJoinOrderYmd,
   isLeaderMaintenanceBonusEligible,
   subtreeJoinUnitsForLeaderMaintenanceInWindow,
@@ -19,6 +17,7 @@ import {
   rollupEligibleUnitsForParentSubtree,
   prePromotionUnitsForPreviousLeaderRollup,
   resolvePromotionUnitSplit,
+  promotionCommissionSplitForNonWalkContract,
 } from './leader-promotion';
 import {
   calculateGroupBonusForMember,
@@ -291,10 +290,11 @@ export interface LeaderSettlementOpts {
   /** 멤버 id → 조직 트리 노드(승격 후 HQ 직속 등 이전 리더 롤업 보강용) */
   orgNodeByMemberId?: Map<string, OrgTreeNode>;
   /**
-   * joinAttributed walk 기준 계약별 승격 전/후 구좌.
-   * threshold_contract_id(SSOT)까지 누적 20구좌는 승격 전 단가로 본다.
+   * joinAttributed walk 기준 계약별 승격 전/후 구좌 (수당 SSOT).
    */
   promotionUnitSplitByMemberId?: Map<string, Map<string, PromotionUnitSplit>>;
+  /** 검증용: 산하 전체 가입 누적 walk audit */
+  promotionCommissionAuditByMemberId?: Map<string, PromotionCommissionSplit[]>;
 }
 
 const LEADER_MAINTENANCE_BONUS_WON = 1_000_000;
@@ -305,9 +305,8 @@ function commissionPerUnitForDirectContract(
   contract: PromotionOrderContractRef & { unit_count?: number },
   rules: SettlementRule[],
   refDate: string,
-  promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>,
-  leaderRankEffectiveAtByMemberId?: Map<string, string | null>,
   promotionUnitSplitByMemberId?: Map<string, Map<string, PromotionUnitSplit>>,
+  leaderRankEffectiveAtByMemberId?: Map<string, string | null>,
 ): number {
   if (dbRank === '본사') return 0;
 
@@ -320,20 +319,11 @@ function commissionPerUnitForDirectContract(
     }
   }
 
-  const th = promotionThresholdByMemberId.get(memberId) ?? null;
-  const walk = promotionUnitSplitByMemberId?.get(memberId);
-
-  // 산하 가입 20구좌 기준 승격 계약(threshold)이 있으면, DB가 리더여도
-  // "승격 계약 이전" 직접 계약은 영업사원 단가, 이후는 리더 단가(롤업 차액 10만/구좌 등).
-  // threshold가 없으면 DB 직급 단가 그대로(기존 리더·미달성 등).
-  if (th && (dbRank === '영업사원' || dbRank === '리더')) {
-    if (
-      isContractStrictlyAfterPromotionThreshold(
-        { ...contract, unit_count: contract.unit_count ?? 1 },
-        th,
-        walk,
-      )
-    ) {
+  if (dbRank === '영업사원' || dbRank === '리더') {
+    const walk = promotionUnitSplitByMemberId?.get(memberId);
+    const units = Math.max(0, contract.unit_count ?? 1);
+    const split = resolvePromotionUnitSplit({ ...contract, unit_count: units }, walk);
+    if (split.postPromotionUnits > 0 && split.prePromotionUnits === 0) {
       return getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
     }
     return getActiveRuleOrFallback(rules, '영업사원', refDate).commission_per_unit;
@@ -357,12 +347,18 @@ function calcDirectContractsWithLeaderPromotion(
   member: { id: string; rank: RankType },
   rules: SettlementRule[],
   refDate: string,
-  promotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>,
-  leaderRankEffectiveAtByMemberId?: Map<string, string | null>,
   promotionUnitSplitByMemberId?: Map<string, Map<string, PromotionUnitSplit>>,
+  promotionCommissionAuditByMemberId?: Map<string, PromotionCommissionSplit[]>,
+  leaderRankEffectiveAtByMemberId?: Map<string, string | null>,
 ): { items: ContractSettlementItem[]; total: number } {
   const salesRate = getActiveRuleOrFallback(rules, '영업사원', refDate).commission_per_unit;
   const leaderRate = getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
+
+  const auditByContractId = new Map<string, PromotionCommissionSplit>();
+  const memberAudit = promotionCommissionAuditByMemberId?.get(member.id) ?? [];
+  for (const row of memberAudit) {
+    auditByContractId.set(row.contractId, row);
+  }
 
   const items: ContractSettlementItem[] = eligible.map((c) => {
     const originMemberId = (c as any).__attributed_origin_member_id as string | undefined;
@@ -370,10 +366,15 @@ function calcDirectContractsWithLeaderPromotion(
     const rateMemberId = originMemberId ?? member.id;
     const dbRank = originRank ?? member.rank;
     const ref = contractPromotionRef(c);
-    const th = promotionThresholdByMemberId.get(rateMemberId) ?? null;
+    const walk =
+      promotionUnitSplitByMemberId?.get(rateMemberId) ??
+      promotionUnitSplitByMemberId?.get(member.id);
 
     let commissionPerUnit: number;
     let base: number;
+    let auditRow =
+      auditByContractId.get(c.id) ??
+      promotionCommissionAuditByMemberId?.get(rateMemberId)?.find((r) => r.contractId === c.id);
 
     const effectiveAtRaw = leaderRankEffectiveAtByMemberId?.get(rateMemberId) ?? null;
     const effectiveAt = (effectiveAtRaw ?? '').trim();
@@ -393,26 +394,30 @@ function calcDirectContractsWithLeaderPromotion(
       }
     }
 
-    if (th && (dbRank === '영업사원' || dbRank === '리더')) {
-      const walk = promotionUnitSplitByMemberId?.get(rateMemberId);
+    if (dbRank === '영업사원' || dbRank === '리더') {
       const { prePromotionUnits, postPromotionUnits } = resolvePromotionUnitSplit(
         { ...ref, unit_count: c.unit_count },
-        th,
         walk,
       );
       base = prePromotionUnits * salesRate + postPromotionUnits * leaderRate;
       commissionPerUnit =
         c.unit_count > 0 ? Math.round(base / c.unit_count) : salesRate;
+      if (!auditRow) {
+        auditRow = promotionCommissionSplitForNonWalkContract({
+          contractId: c.id,
+          contractCode: c.contract_code,
+          unitCount: c.unit_count,
+        });
+      }
     } else {
       commissionPerUnit = commissionPerUnitForDirectContract(
         rateMemberId,
         dbRank,
-        ref,
+        { ...ref, unit_count: c.unit_count },
         rules,
         refDate,
-        promotionThresholdByMemberId,
-        leaderRankEffectiveAtByMemberId,
         promotionUnitSplitByMemberId,
+        leaderRankEffectiveAtByMemberId,
       );
       base = c.unit_count * commissionPerUnit;
     }
@@ -424,6 +429,10 @@ function calcDirectContractsWithLeaderPromotion(
       unit_count: c.unit_count,
       commission_per_unit: commissionPerUnit,
       subtotal: base - penalty,
+      promotion_cumulative_units_before: auditRow?.cumulativeUnitsBefore,
+      promotion_cumulative_units_after: auditRow?.cumulativeUnitsAfter,
+      promotion_is_promotion_contract: auditRow?.isPromotionContract,
+      promotion_reason: auditRow?.promotionReason,
     };
   });
   const total = items.reduce((s, i) => s + i.subtotal, 0);
@@ -495,9 +504,8 @@ function calcRollupItemsWithLeaderPromotion(
         contractPromotionRef(c),
         rules,
         refDate,
-        promotionThresholdByMemberId,
-        leaderRankEffectiveAtByMemberId,
         promotionUnitSplitByMemberId,
+        leaderRankEffectiveAtByMemberId,
       );
       // 산식 변경 금지: lower 는 직속 자식(child.id / child.rank) 기준 그대로 계산한다.
       // (ownerMemberId/ownerRank 는 표시용 메타로만 사용)
@@ -507,9 +515,8 @@ function calcRollupItemsWithLeaderPromotion(
         contractPromotionRef(c),
         rules,
         refDate,
-        promotionThresholdByMemberId,
-        leaderRankEffectiveAtByMemberId,
         promotionUnitSplitByMemberId,
+        leaderRankEffectiveAtByMemberId,
       );
       const diff = Math.max(0, upper - lower);
       const sub = diff * eligibleUnits;
@@ -590,20 +597,18 @@ function calcRollupItemsWithLeaderPromotion(
           contractPromotionRef(c),
           rules,
           refDate,
-          promotionThresholdByMemberId,
-          leaderRankEffectiveAtByMemberId,
           promotionUnitSplitByMemberId,
+          leaderRankEffectiveAtByMemberId,
         );
         const lower = commissionPerUnitForDirectContract(
           promotedId,
-          // 현재 DB rank가 리더로 바뀌었어도 threshold가 있으면 계약 단위로 30/40이 분기됨
+          // 현재 DB rank가 리더로 바뀌었어도 누적 walk 기준 30/40 분기
           '리더',
           contractPromotionRef(c),
           rules,
           refDate,
-          promotionThresholdByMemberId,
-          leaderRankEffectiveAtByMemberId,
           promotionUnitSplitByMemberId,
+          leaderRankEffectiveAtByMemberId,
         );
         const diff = Math.max(0, upper - lower);
         const sub = diff * eligibleUnits;
@@ -688,6 +693,7 @@ export function calculateMemberSettlement(
     leaderOpts?.promotionThresholdByMemberId ?? new Map<string, SalesMemberPromotionThreshold | null>();
   const leaderEffectiveMap = leaderOpts?.leaderRankEffectiveAtByMemberId;
   const promotionUnitSplitByMemberId = leaderOpts?.promotionUnitSplitByMemberId;
+  const promotionCommissionAuditByMemberId = leaderOpts?.promotionCommissionAuditByMemberId;
   const thForMember = thresholdMap.get(member.id) ?? null;
   const hasAttributedOrigin = eligible.some((c) => (c as any).__attributed_origin_member_id != null);
   const useLeaderRates =
@@ -703,9 +709,9 @@ export function calculateMemberSettlement(
       member,
       rules,
       refDate,
-      thresholdMap,
-      leaderEffectiveMap,
       promotionUnitSplitByMemberId,
+      promotionCommissionAuditByMemberId,
+      leaderEffectiveMap,
     ));
     ({
       items: rollupItems,
@@ -802,37 +808,32 @@ export function calculateMemberSettlement(
     let label = `${member.rank} 기준`;
     let applied: number | null = getActiveRuleOrFallback(rules, member.rank, refDate).commission_per_unit;
     if (member.rank === '영업사원' || member.rank === '리더') {
-      if (!th) {
-        if (member.rank === '리더') {
-          label = `${(ruLeader / 10_000).toFixed(0)}만원/구좌(리더)`;
-          applied = ruLeader;
-        } else {
-          label = `${(ruSales / 10_000).toFixed(0)}만원/구좌(영업사원)`;
-          applied = ruSales;
-        }
+      const walk = leaderOpts.promotionUnitSplitByMemberId?.get(member.id);
+      const hasBefore = eligible.some((c) => {
+        const split = walk?.get(c.id);
+        return !split || split.postPromotionUnits === 0;
+      });
+      const hasAfter = eligible.some((c) => {
+        const split = walk?.get(c.id);
+        return split != null && split.postPromotionUnits > 0;
+      });
+      if (hasBefore && hasAfter) {
+        label = `${(ruSales / 10_000).toFixed(0)}만/${(ruLeader / 10_000).toFixed(0)}만 혼합(승격 계약 전후)`;
+        applied = null;
+      } else if (hasAfter && !hasBefore) {
+        label = `${(ruLeader / 10_000).toFixed(0)}만원/구좌(리더)`;
+        applied = ruLeader;
       } else {
-        const hasBefore = eligible.some(
-          (c) => !isContractAtOrAfterPromotionThreshold(contractPromotionRef(c), th),
-        );
-        const hasAfter = eligible.some((c) =>
-          isContractAtOrAfterPromotionThreshold(contractPromotionRef(c), th),
-        );
-        if (hasBefore && hasAfter) {
-          label = `${(ruSales / 10_000).toFixed(0)}만/${(ruLeader / 10_000).toFixed(0)}만 혼합(승격 계약 전후)`;
-          applied = null;
-        } else if (hasAfter && !hasBefore) {
-          label = `${(ruLeader / 10_000).toFixed(0)}만원/구좌(리더)`;
-          applied = ruLeader;
-        } else {
-          label = `${(ruSales / 10_000).toFixed(0)}만원/구좌(영업사원)`;
-          applied = ruSales;
-        }
+        label = `${(ruSales / 10_000).toFixed(0)}만원/구좌(영업사원)`;
+        applied = ruSales;
       }
     }
     leaderPromotion = {
       db_rank: member.rank,
       effective_is_leader:
-        (member.rank === '영업사원' || member.rank === '리더') && th !== null,
+        (member.rank === '영업사원' || member.rank === '리더') &&
+        (promotionCommissionAuditByMemberId?.get(member.id)?.some((r) => r.promotionReason === 'AFTER_PROMOTION') ??
+          false),
       leader_promotion_first_join_date:
         member.rank === '영업사원' || member.rank === '리더' ? th?.threshold_join_date ?? null : null,
       leader_promotion_threshold_contract_id:
@@ -843,6 +844,7 @@ export function calculateMemberSettlement(
       rule_incentive_amount: ruleIncentiveAmount,
       leader_maintenance_bonus_amount: leaderMaintenanceBonus,
       leader_maintenance_bonus_eligible: leaderMaintenanceBonus > 0,
+      promotion_commission_audit: promotionCommissionAuditByMemberId?.get(member.id) ?? undefined,
     };
   }
 
