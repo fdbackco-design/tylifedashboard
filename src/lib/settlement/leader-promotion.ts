@@ -331,6 +331,67 @@ export function computeWalkJoinStatsForMember(
   };
 }
 
+function collectMemberSubtreeWalkRows(
+  memberId: string,
+  treeRows: OrgTreeRow[],
+  sorted: AttributedJoinContractRow[],
+): AttributedJoinContractRow[] {
+  const childrenByParent = buildChildrenByParentFromRows(treeRows);
+  const subtree = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
+  return sorted.filter((c) => subtree.has(c.sales_member_id) && Math.max(0, c.unit_count ?? 0) > 0);
+}
+
+/** walk 에서 threshold 계약이 누적 20구좌 경계를 가로지르는지 */
+export function thresholdCrossesPromotionBoundaryInWalk(
+  memberId: string,
+  treeRows: OrgTreeRow[],
+  joinAttributed: AttributedJoinContractRow[],
+  thresholdContractId: string,
+  minUnits: number = LEADER_PROMOTION_MIN_UNITS,
+): boolean {
+  const sorted = [...joinAttributed].sort(compareAttributedJoinRows);
+  const rows = collectMemberSubtreeWalkRows(memberId, treeRows, sorted);
+  let cum = 0;
+  for (const c of rows) {
+    const units = Math.max(0, c.unit_count ?? 0);
+    if (c.id === thresholdContractId) {
+      return cum < minUnits && cum + units >= minUnits;
+    }
+    cum += units;
+  }
+  return false;
+}
+
+function earliestWalkOrderYmdInSubtree(
+  memberId: string,
+  treeRows: OrgTreeRow[],
+  joinAttributed: AttributedJoinContractRow[],
+): string | null {
+  const sorted = [...joinAttributed].sort(compareAttributedJoinRows);
+  const rows = collectMemberSubtreeWalkRows(memberId, treeRows, sorted);
+  let min: string | null = null;
+  for (const c of rows) {
+    const ymd = contractJoinOrderYmd(c);
+    if (min === null || ymd < min) min = ymd;
+  }
+  return min;
+}
+
+function latestWalkOrderYmdInSubtree(
+  memberId: string,
+  treeRows: OrgTreeRow[],
+  joinAttributed: AttributedJoinContractRow[],
+): string | null {
+  const sorted = [...joinAttributed].sort(compareAttributedJoinRows);
+  const rows = collectMemberSubtreeWalkRows(memberId, treeRows, sorted);
+  let max: string | null = null;
+  for (const c of rows) {
+    const ymd = contractJoinOrderYmd(c);
+    if (max === null || ymd > max) max = ymd;
+  }
+  return max;
+}
+
 /**
  * 승급 이벤트가 있는데 walk 누적이 20구좌 미만(또는 승격 계약이 walk에 없음)이면 감사 로그 생성.
  * 수당은 이벤트 기준을 유지한다.
@@ -413,17 +474,19 @@ function memberUsesEventThresholdSplit(
 /**
  * 수당 계산에 이벤트 threshold 분할을 적용할지 판단.
  *
- * 우선순위 (승급 이벤트 + walk 공존):
- * 1. threshold_contract_id 가 joinAttributed walk 에 포함 → walk 가 SSOT (이벤트 무시)
- *    - walk < 20: 전량 30만원
- *    - walk ≥ 20: 누적 20 경계 30만/40만 분할
- * 2. threshold 가 walk 에 없음 → 귀속·인정 필터로 누락된 기존 승격 → 이벤트 threshold 분할
+ * 1. threshold 가 walk 에 없음 → 이벤트 (김세영: 과거 승격·귀속 누락)
+ * 2. threshold 가 walk 에서 누적 20 경계를 가로지름 → walk SSOT
+ * 3. walk 누적 ≥ 20 (경계는 다른 계약) → walk SSOT
+ * 4. threshold 가 walk 에 있으나 경계 아님 + walk < 20:
+ *    - threshold 순서일이 walk 최신 계약 순서일보다 이전 → 이벤트 (김세영: 과거 승격·walk 일부만 포함)
+ *    - 그 외 → walk SSOT 전량 30만 (조자양)
  */
 export function shouldUseEventThresholdSplitForCommission(
   memberId: string,
   treeRows: OrgTreeRow[],
   joinAttributed: AttributedJoinContractRow[],
   threshold: SalesMemberPromotionThreshold,
+  minUnits: number = LEADER_PROMOTION_MIN_UNITS,
 ): boolean {
   const stats = computeWalkJoinStatsForMember(
     memberId,
@@ -431,10 +494,34 @@ export function shouldUseEventThresholdSplitForCommission(
     joinAttributed,
     threshold.threshold_contract_id,
   );
-  if (stats.walk_cumulative_units_at_threshold !== null) {
+
+  if (stats.walk_cumulative_units_at_threshold === null) {
+    return true;
+  }
+
+  if (
+    thresholdCrossesPromotionBoundaryInWalk(
+      memberId,
+      treeRows,
+      joinAttributed,
+      threshold.threshold_contract_id,
+      minUnits,
+    )
+  ) {
     return false;
   }
-  return true;
+
+  if (stats.walk_total_join_units >= minUnits) {
+    return false;
+  }
+
+  const latest = latestWalkOrderYmdInSubtree(memberId, treeRows, joinAttributed);
+  const thYmd = threshold.threshold_join_date.slice(0, 10);
+  if (latest && thYmd < latest) {
+    return true;
+  }
+
+  return false;
 }
 
 function resolvePromotionSplitForMember(

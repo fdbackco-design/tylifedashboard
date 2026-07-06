@@ -5,6 +5,7 @@ import {
   buildPromotionCommissionWalkForMember,
   buildPromotionUnitSplitByContractId,
   shouldUseEventThresholdSplitForCommission,
+  thresholdCrossesPromotionBoundaryInWalk,
   isPromotionAccumulationJoinContractRow,
   resolvePromotionUnitSplit,
   type AttributedJoinContractRow,
@@ -256,5 +257,38 @@ describe('leader promotion commission (cumulative walk SSOT)', () => {
       audit.find((a) => a.contractId === thresholdId)?.promotionReason,
       'BEFORE_PROMOTION',
     );
+  });
+
+  it('11) 김세영 — threshold가 walk에 있으나 20경계 아님 + walk<20 + threshold일이 walk보다 이전 → 이벤트 40만', () => {
+    const thresholdId = 'may-threshold-in-walk';
+    const threshold: SalesMemberPromotionThreshold = {
+      threshold_contract_id: thresholdId,
+      threshold_join_date: '2026-05-21',
+    };
+    const rows: AttributedJoinContractRow[] = [
+      { ...row(thresholdId, 1, { happy_call_at: '2026-05-21' }), id: thresholdId },
+      ...Array.from({ length: 4 }, (_, i) =>
+        row(`june-${i}`, 1, { happy_call_at: `2026-06-${String(10 + i)}` }),
+      ),
+    ];
+    assert.equal(thresholdCrossesPromotionBoundaryInWalk(MEMBER, treeRows, rows, thresholdId), false);
+    assert.equal(shouldUseEventThresholdSplitForCommission(MEMBER, treeRows, rows, threshold), true);
+    const { splitByContractId, audit } = buildPromotionCommissionWalkForMember(MEMBER, treeRows, rows, 20, {
+      promotionThresholdByMemberId: new Map([[MEMBER, threshold]]),
+      promotionEventsByMemberId: new Map([
+        [
+          MEMBER,
+          {
+            member_id: MEMBER,
+            threshold_contract_id: thresholdId,
+            threshold_join_date: '2026-05-21',
+            created_at: '2026-06-11T00:00:00Z',
+          },
+        ],
+      ]),
+      treeRows,
+    });
+    assert.equal(splitByContractId.get('june-0')?.postPromotionUnits, 1);
+    assert.equal(audit.find((a) => a.contractId === 'june-0')?.promotionReason, 'AFTER_PROMOTION');
   });
 });
