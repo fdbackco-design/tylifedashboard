@@ -57,6 +57,16 @@ function normalizeCreatedAt(s?: string | null): string {
   return String(s).trim();
 }
 
+/** 동일 송장 배치 등 ms 차이만 나는 invoice_registered_at 은 초 단위로 묶는다. */
+function invoiceRegisteredAtSecondKey(s?: string | null): string {
+  const inv = normalizeCreatedAt(s);
+  if (!inv) return '';
+  const dot = inv.indexOf('.');
+  if (dot > 0) return inv.slice(0, dot);
+  if (inv.length >= 19) return inv.slice(0, 19);
+  return inv;
+}
+
 /** 정산 수당·승격 순서 판정용 기준일: 해피콜 완료일(서울 YMD) 우선, 없으면 join_date */
 export function contractJoinOrderYmd(c: {
   join_date: string;
@@ -67,33 +77,38 @@ export function contractJoinOrderYmd(c: {
   return String(c.join_date ?? '').slice(0, 10);
 }
 
-/** 동일 순서일 tie-break: invoice_registered_at → created_at → id */
+/** 동일 순서일 tie-break: invoice_registered_at(초) → created_at → id */
 export function promotionOrderTieBreakTs(c: {
   invoice_registered_at?: string | null;
   created_at?: string | null;
 }): string {
-  const inv = normalizeCreatedAt(c.invoice_registered_at);
-  if (inv) return inv;
+  const invSec = invoiceRegisteredAtSecondKey(c.invoice_registered_at);
+  if (invSec) return invSec;
   return normalizeCreatedAt(c.created_at);
 }
 
 /**
  * 동일 순서일(해피콜 완료일) 내 정렬.
  * - 송장 등록 시각이 있는 계약이 없는 계약보다 앞선다.
- * - 둘 다 있으면 invoice_registered_at 비교.
+ * - 둘 다 있으면 invoice_registered_at 을 초 단위로 비교(동일 송장 배치 ms 차이는 created_at 으로).
  * - 없으면 created_at.
  */
 function comparePromotionOrderTieBreak(
   a: { invoice_registered_at?: string | null; created_at?: string | null },
   b: { invoice_registered_at?: string | null; created_at?: string | null },
 ): number {
-  const invA = normalizeCreatedAt(a.invoice_registered_at);
-  const invB = normalizeCreatedAt(b.invoice_registered_at);
-  if (invA && invB) {
-    const d = invA.localeCompare(invB);
+  const secA = invoiceRegisteredAtSecondKey(a.invoice_registered_at);
+  const secB = invoiceRegisteredAtSecondKey(b.invoice_registered_at);
+  if (secA && secB) {
+    const d = secA.localeCompare(secB);
     if (d !== 0) return d;
-  } else if (invA && !invB) return -1;
-  else if (!invA && invB) return 1;
+    const ca = normalizeCreatedAt(a.created_at);
+    const cb = normalizeCreatedAt(b.created_at);
+    if (ca !== cb) return ca.localeCompare(cb);
+    return 0;
+  }
+  if (secA && !secB) return -1;
+  if (!secA && secB) return 1;
   const ca = normalizeCreatedAt(a.created_at);
   const cb = normalizeCreatedAt(b.created_at);
   if (ca !== cb) return ca.localeCompare(cb);
