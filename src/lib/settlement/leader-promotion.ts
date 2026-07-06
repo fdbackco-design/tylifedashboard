@@ -90,8 +90,8 @@ export function promotionOrderTieBreakTs(c: {
 /**
  * 동일 순서일(해피콜 완료일) 내 정렬.
  * - 송장 등록 시각이 있는 계약이 없는 계약보다 앞선다.
- * - 둘 다 있으면 invoice_registered_at 을 초 단위로 비교(동일 송장 배치 ms 차이는 created_at 으로).
- * - 없으면 created_at.
+ * - 둘 다 있으면 invoice_registered_at(초) 비교.
+ * - 송장 시각이 없을 때만 created_at 보조.
  */
 function comparePromotionOrderTieBreak(
   a: { invoice_registered_at?: string | null; created_at?: string | null },
@@ -100,12 +100,7 @@ function comparePromotionOrderTieBreak(
   const secA = invoiceRegisteredAtSecondKey(a.invoice_registered_at);
   const secB = invoiceRegisteredAtSecondKey(b.invoice_registered_at);
   if (secA && secB) {
-    const d = secA.localeCompare(secB);
-    if (d !== 0) return d;
-    const ca = normalizeCreatedAt(a.created_at);
-    const cb = normalizeCreatedAt(b.created_at);
-    if (ca !== cb) return ca.localeCompare(cb);
-    return 0;
+    return secA.localeCompare(secB);
   }
   if (secA && !secB) return -1;
   if (!secA && secB) return 1;
@@ -238,6 +233,45 @@ function compareAttributedJoinRows(a: AttributedJoinContractRow, b: AttributedJo
   const tie = comparePromotionOrderTieBreak(a, b);
   if (tie !== 0) return tie;
   return a.id.localeCompare(b.id);
+}
+
+/** 가입(status=가입) 계약 누적 walk로 계약별 승격 전/후 구좌를 산출 (20구좌 경계) */
+function promotionUnitSplitFromCumulativeWalk(
+  sorted: AttributedJoinContractRow[],
+  subtree: Set<string>,
+  minUnits: number,
+): Map<string, PromotionUnitSplit> {
+  const out = new Map<string, PromotionUnitSplit>();
+  let cum = 0;
+
+  for (const c of sorted) {
+    if (!subtree.has(c.sales_member_id)) continue;
+    const units = Math.max(0, c.unit_count ?? 0);
+    if (units === 0) continue;
+
+    if (cum >= minUnits) {
+      out.set(c.id, { prePromotionUnits: 0, postPromotionUnits: units });
+      cum += units;
+      continue;
+    }
+
+    const cumBefore = cum;
+    const cumAfter = cumBefore + units;
+    if (cumAfter >= minUnits) {
+      const pre = minUnits - cumBefore;
+      out.set(c.id, {
+        prePromotionUnits: pre,
+        postPromotionUnits: units - pre,
+      });
+      cum = cumAfter;
+      continue;
+    }
+
+    out.set(c.id, { prePromotionUnits: units, postPromotionUnits: 0 });
+    cum = cumAfter;
+  }
+
+  return out;
 }
 
 /** 리더 승격 20구좌 누적에 포함되는 계약인지 (status === 가입 만) */
@@ -629,12 +663,12 @@ export function enrichThresholdPrePromotionUnits(
 
 /**
  * joinAttributed 정렬·누적 walk 기준으로 계약별 승격 전/후 구좌를 산출한다.
- * 정책 승격 이벤트의 threshold_contract_id(SSOT)까지는 전부 승격 전(30만), 이후만 승격 후(40만).
- * 날짜만 비교하면 같은 승급일·동일 송장 배치 계약이 잘못 40만원이 되는 문제를 방지한다.
+ * 해피콜 완료일 → 송장 등록일(초) → id 순으로 쌓아 누적 20구좌가 처음 달성되는 계약이 승격 계약.
+ * 승격 계약 포함 이전 구좌는 승격 전(30만), 21구좌부터 승격 후(40만).
  */
 export function buildPromotionUnitSplitByContractId(
   memberId: string,
-  threshold: SalesMemberPromotionThreshold,
+  _threshold: SalesMemberPromotionThreshold | null,
   treeRows: OrgTreeRow[],
   joinContractsAttributed: AttributedJoinContractRow[],
   minUnits: number = LEADER_PROMOTION_MIN_UNITS,
@@ -642,37 +676,7 @@ export function buildPromotionUnitSplitByContractId(
   const childrenByParent = buildChildrenByParentFromRows(treeRows);
   const subtree = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
   const sorted = [...joinContractsAttributed].sort(compareAttributedJoinRows);
-  const out = new Map<string, PromotionUnitSplit>();
-
-  let cum = 0;
-  let pastThreshold = false;
-
-  for (const c of sorted) {
-    if (!subtree.has(c.sales_member_id)) continue;
-    const units = Math.max(0, c.unit_count ?? 0);
-    if (units === 0) continue;
-
-    if (pastThreshold) {
-      out.set(c.id, { prePromotionUnits: 0, postPromotionUnits: units });
-      continue;
-    }
-
-    if (c.id === threshold.threshold_contract_id) {
-      const pre = prePromotionUnitsOnThresholdContract(units, cum, minUnits);
-      out.set(c.id, {
-        prePromotionUnits: pre,
-        postPromotionUnits: units - pre,
-      });
-      cum += units;
-      pastThreshold = true;
-      continue;
-    }
-
-    out.set(c.id, { prePromotionUnits: units, postPromotionUnits: 0 });
-    cum += units;
-  }
-
-  return out;
+  return promotionUnitSplitFromCumulativeWalk(sorted, subtree, minUnits);
 }
 
 /** threshold가 있는 멤버별 walk split 맵 일괄 생성 */
@@ -692,7 +696,7 @@ export function buildPromotionUnitSplitByMemberId(
   return out;
 }
 
-/** walk 맵이 있으면 우선 사용, 없으면 날짜·tie-break 기반 split 으로 fallback */
+/** walk 맵이 있으면 우선 사용, walk에 없으면 승격 전(가입 누적 미포함), 없으면 날짜 fallback */
 export function resolvePromotionUnitSplit(
   contract: PromotionOrderContractRef & { unit_count: number },
   threshold: SalesMemberPromotionThreshold | null,
@@ -702,9 +706,16 @@ export function resolvePromotionUnitSplit(
   if (!threshold || total === 0) {
     return { prePromotionUnits: total, postPromotionUnits: 0 };
   }
-  const fromWalk = walkSplitByContractId?.get(contract.id);
-  if (fromWalk && fromWalk.prePromotionUnits + fromWalk.postPromotionUnits === total) {
-    return fromWalk;
+  if (walkSplitByContractId) {
+    const fromWalk = walkSplitByContractId.get(contract.id);
+    if (fromWalk) {
+      if (fromWalk.prePromotionUnits + fromWalk.postPromotionUnits === total) {
+        return fromWalk;
+      }
+      const pre = Math.min(total, Math.max(0, fromWalk.prePromotionUnits));
+      return { prePromotionUnits: pre, postPromotionUnits: total - pre };
+    }
+    return { prePromotionUnits: total, postPromotionUnits: 0 };
   }
   return splitContractUnitsByPromotionThreshold(contract, threshold);
 }

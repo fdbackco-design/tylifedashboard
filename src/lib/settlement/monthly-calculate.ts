@@ -287,7 +287,7 @@ export async function calculateMonthlySettlement(params: {
   // 리더 승격(20구좌) / 오버라이드 가입 순서 계산용 가입 인정 계약 집합.
   // - status === '가입' 만 포함 (대기·준비 등 해피콜만 완료된 계약은 제외).
   // - 조직도 KPI(org-node-metrics)와 동일 기준.
-  // - 정렬·승격 전/후 판정: 해피콜 완료일 → 동일일 송장등록시각(초) → created_at
+  // - 정렬·승격 전/후 판정: 해피콜 완료일 → 송장등록일(초) → id (누적 20구좌 경계)
   const joinAttributed: AttributedJoinContractRow[] = [];
   for (const row of (allContractRows ?? []) as any[]) {
     if (!isLeaderPromotionJoinContractRow(row)) continue;
