@@ -410,6 +410,33 @@ function memberUsesEventThresholdSplit(
   return null;
 }
 
+/**
+ * 수당 계산에 이벤트 threshold 분할을 적용할지 판단.
+ *
+ * 우선순위 (승급 이벤트 + walk 공존):
+ * 1. threshold_contract_id 가 joinAttributed walk 에 포함 → walk 가 SSOT (이벤트 무시)
+ *    - walk < 20: 전량 30만원
+ *    - walk ≥ 20: 누적 20 경계 30만/40만 분할
+ * 2. threshold 가 walk 에 없음 → 귀속·인정 필터로 누락된 기존 승격 → 이벤트 threshold 분할
+ */
+export function shouldUseEventThresholdSplitForCommission(
+  memberId: string,
+  treeRows: OrgTreeRow[],
+  joinAttributed: AttributedJoinContractRow[],
+  threshold: SalesMemberPromotionThreshold,
+): boolean {
+  const stats = computeWalkJoinStatsForMember(
+    memberId,
+    treeRows,
+    joinAttributed,
+    threshold.threshold_contract_id,
+  );
+  if (stats.walk_cumulative_units_at_threshold !== null) {
+    return false;
+  }
+  return true;
+}
+
 function resolvePromotionSplitForMember(
   memberId: string,
   subtree: Set<string>,
@@ -418,20 +445,30 @@ function resolvePromotionSplitForMember(
   options?: PromotionUnitSplitBuildOptions,
 ): { splitByContractId: Map<string, PromotionUnitSplit>; audit: PromotionCommissionSplit[] } {
   const eventCtx = memberUsesEventThresholdSplit(memberId, options);
-  if (eventCtx) {
+  if (eventCtx && options?.treeRows) {
     const { event, threshold } = eventCtx;
-    if (options?.walkMismatchOut && options.joinStatusCandidates && options.treeRows) {
+    const useEventSplit = shouldUseEventThresholdSplitForCommission(
+      memberId,
+      options.treeRows,
+      sorted,
+      threshold,
+    );
+    if (options?.walkMismatchOut) {
       const mismatch = auditPromotionEventWalkMismatch({
         memberId,
         treeRows: options.treeRows,
         joinAttributed: sorted,
-        joinStatusCandidates: options.joinStatusCandidates,
+        joinStatusCandidates: options.joinStatusCandidates ?? [],
         event,
         threshold,
       });
       if (mismatch) options.walkMismatchOut.push(mismatch);
     }
-    return promotionSplitFromRecordedThreshold(subtree, sorted, threshold);
+    if (useEventSplit) {
+      return promotionSplitFromRecordedThreshold(subtree, sorted, threshold);
+    }
+  } else if (eventCtx) {
+    return promotionSplitFromRecordedThreshold(subtree, sorted, eventCtx.threshold);
   }
   return promotionWalkFromCumulative(sorted, subtree, minUnits);
 }
@@ -455,7 +492,7 @@ function promotionReasonFromThresholdSplit(
 
 /**
  * `leader_promotion_events`에 기록된 승격 계약(threshold) 기준 분할.
- * joinAttributed walk 누적이 20구좌에 못 미치더라도(귀속·인정 필터 차이) 승격 이후 계약은 40만원.
+ * {@link shouldUseEventThresholdSplitForCommission} 가 true 일 때만 사용한다.
  */
 function promotionSplitFromRecordedThreshold(
   subtree: Set<string>,
