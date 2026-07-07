@@ -70,6 +70,24 @@ export interface RollupContractItem {
   subtotal: number;
   /** 디버그/분류용 라벨: 'direct_child' | 'previous_leader_pre_promotion' 등 */
   included_reason?: string;
+  /** 계약 가입일 (감사) */
+  contract_join_date?: string;
+  /** 계약 해피콜 완료일 YMD (감사) */
+  contract_happy_call_ymd?: string | null;
+  /** 센터장 기준 조직 경로 (감사) */
+  org_path_label?: string;
+  /** 센터장 승급 확정일 = 5번째 리더 승급 계약 해피콜 완료일 */
+  center_chief_promotion_confirmed_ymd?: string | null;
+  /** 센터장 차액 롤업 적용 시작일 (확정일 다음날) */
+  center_chief_rate_starts_ymd?: string | null;
+  /** LEADER_BEFORE_CENTER | CENTER_AFTER_PROMOTION */
+  center_chief_rollup_segment?: 'LEADER_BEFORE_CENTER' | 'CENTER_AFTER_PROMOTION';
+  /** 롤업 상위에 적용한 직급 (승급 전 구간은 리더) */
+  upper_rank_applied?: RankType;
+  /** 상위 직급 직접계약 단가 */
+  upper_direct_commission_per_unit?: number;
+  /** 직속 자식 직급 직접계약 단가 */
+  lower_direct_commission_per_unit?: number;
 }
 
 /** 리더 승격(영업사원 → 산하 가입 20구좌) 및 유지 장려금 UI용 */

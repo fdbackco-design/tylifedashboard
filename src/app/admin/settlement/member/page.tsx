@@ -371,6 +371,9 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
   const calcDetail = calcDetailEarly;
   const rollupContractItemsRaw: RollupContractItem[] =
     Array.isArray(calcDetail?.rollup_contract_items) ? calcDetail!.rollup_contract_items! : [];
+  const showCenterChiefRollupAudit =
+    String(member.rank ?? '') === '센터장' ||
+    rollupContractItemsRaw.some((r) => r.center_chief_rollup_segment);
   const rollupItems: RollupItem[] = Array.isArray(calcDetail?.rollup_items)
     ? (calcDetail!.rollup_items as RollupItem[])
     : [];
@@ -458,8 +461,13 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     effective_sales_member_name: string;
     unit_count: number;
     subtotal: number;
-    // 표시용 정렬키
     sort_join_ymd: string;
+    center_chief_rollup_segment?: RollupContractItem['center_chief_rollup_segment'];
+    center_chief_promotion_confirmed_ymd?: string | null;
+    upper_rank_applied?: RankType;
+    upper_direct_commission_per_unit?: number;
+    lower_direct_commission_per_unit?: number;
+    org_path_label?: string;
   };
   const groupedRollupMap = new Map<string, GroupedRollupRow>();
   for (const r of rollupContractItemsRaw) {
@@ -503,6 +511,12 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         unit_count: units,
         subtotal: sub,
         sort_join_ymd: join_ymd,
+        center_chief_rollup_segment: r.center_chief_rollup_segment,
+        center_chief_promotion_confirmed_ymd: r.center_chief_promotion_confirmed_ymd,
+        upper_rank_applied: r.upper_rank_applied,
+        upper_direct_commission_per_unit: r.upper_direct_commission_per_unit,
+        lower_direct_commission_per_unit: r.lower_direct_commission_per_unit,
+        org_path_label: r.org_path_label,
       });
       continue;
     }
@@ -582,6 +596,9 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                       '산하 멤버',
                       '산하 직급',
                       '실제 계약 담당자',
+                      ...(showCenterChiefRollupAudit
+                        ? ['수당 구간', '승급 확정일', '상위 직급', '상위 단가', '하위 단가', '조직 경로']
+                        : []),
                       '구좌',
                       '구좌당 롤업',
                       '롤업 소계',
@@ -623,6 +640,36 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                         <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">
                           {r.effective_sales_member_name}
                         </td>
+                        {showCenterChiefRollupAudit && (
+                          <>
+                            <td className="px-3 py-2 text-xs whitespace-nowrap">
+                              {r.center_chief_rollup_segment === 'CENTER_AFTER_PROMOTION'
+                                ? '승급 후'
+                                : r.center_chief_rollup_segment === 'LEADER_BEFORE_CENTER'
+                                  ? '승급 전/대기'
+                                  : '-'}
+                            </td>
+                            <td className="px-3 py-2 tabular-nums text-xs whitespace-nowrap">
+                              {r.center_chief_promotion_confirmed_ymd ?? '-'}
+                            </td>
+                            <td className="px-3 py-2 text-xs whitespace-nowrap">
+                              {r.upper_rank_applied ?? '-'}
+                            </td>
+                            <td className="px-3 py-2 tabular-nums text-right text-xs">
+                              {r.upper_direct_commission_per_unit != null
+                                ? `₩${r.upper_direct_commission_per_unit.toLocaleString()}`
+                                : '-'}
+                            </td>
+                            <td className="px-3 py-2 tabular-nums text-right text-xs">
+                              {r.lower_direct_commission_per_unit != null
+                                ? `₩${r.lower_direct_commission_per_unit.toLocaleString()}`
+                                : '-'}
+                            </td>
+                            <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap max-w-[200px] truncate" title={r.org_path_label ?? ''}>
+                              {r.org_path_label ?? '-'}
+                            </td>
+                          </>
+                        )}
                         <td className="px-3 py-2 tabular-nums text-right">
                           {r.unit_count.toLocaleString()}
                         </td>
@@ -638,7 +685,10 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                 </tbody>
                 <tfoot className="bg-gray-50 border-t border-gray-200">
                   <tr>
-                    <td colSpan={9} className="px-3 py-2 text-right text-xs text-gray-500">
+                    <td
+                      colSpan={9 + (showCenterChiefRollupAudit ? 6 : 0)}
+                      className="px-3 py-2 text-right text-xs text-gray-500"
+                    >
                       합계
                     </td>
                     <td className="px-3 py-2 tabular-nums text-right">
