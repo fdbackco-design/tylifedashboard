@@ -521,24 +521,34 @@ function calcRollupItemsWithLeaderPromotion(
         promotionUnitSplitByMemberId,
         leaderRankEffectiveAtByMemberId,
       );
-      const centerChiefUpper = commissionPerUnitForDirectContract(
-        node.id,
-        '센터장',
-        cref,
-        rules,
-        refDate,
-        promotionUnitSplitByMemberId,
-        leaderRankEffectiveAtByMemberId,
-      );
-      const leaderUpper = commissionPerUnitForDirectContract(
-        node.id,
-        '리더',
-        cref,
-        rules,
-        refDate,
-        promotionUnitSplitByMemberId,
-        leaderRankEffectiveAtByMemberId,
-      );
+      // DB 센터장은 promotion walk 맵에 없어 commissionPerUnit(..., '리더')가 30만으로 떨어진다.
+      // 승급 전/대기 구간은 리더 직급 단가(40만)를 상한으로 쓴다.
+      const leaderRuleRate = getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
+      const centerChiefRuleRate = getActiveRuleOrFallback(rules, '센터장', refDate).commission_per_unit;
+      const leaderUpper =
+        node.rank === '센터장'
+          ? leaderRuleRate
+          : commissionPerUnitForDirectContract(
+              node.id,
+              '리더',
+              cref,
+              rules,
+              refDate,
+              promotionUnitSplitByMemberId,
+              leaderRankEffectiveAtByMemberId,
+            );
+      const centerChiefUpper =
+        node.rank === '센터장'
+          ? centerChiefRuleRate
+          : commissionPerUnitForDirectContract(
+              node.id,
+              '센터장',
+              cref,
+              rules,
+              refDate,
+              promotionUnitSplitByMemberId,
+              leaderRankEffectiveAtByMemberId,
+            );
       const defaultUpper =
         node.rank === '센터장'
           ? centerChiefUpper

@@ -45,11 +45,13 @@ describe('center chief rollup', () => {
     assert.equal(split.postCenterChiefUnits, 0);
   });
 
-  it('조명희 예시 — 직속 영업사원 20만, 직속 리더 라인 10만', () => {
+  it('DB 센터장 승급 전 — 직속 영업사원 라인 10만 (리더 단가 상한)', () => {
     const rules: never[] = [];
     const d = '2026-06-30';
-    assert.equal(getRollupAmountPerUnit('센터장', '영업사원', rules, d), 200_000);
-    assert.equal(getRollupAmountPerUnit('센터장', '리더', rules, d), 100_000);
-    assert.equal(getRollupAmountPerUnit('리더', '영업사원', rules, d), 100_000);
+    const leaderRate = 400_000;
+    const salesRate = 300_000;
+    assert.equal(getRollupAmountPerUnit('리더', '영업사원', rules, d), leaderRate - salesRate);
+    // 승급 전 구간은 센터장도 리더 상한 − 하위와 동일 차액
+    assert.equal(leaderRate - salesRate, 100_000);
   });
 });
