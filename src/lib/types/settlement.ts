@@ -24,6 +24,17 @@ export interface ContractSettlementItem {
   unit_count: number;
   commission_per_unit: number;
   subtotal: number;
+  /** 코드 선발급 특례: 적용 단가/한도 분할 (직접판매 개인수당에만 사용) */
+  pre_issued_special_applied?: boolean;
+  pre_issued_special_units?: number;
+  pre_issued_special_unit_price?: number;
+  pre_issued_normal_units?: number;
+  pre_issued_normal_unit_price?: number;
+  pre_issued_special_amount?: number;
+  pre_issued_normal_amount?: number;
+  pre_issued_special_units_before?: number;
+  pre_issued_special_units_after?: number;
+  pre_issued_remaining_special_units_after?: number;
   /** 승격 누적 walk 검증용 (리더/영업사원 직접 계약) */
   promotion_cumulative_units_before?: number;
   promotion_cumulative_units_after?: number;

@@ -27,6 +27,12 @@ import {
   buildCenterChiefRollupAuditFields,
 } from './center-chief-rollup';
 import { calculateCenterChiefSubtreeBonus, subtreeSettlementUnitsForCenterChiefBonus } from './center-chief-bonus';
+import type { PreIssuedCodeMemberSetting } from './pre-issued-code-special';
+import {
+  computeNormalUnitPriceForRank,
+  isSpecialApplicableToContract,
+  splitDirectContractByPreIssuedSpecial,
+} from './pre-issued-code-special';
 import {
   calculateGroupBonusForMember,
   type GroupBonusContractInput,
@@ -309,6 +315,8 @@ export interface LeaderSettlementOpts {
   promotionEventValidationByMemberId?: Map<string, PromotionEventValidation>;
   /** 센터장 달성(산하 리더 5명) 이후 롤업 단가 분기용 */
   centerChiefThresholdByMemberId?: Map<string, CenterChiefPromotionThreshold | null>;
+  /** 코드 선발급자 설정: member_id → setting (개인 직접판매 특례 단가/한도) */
+  preIssuedCodeSettingsByMemberId?: Map<string, PreIssuedCodeMemberSetting>;
 }
 
 const LEADER_MAINTENANCE_BONUS_WON = 1_000_000;
@@ -364,15 +372,20 @@ function calcDirectContractsWithLeaderPromotion(
   promotionUnitSplitByMemberId?: Map<string, Map<string, PromotionUnitSplit>>,
   promotionCommissionAuditByMemberId?: Map<string, PromotionCommissionSplit[]>,
   leaderRankEffectiveAtByMemberId?: Map<string, string | null>,
+  preIssuedCodeSettingsByMemberId?: Map<string, PreIssuedCodeMemberSetting>,
 ): { items: ContractSettlementItem[]; total: number } {
   const salesRate = getActiveRuleOrFallback(rules, '영업사원', refDate).commission_per_unit;
   const leaderRate = getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
+  const centerChiefRate = getActiveRuleOrFallback(rules, '센터장', refDate).commission_per_unit;
 
   const auditByContractId = new Map<string, PromotionCommissionSplit>();
   const memberAudit = promotionCommissionAuditByMemberId?.get(member.id) ?? [];
   for (const row of memberAudit) {
     auditByContractId.set(row.contractId, row);
   }
+
+  const setting = preIssuedCodeSettingsByMemberId?.get(member.id) ?? null;
+  let specialConsumed = 0;
 
   const items: ContractSettlementItem[] = eligible.map((c) => {
     const originMemberId = (c as any).__attributed_origin_member_id as string | undefined;
@@ -437,6 +450,62 @@ function calcDirectContractsWithLeaderPromotion(
     }
 
     const penalty = commissionPenaltyWonForItemName((c as { item_name?: string }).item_name, c.unit_count);
+
+    // 코드 선발급 특례: 개인 직접판매 수당만 예외 단가 적용.
+    // - 더블업/승급/보너스/오버라이드는 기존 규칙 유지.
+    // - 한도 소진은 "본인 직접판매 실제 구좌" 누계(unit_count)만 사용.
+    if (setting && originMemberId == null) {
+      const contractSalesMemberId = ((c as any).sales_member_id ?? null) as string | null;
+      const orderYmd = contractJoinOrderYmd({
+        join_date: String(c.join_date ?? '').slice(0, 10),
+        happy_call_at: (c as any).happy_call_at ?? null,
+      });
+      const specialOk = isSpecialApplicableToContract({
+        setting,
+        contractOrderYmd: orderYmd,
+        memberId: member.id,
+        contractSalesMemberId,
+      });
+      if (specialOk) {
+        const normalUnitPrice = computeNormalUnitPriceForRank({
+          rankAtContract: member.rank,
+          salesUnitPrice: salesRate,
+          leaderUnitPrice: leaderRate,
+          centerChiefUnitPrice: centerChiefRate,
+        });
+        const split = splitDirectContractByPreIssuedSpecial({
+          contractUnitCount: c.unit_count,
+          specialConsumedBefore: specialConsumed,
+          setting,
+          normalUnitPrice,
+        });
+        specialConsumed = split.special_units_after;
+        const subtotal = split.special_amount + split.normal_amount - penalty;
+        const avg = c.unit_count > 0 ? Math.round((split.special_amount + split.normal_amount) / c.unit_count) : normalUnitPrice;
+        return {
+          contract_id: c.id,
+          contract_code: c.contract_code,
+          unit_count: c.unit_count,
+          commission_per_unit: avg,
+          subtotal,
+          pre_issued_special_applied: split.special_units > 0,
+          pre_issued_special_units: split.special_units,
+          pre_issued_special_unit_price: split.special_unit_price,
+          pre_issued_normal_units: split.normal_units,
+          pre_issued_normal_unit_price: split.normal_unit_price,
+          pre_issued_special_amount: split.special_amount,
+          pre_issued_normal_amount: split.normal_amount,
+          pre_issued_special_units_before: split.special_units_before,
+          pre_issued_special_units_after: split.special_units_after,
+          pre_issued_remaining_special_units_after: split.remaining_special_units_after,
+          promotion_cumulative_units_before: auditRow?.cumulativeUnitsBefore,
+          promotion_cumulative_units_after: auditRow?.cumulativeUnitsAfter,
+          promotion_is_promotion_contract: auditRow?.isPromotionContract,
+          promotion_reason: auditRow?.promotionReason,
+        };
+      }
+    }
+
     return {
       contract_id: c.id,
       contract_code: c.contract_code,
@@ -812,6 +881,7 @@ export function calculateMemberSettlement(
       promotionUnitSplitByMemberId,
       promotionCommissionAuditByMemberId,
       leaderEffectiveMap,
+      leaderOpts?.preIssuedCodeSettingsByMemberId,
     ));
     ({
       items: rollupItems,

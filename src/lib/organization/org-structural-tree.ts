@@ -24,8 +24,10 @@ export type OrgStructuralTreeContext = {
 export function buildOrgStructuralTreeContext(params: {
   membersRaw: OrgMemberForContractRemap[];
   edgesRaw: Array<{ parent_id: string | null; child_id: string }>;
+  /** member_id → override parent_id (코드 선발급 예외 연결 등) */
+  parentOverrideByChildId?: ReadonlyMap<string, string | null>;
 }): OrgStructuralTreeContext {
-  const { membersRaw, edgesRaw } = params;
+  const { membersRaw, edgesRaw, parentOverrideByChildId } = params;
 
   const remapCtx = buildOrgContractSalesRemap(membersRaw);
   const {
@@ -67,6 +69,13 @@ export function buildOrgStructuralTreeContext(params: {
   const edgeMap = new Map<string, string | null>();
   for (const e of bestByChild.values()) {
     edgeMap.set(e.child_id, e.parent_id);
+  }
+  if (parentOverrideByChildId) {
+    for (const [childId, parentId] of parentOverrideByChildId) {
+      if (!memberIdSet.has(childId)) continue;
+      // parent는 존재하지 않으면 null로 처리(본사 직속) — 저장 단계에서 검증한다.
+      edgeMap.set(childId, parentId ?? null);
+    }
   }
 
   const treeRows: OrgTreeRow[] = membersFiltered.map((m) => ({

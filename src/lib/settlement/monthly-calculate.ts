@@ -36,6 +36,10 @@ import {
   computeNextYearMonth,
   happycallYmdSeoul,
 } from '@/lib/settlement/settlement-eligibility-v2';
+import {
+  isParentOverrideActiveForYearMonth,
+  type PreIssuedCodeMemberSetting,
+} from '@/lib/settlement/pre-issued-code-special';
 
 function isSettlementDebugEnabled(): boolean {
   const v = process.env.SETTLEMENT_DEBUG;
@@ -289,12 +293,17 @@ export async function calculateMonthlySettlement(params: {
   const { data: rules, error: rErr } = await db.from('settlement_rules').select('*');
   if (rErr) throw new Error(`정산 규칙 조회 실패: ${rErr.message}`);
 
-  const [membersRes, edgesRes] = await Promise.all([
+  const [membersRes, edgesRes, preIssuedRes] = await Promise.all([
     db
       .from('organization_members')
       .select('id, name, rank, external_id, phone, source_customer_id, leader_rank_effective_at, lock_center_chief_promotion')
       .eq('is_active', true),
     db.from('organization_edges').select('parent_id, child_id'),
+    db
+      .from('pre_issued_code_member_settings')
+      .select(
+        'id, member_id, parent_leader_member_id, reason, special_unit_price, special_unit_limit, effective_from, effective_to, status, note, updated_at',
+      ),
   ]);
   if (membersRes.error) throw new Error(`조직원 조회 실패: ${membersRes.error.message}`);
 
@@ -313,6 +322,30 @@ export async function calculateMonthlySettlement(params: {
   }
   const edgesRaw = (edgesRes.data ?? []) as Array<{ parent_id: string | null; child_id: string }>;
 
+  const preIssuedSettingsByMemberId = new Map<string, PreIssuedCodeMemberSetting>();
+  for (const r of (preIssuedRes.data ?? []) as any[]) {
+    if (!r?.member_id) continue;
+    preIssuedSettingsByMemberId.set(String(r.member_id), {
+      id: String(r.id),
+      member_id: String(r.member_id),
+      parent_leader_member_id: String(r.parent_leader_member_id),
+      reason: String(r.reason ?? ''),
+      special_unit_price: Number(r.special_unit_price ?? 100000),
+      special_unit_limit: Number(r.special_unit_limit ?? 10),
+      effective_from: String(r.effective_from ?? '').slice(0, 10),
+      effective_to: r.effective_to != null ? String(r.effective_to).slice(0, 10) : null,
+      status: String(r.status ?? 'active') as any,
+      note: (r.note ?? null) as string | null,
+      updated_at: (r.updated_at ?? null) as string | null,
+    });
+  }
+
+  const parentOverrideByChildId = new Map<string, string | null>();
+  for (const s of preIssuedSettingsByMemberId.values()) {
+    if (!isParentOverrideActiveForYearMonth(s, yearMonth)) continue;
+    parentOverrideByChildId.set(s.member_id, s.parent_leader_member_id);
+  }
+
   const orgWalkCtx = buildOrgStructuralTreeContext({
     membersRaw: (membersRaw as unknown as Array<{
       id: string;
@@ -328,6 +361,7 @@ export async function calculateMonthlySettlement(params: {
       source_customer_id: m.source_customer_id ?? null,
     })),
     edgesRaw,
+    parentOverrideByChildId,
   });
   const { treeRows, resolveSettlementWalkSalesMemberId } = orgWalkCtx;
 
@@ -803,6 +837,7 @@ export async function calculateMonthlySettlement(params: {
     groupBonusContracts,
     incentiveAmountOverrideByMemberId,
     centerChiefThresholdByMemberId,
+    preIssuedCodeSettingsByMemberId: preIssuedSettingsByMemberId,
   };
 
   const contractsByMember = new Map<string, Contract[]>();

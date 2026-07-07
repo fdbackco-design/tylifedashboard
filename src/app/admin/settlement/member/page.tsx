@@ -83,7 +83,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
   const hcFromIso = kstYmdToUtcIso(hcWindow.start_date); // KST 자정 (inclusive)
   const hcToIso = kstYmdToUtcIso(nextDay(hcWindow.end_date)); // KST 다음날 자정 (exclusive)
 
-  const [memberRes, membersRes, edgesRes, contractRowsRes, deferredRowsRes, settlementRes] =
+  const [memberRes, membersRes, edgesRes, contractRowsRes, deferredRowsRes, settlementRes, preIssuedRes] =
     await Promise.all([
     db
       .from('organization_members')
@@ -111,6 +111,11 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
       .from('monthly_settlements')
       .select('rollup_commission, calculation_detail')
       .eq('year_month', yearMonth)
+      .eq('member_id', memberId)
+      .maybeSingle(),
+    db
+      .from('pre_issued_code_member_settings')
+      .select('id, member_id, parent_leader_member_id, reason, special_unit_price, special_unit_limit, effective_from, effective_to, status, note, updated_at')
       .eq('member_id', memberId)
       .maybeSingle(),
   ]);
@@ -556,6 +561,99 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         </div>
       </div>
 
+      {(() => {
+        const setting = (preIssuedRes.data ?? null) as any | null;
+        if (!setting) return null;
+
+        const ymEnd = (() => {
+          const [y, m] = yearMonth.split('-').map(Number);
+          const dt = new Date(Date.UTC(y, m, 0));
+          return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+        })();
+        const isActiveOnMonthEnd = (() => {
+          const st = String(setting.status ?? 'active');
+          if (st !== 'active') return false;
+          const from = String(setting.effective_from ?? '').slice(0, 10);
+          const to = setting.effective_to != null ? String(setting.effective_to).slice(0, 10) : null;
+          if (!from || ymEnd < from) return false;
+          if (to && ymEnd > to) return false;
+          return true;
+        })();
+
+        const parentId = isActiveOnMonthEnd ? String(setting.parent_leader_member_id ?? '') : '';
+        const parentName =
+          parentId && membersRaw
+            ? (membersRaw.find((m: any) => String(m.id) === parentId)?.name ?? parentId)
+            : '-';
+
+        const directItems = Array.isArray(calcDetail?.direct_contracts) ? (calcDetail!.direct_contracts as any[]) : [];
+        const specialAppliedUnits = directItems.reduce((s, x) => s + Number(x.pre_issued_special_units ?? 0), 0);
+        const normalConvertedUnits = directItems.reduce((s, x) => s + Number(x.pre_issued_normal_units ?? 0), 0);
+        const specialAmount = directItems.reduce((s, x) => s + Number(x.pre_issued_special_amount ?? 0), 0);
+        const normalAmount = directItems.reduce((s, x) => s + Number(x.pre_issued_normal_amount ?? 0), 0);
+        const directActualUnits = directItems.reduce((s, x) => s + Number(x.unit_count ?? 0), 0);
+        const limit = Number(setting.special_unit_limit ?? 0);
+        const remaining = Math.max(0, limit - specialAppliedUnits);
+        const st = String(setting.status ?? 'active');
+        const runtimeStatus =
+          st === 'paused'
+            ? '중지'
+            : st === 'ended'
+              ? '종료'
+              : remaining === 0 && limit > 0
+                ? '특례 소진'
+                : '적용중';
+
+        const promoEligible = calcDetail?.leader_promotion?.subtree_promotion_eligible_units_as_of_end ?? null;
+        const rankLabel = String(member?.rank ?? '-');
+
+        const nextUnitPriceHint =
+          remaining > 0
+            ? `특례 ${Number(setting.special_unit_price ?? 0).toLocaleString()}원/구좌`
+            : `${rankLabel} 일반 단가 적용`;
+
+        return (
+          <section className="mb-6 rounded-lg border border-orange-200 bg-white shadow-sm overflow-hidden">
+            <div className="px-4 py-3 bg-orange-50 border-b border-orange-100">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-orange-900">코드 선발급 특례 · 월말 기준 요약</h3>
+                  <p className="text-[11px] text-orange-800 mt-1">
+                    월말({ymEnd}) 기준 활성 설정이 해당 월 전체 오버라이드/롤업 경로에 적용됩니다.
+                  </p>
+                </div>
+                <span className="inline-flex rounded-full bg-white px-2 py-1 text-xs font-semibold text-orange-800 border border-orange-200">
+                  {runtimeStatus}
+                </span>
+              </div>
+            </div>
+            <div className="px-4 py-3 grid gap-2 sm:grid-cols-2 text-xs text-gray-700">
+              <div>적용단가: <span className="font-semibold tabular-nums">₩{Number(setting.special_unit_price ?? 0).toLocaleString()}</span></div>
+              <div>적용구좌: <span className="font-semibold tabular-nums">{limit.toLocaleString()}구좌</span></div>
+              <div>특례 수당용 실제 직접판매 누적: <span className="font-semibold tabular-nums">{directActualUnits.toLocaleString()}구좌</span></div>
+              <div>특례 적용 누계: <span className="font-semibold tabular-nums text-orange-800">{specialAppliedUnits.toLocaleString()}구좌</span></div>
+              <div>남은 특례 구좌: <span className="font-semibold tabular-nums">{remaining.toLocaleString()}구좌</span></div>
+              <div>승급용 인정구좌 누계(말일): <span className="font-semibold tabular-nums">{promoEligible != null ? Number(promoEligible).toLocaleString() : '-'}</span></div>
+              <div>현재 직급: <span className="font-semibold">{rankLabel}</span></div>
+              <div>월말 기준 상위리더: <span className="font-semibold">{isActiveOnMonthEnd ? String(parentName).replace(/^\\[고객\\]\\s*/, '') : '-'}</span></div>
+              <div className="sm:col-span-2">
+                특례 적용 수당: <span className="font-semibold tabular-nums">₩{Math.round(specialAmount).toLocaleString()}</span>
+                <span className="mx-2 text-gray-300">|</span>
+                일반 단가 수당: <span className="font-semibold tabular-nums">₩{Math.round(normalAmount).toLocaleString()}</span>
+                <span className="mx-2 text-gray-300">|</span>
+                일반 전환 구좌: <span className="font-semibold tabular-nums">{normalConvertedUnits.toLocaleString()}구좌</span>
+              </div>
+              <div className="sm:col-span-2 text-[11px] text-gray-600 leading-relaxed">
+                특례 수당은 실제 직접판매 {limit.toLocaleString()}구좌에서 소진됩니다.
+                승급 인정구좌는 더블업 포함 규칙으로 별도 계산됩니다.
+                <br />
+                다음 직접판매 계약 예상 단가: <span className="font-semibold">{nextUnitPriceHint}</span>
+              </div>
+            </div>
+          </section>
+        );
+      })()}
+
       {calcDetail?.leader_promotion && (
         <section className="mb-6 bg-white rounded-lg border border-indigo-100 shadow-sm overflow-hidden">
           <div className="px-4 py-3 bg-indigo-50 border-b border-indigo-100">
@@ -857,6 +955,13 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
             <p className="text-xs text-gray-500 mb-2">
               직접 계약 + 정산 담당자 보정 계약
             </p>
+            {Array.isArray(calcDetail?.direct_contracts) &&
+              (calcDetail!.direct_contracts as any[]).some((x) => x.pre_issued_special_applied) && (
+                <div className="mb-3 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-800">
+                  <span className="font-semibold">[코드 선발급 특례 적용]</span>{' '}
+                  특례 단가는 개인 직접판매 수당에만 적용되며, 오버라이드·승급·보너스·더블업·썸머 집계는 기존 규칙을 유지합니다.
+                </div>
+              )}
             <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
               <div className="overflow-x-auto [-webkit-overflow-scrolling:touch]">
                 <table className="w-full min-w-[920px] text-xs sm:text-sm">
@@ -885,6 +990,12 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                         '귀속(산하)',
                         '원 담당자',
                         '수당',
+                        '특례(구좌)',
+                        '일반전환(구좌)',
+                        '특례수당',
+                        '일반수당',
+                        '월말 상위리더',
+                        '부모 출처',
                       ].map((h) => (
                         <th
                           key={h}
@@ -898,7 +1009,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                   <tbody className="divide-y divide-gray-100">
                     {groupedRowsWithAmount.length === 0 && (
                       <tr>
-                        <td colSpan={10} className="px-4 py-10 text-center text-sm text-gray-500">
+                        <td colSpan={16} className="px-4 py-10 text-center text-sm text-gray-500">
                           표시할 계약이 없습니다.
                         </td>
                       </tr>
@@ -909,6 +1020,49 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                       const rawSalesName =
                         (membersRaw.find((m: any) => m.id === r.raw_sales_member_id)?.name ??
                           r.raw_sales_member_id) as string;
+                      const directItems = Array.isArray(calcDetail?.direct_contracts)
+                        ? (calcDetail!.direct_contracts as any[])
+                        : [];
+                      const ids = new Set<string>(r.contract_ids as string[]);
+                      let specialUnits = 0;
+                      let normalUnits = 0;
+                      let specialAmount = 0;
+                      let normalAmount = 0;
+                      for (const it of directItems) {
+                        if (!ids.has(String(it.contract_id))) continue;
+                        specialUnits += Number(it.pre_issued_special_units ?? 0);
+                        normalUnits += Number(it.pre_issued_normal_units ?? 0);
+                        specialAmount += Number(it.pre_issued_special_amount ?? 0);
+                        normalAmount += Number(it.pre_issued_normal_amount ?? 0);
+                      }
+
+                      const setting = (preIssuedRes.data ?? null) as any | null;
+                      const ymEnd = (() => {
+                        const [y, m] = yearMonth.split('-').map(Number);
+                        const dt = new Date(Date.UTC(y, m, 0));
+                        return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+                      })();
+                      const isActiveOnMonthEnd = (() => {
+                        if (!setting) return false;
+                        const st = String(setting.status ?? 'active');
+                        if (st !== 'active') return false;
+                        const from = String(setting.effective_from ?? '').slice(0, 10);
+                        const to = setting.effective_to != null ? String(setting.effective_to).slice(0, 10) : null;
+                        if (!from || ymEnd < from) return false;
+                        if (to && ymEnd > to) return false;
+                        return true;
+                      })();
+                      const monthEndParentId = isActiveOnMonthEnd ? String(setting?.parent_leader_member_id ?? '') : '';
+                      const monthEndParentName =
+                        monthEndParentId
+                          ? String(membersRaw.find((m: any) => String(m.id) === monthEndParentId)?.name ?? monthEndParentId).replace(/^\[고객\]\s*/, '')
+                          : '-';
+                      const parentSource =
+                        isActiveOnMonthEnd
+                          ? '코드 선발급 예외'
+                          : (parentByChild.get(r.origin) ?? null)
+                            ? '일반 조직도'
+                            : '본사 직속';
                       return (
                         <tr key={`${r.customer_name}__${r.hc_ymd}`} className="hover:bg-gray-50 align-top">
                           <td className="px-2 sm:px-3 py-2">
@@ -948,6 +1102,22 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                           <td className="px-2 sm:px-3 py-2 tabular-nums text-right font-semibold whitespace-nowrap">
                             ₩{r.amount.toLocaleString()}
                           </td>
+                          <td className="px-2 sm:px-3 py-2 tabular-nums text-right text-orange-800 whitespace-nowrap">
+                            {specialUnits > 0 ? specialUnits.toLocaleString() : '-'}
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 tabular-nums text-right text-gray-700 whitespace-nowrap">
+                            {normalUnits > 0 ? normalUnits.toLocaleString() : '-'}
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 tabular-nums text-right text-orange-800 whitespace-nowrap">
+                            {specialAmount > 0 ? `₩${Math.round(specialAmount).toLocaleString()}` : '-'}
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 tabular-nums text-right text-gray-700 whitespace-nowrap">
+                            {normalAmount > 0 ? `₩${Math.round(normalAmount).toLocaleString()}` : '-'}
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 text-gray-700 whitespace-nowrap break-keep max-w-[6.5rem] truncate">
+                            {monthEndParentName}
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 text-gray-500 whitespace-nowrap">{parentSource}</td>
                         </tr>
                       );
                     })}
@@ -966,6 +1136,12 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                         <td className="px-2 sm:px-3 py-2 tabular-nums text-right font-semibold whitespace-nowrap">
                           ₩{totalAmount.toLocaleString()}
                         </td>
+                        <td className="px-2 sm:px-3 py-2" />
+                        <td className="px-2 sm:px-3 py-2" />
+                        <td className="px-2 sm:px-3 py-2" />
+                        <td className="px-2 sm:px-3 py-2" />
+                        <td className="px-2 sm:px-3 py-2" />
+                        <td className="px-2 sm:px-3 py-2" />
                       </tr>
                     </tfoot>
                   )}
