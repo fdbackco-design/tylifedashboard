@@ -5,7 +5,8 @@ import type { RankType } from '@/lib/types/organization';
 import {
   computeCenterChiefThresholdForMember,
   compareSubtreeLeaderPromotionOrder,
-  isContractAtOrAfterCenterChiefThreshold,
+  centerChiefPostRollupStartsYmd,
+  isContractAtOrAfterCenterChiefPostRollup,
   splitContractUnitsByCenterChiefThreshold,
   type CenterChiefPromotionThreshold,
 } from './center-chief-promotion';
@@ -97,7 +98,7 @@ describe('center chief promotion', () => {
     assert.equal(th.threshold_contract_id, 'c-l5');
   });
 
-  it('센터장 달성 이후 계약은 postCenterChiefUnits', () => {
+  it('승급 계약 해피콜 다음날부터 postCenterChiefUnits (당일은 pre)', () => {
     const ccTh: CenterChiefPromotionThreshold = {
       threshold_leader_member_id: L5,
       threshold_join_date: '2026-06-20',
@@ -105,6 +106,8 @@ describe('center chief promotion', () => {
       threshold_invoice_registered_at: '2026-06-20T10:00:00Z',
       threshold_created_at: '2026-06-20T10:00:01Z',
     };
+
+    assert.equal(centerChiefPostRollupStartsYmd(ccTh), '2026-06-21');
 
     const before = {
       id: 'before',
@@ -120,22 +123,26 @@ describe('center chief promotion', () => {
       created_at: '2026-06-20T10:00:01Z',
       unit_count: 1,
     };
-    const after = {
-      id: 'after',
+    const onNextDay = {
+      id: 'next-day',
       join_date: '2026-06-21',
       happy_call_at: '2026-06-21',
       unit_count: 1,
     };
 
-    assert.equal(isContractAtOrAfterCenterChiefThreshold(before, ccTh), false);
-    assert.equal(isContractAtOrAfterCenterChiefThreshold(onThreshold, ccTh), true);
-    assert.equal(isContractAtOrAfterCenterChiefThreshold(after, ccTh), true);
+    assert.equal(isContractAtOrAfterCenterChiefPostRollup(before, ccTh), false);
+    assert.equal(isContractAtOrAfterCenterChiefPostRollup(onThreshold, ccTh), false);
+    assert.equal(isContractAtOrAfterCenterChiefPostRollup(onNextDay, ccTh), true);
 
     assert.deepEqual(splitContractUnitsByCenterChiefThreshold(before, ccTh), {
       preCenterChiefUnits: 2,
       postCenterChiefUnits: 0,
     });
-    assert.deepEqual(splitContractUnitsByCenterChiefThreshold(after, ccTh), {
+    assert.deepEqual(splitContractUnitsByCenterChiefThreshold(onThreshold, ccTh), {
+      preCenterChiefUnits: 1,
+      postCenterChiefUnits: 0,
+    });
+    assert.deepEqual(splitContractUnitsByCenterChiefThreshold(onNextDay, ccTh), {
       preCenterChiefUnits: 0,
       postCenterChiefUnits: 1,
     });
