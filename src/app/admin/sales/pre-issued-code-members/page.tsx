@@ -27,11 +27,12 @@ export default async function PreIssuedCodeMembersPage({ searchParams }: PagePro
 
   const db = createAdminSupabaseClient();
 
-  const [membersRes, settingsRes] = await Promise.all([
+  // 후보 영업자/리더 검색 대상:
+  // - 조직도(active) 멤버 + 계정 발급된(user_profiles.member_id 존재) 멤버(계약/산하가 없어도 포함)
+  const [membersRes, settingsRes, issuedProfilesRes] = await Promise.all([
     db
       .from('organization_members')
-      .select('id,name,rank,phone,external_id')
-      .eq('is_active', true)
+      .select('id,name,rank,phone,external_id,is_active')
       .order('name'),
     db
       .from('pre_issued_code_member_settings')
@@ -40,6 +41,12 @@ export default async function PreIssuedCodeMembersPage({ searchParams }: PagePro
       )
       .order('updated_at', { ascending: false })
       .limit(2000),
+    db
+      .from('user_profiles')
+      .select('member_id, display_name, phone, role, is_active, mapping_status')
+      .eq('role', 'member')
+      .not('member_id', 'is', null)
+      .limit(5000),
   ]);
 
   if (membersRes.error) {
@@ -48,9 +55,57 @@ export default async function PreIssuedCodeMembersPage({ searchParams }: PagePro
   if (settingsRes.error) {
     return <div className="p-6 text-sm text-red-600">설정 조회 실패: {settingsRes.error.message}</div>;
   }
+  if (issuedProfilesRes.error) {
+    return <div className="p-6 text-sm text-red-600">계정 발급 목록 조회 실패: {issuedProfilesRes.error.message}</div>;
+  }
 
   const memberById = new Map<string, any>();
   for (const m of (membersRes.data ?? []) as any[]) memberById.set(String(m.id), m);
+
+  // 계정 발급된 멤버가 is_active=false 등으로 조직도 후보에서 빠지지 않도록 합집합 처리
+  const issuedMemberIdSet = new Set<string>();
+  const issuedPhoneByMemberId = new Map<string, string | null>();
+  const issuedDisplayByMemberId = new Map<string, string>();
+  for (const p of (issuedProfilesRes.data ?? []) as any[]) {
+    const mid = String(p.member_id ?? '').trim();
+    if (!mid) continue;
+    issuedMemberIdSet.add(mid);
+    issuedPhoneByMemberId.set(mid, (p.phone ?? null) as string | null);
+    issuedDisplayByMemberId.set(mid, String(p.display_name ?? '').trim());
+  }
+
+  const mergedMembers = (() => {
+    const out: any[] = [];
+    const added = new Set<string>();
+    // 1) organization_members 전부
+    for (const m of (membersRes.data ?? []) as any[]) {
+      const id = String(m.id);
+      if (added.has(id)) continue;
+      added.add(id);
+      out.push(m);
+    }
+    // 2) user_profiles에만 있고 membersRes에 누락된 경우(방어) — member_id FK라 보통은 존재함
+    for (const id of issuedMemberIdSet) {
+      if (added.has(id)) continue;
+      out.push({
+        id,
+        name: issuedDisplayByMemberId.get(id) ?? id,
+        rank: '영업사원',
+        phone: issuedPhoneByMemberId.get(id) ?? null,
+        external_id: null,
+        is_active: true,
+      });
+      added.add(id);
+    }
+    return out;
+  })();
+
+  // UI 선택 후보: "계정 발급된 사람"은 무조건 포함 + (조직도 활성 멤버) 포함
+  const selectableMembers = mergedMembers.filter((m: any) => {
+    const id = String(m.id);
+    const active = Boolean(m.is_active ?? true);
+    return issuedMemberIdSet.has(id) || active;
+  });
 
   const rows = ((settingsRes.data ?? []) as any[])
     .map((s) => {
@@ -141,7 +196,7 @@ export default async function PreIssuedCodeMembersPage({ searchParams }: PagePro
       </div>
 
       <PreIssuedCodeMembersClient
-        members={(membersRes.data ?? []) as any[]}
+        members={selectableMembers as any[]}
         initialSettings={rows as any[]}
       />
 
