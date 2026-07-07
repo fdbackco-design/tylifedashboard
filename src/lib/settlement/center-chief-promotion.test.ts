@@ -11,6 +11,7 @@ import {
   type CenterChiefPromotionThreshold,
 } from './center-chief-promotion';
 import type { SalesMemberPromotionThreshold } from './leader-promotion';
+import { getRollupAmountPerUnit } from './calculator';
 
 const CENTER = 'center-leader';
 const L1 = 'leader-1';
@@ -146,5 +147,15 @@ describe('center chief promotion', () => {
       preCenterChiefUnits: 0,
       postCenterChiefUnits: 1,
     });
+  });
+
+  it('센터장 승급 후 롤업은 직속 자식 직급 기준 차액 (조명희 예시)', () => {
+    const rules: never[] = [];
+    const refDate = '2026-06-30';
+    // 직속 영업사원 라인: 센터장 20만
+    assert.equal(getRollupAmountPerUnit('센터장', '영업사원', rules, refDate), 200_000);
+    // 직속 리더 라인(리더 산하 영업사원 계약): 센터장 10만 + 리더 10만
+    assert.equal(getRollupAmountPerUnit('센터장', '리더', rules, refDate), 100_000);
+    assert.equal(getRollupAmountPerUnit('리더', '영업사원', rules, refDate), 100_000);
   });
 });

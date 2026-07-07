@@ -481,6 +481,8 @@ function calcRollupItemsWithLeaderPromotion(
   const contractItems: RollupContractItem[] = [];
   const nodeThreshold = promotionThresholdByMemberId.get(node.id) ?? null;
   const nodeCenterChiefThreshold = centerChiefThresholdByMemberId?.get(node.id) ?? null;
+  /** DB 직급이 센터장일 때만 승급 전/후 롤업 단가 분기 (리더 시절 diff는 일반 리더와 동일) */
+  const useCenterChiefRollupSplit = node.rank === '센터장';
 
   const directChildIdSet = new Set((node.children ?? []).map((c) => c.id));
 
@@ -508,6 +510,7 @@ function calcRollupItemsWithLeaderPromotion(
       );
       if (eligibleUnits <= 0) continue;
 
+      // lower 는 직속 자식(child.id / child.rank) 기준. (ownerMemberId/ownerRank 는 표시용)
       const lower = commissionPerUnitForDirectContract(
         child.id,
         child.rank,
@@ -517,84 +520,94 @@ function calcRollupItemsWithLeaderPromotion(
         promotionUnitSplitByMemberId,
         leaderRankEffectiveAtByMemberId,
       );
+      const centerChiefUpper = commissionPerUnitForDirectContract(
+        node.id,
+        node.rank,
+        contractPromotionRef(c),
+        rules,
+        refDate,
+        promotionUnitSplitByMemberId,
+        leaderRankEffectiveAtByMemberId,
+      );
+      const leaderUpper = commissionPerUnitForDirectContract(
+        node.id,
+        '리더',
+        contractPromotionRef(c),
+        rules,
+        refDate,
+        promotionUnitSplitByMemberId,
+        leaderRankEffectiveAtByMemberId,
+      );
+      const postDiff = Math.max(0, centerChiefUpper - lower);
+      const preDiff = Math.max(0, leaderUpper - lower);
+      const defaultDiff = postDiff;
 
-      const rollupDiffForCenterChiefPhase = (phase: 'pre' | 'post'): number => {
-        const upperRank: RankType = phase === 'pre' ? '리더' : '센터장';
-        const upper = commissionPerUnitForDirectContract(
-          node.id,
-          upperRank,
-          contractPromotionRef(c),
-          rules,
-          refDate,
-          promotionUnitSplitByMemberId,
-          leaderRankEffectiveAtByMemberId,
-        );
-        return Math.max(0, upper - lower);
-      };
+      let preUnits = 0;
+      let postUnits = 0;
 
-      const rollupDiffDefault = (): number => {
-        const upper = commissionPerUnitForDirectContract(
-          node.id,
-          node.rank,
-          contractPromotionRef(c),
-          rules,
-          refDate,
-          promotionUnitSplitByMemberId,
-          leaderRankEffectiveAtByMemberId,
-        );
-        return Math.max(0, upper - lower);
-      };
-
-      const pushRollupUnits = (
-        units: number,
-        rollupPerUnit: number,
-        includedReason: string,
-      ) => {
-        if (units <= 0 || rollupPerUnit <= 0) return;
-        const sub = rollupPerUnit * units;
-        childUnits += units;
-        subtotal += sub;
-        localContractItems.push({
-          contract_id: c.id,
-          contract_code: c.contract_code,
-          from_member_id: child.id,
-          from_member_name: child.name,
-          from_rank: child.rank,
-          effective_sales_member_id: ownerMemberId,
-          effective_sales_member_name: ownerName,
-          effective_sales_member_rank: ownerRank,
-          unit_count: units,
-          rollup_amount_per_unit: rollupPerUnit,
-          subtotal: sub,
-          included_reason: includedReason,
-        });
-      };
-
-      if (node.rank === '센터장') {
+      if (useCenterChiefRollupSplit) {
         if (nodeCenterChiefThreshold) {
           const ccSplit = splitContractUnitsByCenterChiefThreshold(
             { ...ref, unit_count: eligibleUnits },
             nodeCenterChiefThreshold,
           );
-          pushRollupUnits(
-            ccSplit.preCenterChiefUnits,
-            rollupDiffForCenterChiefPhase('pre'),
-            'center_chief_pre_threshold',
-          );
-          pushRollupUnits(
-            ccSplit.postCenterChiefUnits,
-            rollupDiffForCenterChiefPhase('post'),
-            'center_chief_post_threshold',
-          );
+          preUnits = ccSplit.preCenterChiefUnits;
+          postUnits = ccSplit.postCenterChiefUnits;
         } else {
-          pushRollupUnits(eligibleUnits, rollupDiffForCenterChiefPhase('post'), 'direct_child');
+          postUnits = eligibleUnits;
         }
       } else {
-        pushRollupUnits(
-          eligibleUnits,
-          rollupDiffDefault(),
-          childThreshold ? 'direct_child_pre_promotion' : 'direct_child',
-        );
+        preUnits = eligibleUnits;
+      }
+
+      if (preUnits > 0) {
+        const rollupPerUnit = useCenterChiefRollupSplit ? preDiff : defaultDiff;
+        const sub = rollupPerUnit * preUnits;
+        childUnits += preUnits;
+        subtotal += sub;
+        if (sub > 0) {
+          localContractItems.push({
+            contract_id: c.id,
+            contract_code: c.contract_code,
+            from_member_id: child.id,
+            from_member_name: child.name,
+            from_rank: child.rank,
+            effective_sales_member_id: ownerMemberId,
+            effective_sales_member_name: ownerName,
+            effective_sales_member_rank: ownerRank,
+            unit_count: preUnits,
+            rollup_amount_per_unit: rollupPerUnit,
+            subtotal: sub,
+            included_reason: useCenterChiefRollupSplit
+              ? 'center_chief_pre_threshold'
+              : childThreshold
+                ? 'direct_child_pre_promotion'
+                : 'direct_child',
+          });
+        }
+      }
+
+      if (postUnits > 0) {
+        const rollupPerUnit = postDiff;
+        const sub = rollupPerUnit * postUnits;
+        childUnits += postUnits;
+        subtotal += sub;
+        if (sub > 0) {
+          localContractItems.push({
+            contract_id: c.id,
+            contract_code: c.contract_code,
+            from_member_id: child.id,
+            from_member_name: child.name,
+            from_rank: child.rank,
+            effective_sales_member_id: ownerMemberId,
+            effective_sales_member_name: ownerName,
+            effective_sales_member_rank: ownerRank,
+            unit_count: postUnits,
+            rollup_amount_per_unit: rollupPerUnit,
+            subtotal: sub,
+            included_reason: 'center_chief_post_threshold',
+          });
+        }
       }
     }
 
