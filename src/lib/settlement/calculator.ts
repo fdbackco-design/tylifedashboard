@@ -14,6 +14,8 @@ import {
   isLeaderMaintenanceBonusEligible,
   subtreeJoinUnitsForLeaderMaintenanceInWindow,
   subtreeJoinUnitsJoinOnlyAsOf,
+  subtreePromotionEligibleWalkUnitsAsOf,
+  DOUBLE_UP_COMMISSION_NOTE,
   rollupEligibleUnitsForParentSubtree,
   prePromotionUnitsForPreviousLeaderRollup,
   resolvePromotionUnitSplit,
@@ -924,6 +926,14 @@ export function calculateMemberSettlement(
       leaderOpts.joinOnlyAttributed,
       leaderOpts.settlementEndDate.slice(0, 10),
     );
+    const subtreeEligibleEnd = subtreePromotionEligibleWalkUnitsAsOf(
+      member.id,
+      leaderOpts.treeRows,
+      leaderOpts.joinOnlyAttributed,
+      leaderOpts.settlementEndDate.slice(0, 10),
+    );
+    const hasDoubleUpInAudit =
+      promotionCommissionAuditByMemberId?.get(member.id)?.some((r) => r.doubleUpApplied) ?? false;
     const ruSales = getActiveRuleOrFallback(rules, '영업사원', refDate).commission_per_unit;
     const ruLeader = getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
     let label = `${member.rank} 기준`;
@@ -960,6 +970,8 @@ export function calculateMemberSettlement(
       leader_promotion_threshold_contract_id:
         member.rank === '영업사원' || member.rank === '리더' ? th?.threshold_contract_id ?? null : null,
       subtree_join_units_join_status_as_of_end: subtreeJoinEnd,
+      subtree_promotion_eligible_units_as_of_end: subtreeEligibleEnd,
+      double_up_commission_note: hasDoubleUpInAudit ? DOUBLE_UP_COMMISSION_NOTE : null,
       commission_rate_label: label,
       applied_commission_per_unit: applied,
       rule_incentive_amount: ruleIncentiveAmount,

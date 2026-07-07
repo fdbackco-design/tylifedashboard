@@ -9,6 +9,27 @@ import {
   SETTLEMENT_VALID_HAPPYCALL_RESULTS,
 } from '@/lib/settlement/settlement-eligibility-v2';
 import { hasValidInvoiceNo } from '@/lib/utils/invoice-no';
+import {
+  buildDoubleUpPromotionAudit,
+  promotionEligibleUnitsForContract,
+} from '@/lib/settlement/double-up-promotion';
+
+export {
+  buildDoubleUpPromotionAudit,
+  DOUBLE_UP_COMMISSION_NOTE,
+  DOUBLE_UP_PROMOTION_APPLIED_REASON,
+  DOUBLE_UP_PROMOTION_END_YMD,
+  DOUBLE_UP_PROMOTION_NAME,
+  DOUBLE_UP_PROMOTION_START_YMD,
+  isDoubleUpPromotionWindow,
+  isHappyCallSuccessForPromotion,
+  promotionEligibleUnitsForContract,
+  promotionMultiplierForContract,
+} from '@/lib/settlement/double-up-promotion';
+export type {
+  DoubleUpPromotionAudit,
+  PromotionMultiplier,
+} from '@/lib/settlement/double-up-promotion';
 
 /** 리더 승격/유지 판정에 쓰는 '가입' 계약만 (status === 가입, 귀속된 담당자 기준) */
 export type AttributedJoinContractRow = {
@@ -278,6 +299,8 @@ function promotionWalkFromCumulative(
         ? PROMOTION_LEADER_COMMISSION_PER_UNIT
         : PROMOTION_SALES_COMMISSION_PER_UNIT;
 
+    const doubleUp = buildDoubleUpPromotionAudit(c);
+
     audit.push({
       contractId: c.id,
       contractCode: String(c.contract_code ?? c.id),
@@ -289,6 +312,14 @@ function promotionWalkFromCumulative(
       promotionReason: classified.promotionReason,
       prePromotionUnits: classified.prePromotionUnits,
       postPromotionUnits: classified.postPromotionUnits,
+      actualUnitCount: doubleUp.actual_unit_count,
+      promotionMultiplier: doubleUp.promotion_multiplier,
+      promotionEligibleUnitCount: doubleUp.promotion_eligible_unit_count,
+      doubleUpApplied: doubleUp.double_up_applied,
+      happyCallSuccessYmd: doubleUp.happy_call_success_ymd,
+      commissionUnitCount: doubleUp.commission_unit_count,
+      bonusUnitCount: doubleUp.bonus_unit_count,
+      doubleUpAppliedReason: doubleUp.applied_reason,
     });
   }
 
@@ -343,12 +374,21 @@ function explainPromotionWalkJoinExclusion(
   };
 }
 
+type WalkJoinUnitMode = 'actual' | 'eligible';
+
+function walkUnitsForMode(c: AttributedJoinContractRow, mode: WalkJoinUnitMode): number {
+  const actual = Math.max(0, c.unit_count ?? 0);
+  if (mode === 'actual') return actual;
+  return promotionEligibleUnitsForContract(c);
+}
+
 /** 산하 walk 누적 통계 (이벤트 불일치 감사용) */
 export function computeWalkJoinStatsForMember(
   memberId: string,
   treeRows: OrgTreeRow[],
   joinContractsAttributed: AttributedJoinContractRow[],
   thresholdContractId?: string | null,
+  mode: WalkJoinUnitMode = 'actual',
 ): { walk_total_join_units: number; walk_cumulative_units_at_threshold: number | null } {
   const childrenByParent = buildChildrenByParentFromRows(treeRows);
   const subtree = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
@@ -360,7 +400,7 @@ export function computeWalkJoinStatsForMember(
 
   for (const c of sorted) {
     if (!subtree.has(c.sales_member_id)) continue;
-    const units = Math.max(0, c.unit_count ?? 0);
+    const units = walkUnitsForMode(c, mode);
     if (units === 0) continue;
     if (thId && c.id === thId) {
       walkCumAtThreshold = cum;
@@ -373,6 +413,22 @@ export function computeWalkJoinStatsForMember(
     walk_total_join_units: walkTotal,
     walk_cumulative_units_at_threshold: walkCumAtThreshold,
   };
+}
+
+/** 승급 판정 전용 walk 누적 (더블업 인정구좌 반영) */
+export function computePromotionEligibleWalkJoinStatsForMember(
+  memberId: string,
+  treeRows: OrgTreeRow[],
+  joinContractsAttributed: AttributedJoinContractRow[],
+  thresholdContractId?: string | null,
+): { walk_total_join_units: number; walk_cumulative_units_at_threshold: number | null } {
+  return computeWalkJoinStatsForMember(
+    memberId,
+    treeRows,
+    joinContractsAttributed,
+    thresholdContractId,
+    'eligible',
+  );
 }
 
 function collectMemberSubtreeWalkRows(
@@ -397,7 +453,7 @@ export function thresholdCrossesPromotionBoundaryInWalk(
   const rows = collectMemberSubtreeWalkRows(memberId, treeRows, sorted);
   let cum = 0;
   for (const c of rows) {
-    const units = Math.max(0, c.unit_count ?? 0);
+    const units = promotionEligibleUnitsForContract(c);
     if (c.id === thresholdContractId) {
       return cum < minUnits && cum + units >= minUnits;
     }
@@ -422,6 +478,15 @@ export type PromotionWalkContractAuditRow = {
   cumulative_units_before: number;
   cumulative_units_after: number;
   is_threshold: boolean;
+  /** 실제 계약 구좌 (unit_count와 동일, 감사 표시용) */
+  actual_unit_count?: number;
+  promotion_multiplier?: 1 | 2;
+  promotion_eligible_units?: number;
+  double_up_applied?: boolean;
+  happy_call_success_ymd?: string | null;
+  commission_unit_count?: number;
+  bonus_unit_count?: number;
+  double_up_applied_reason?: string | null;
 };
 
 /** leader_promotion_events 신뢰도·수당 전략 판정 결과 */
@@ -492,26 +557,47 @@ function collectWalkAuditRows(
   treeRows: OrgTreeRow[],
   joinRows: AttributedJoinContractRow[],
   thresholdContractId: string,
+  mode: WalkJoinUnitMode = 'actual',
 ): PromotionWalkContractAuditRow[] {
   const sorted = [...joinRows].sort(compareAttributedJoinRows);
   const rows = collectMemberSubtreeWalkRows(memberId, treeRows, sorted);
   const out: PromotionWalkContractAuditRow[] = [];
   let cum = 0;
   for (const c of rows) {
-    const units = Math.max(0, c.unit_count ?? 0);
+    const actualUnits = Math.max(0, c.unit_count ?? 0);
+    const walkUnits = walkUnitsForMode(c, mode);
+    const doubleUp = buildDoubleUpPromotionAudit(c);
     const cumBefore = cum;
-    cum += units;
+    cum += walkUnits;
     out.push({
       contract_id: c.id,
       contract_code: c.contract_code ?? null,
-      unit_count: units,
+      unit_count: actualUnits,
       order_ymd: contractJoinOrderYmd(c),
       cumulative_units_before: cumBefore,
       cumulative_units_after: cum,
       is_threshold: c.id === thresholdContractId,
+      actual_unit_count: doubleUp.actual_unit_count,
+      promotion_multiplier: doubleUp.promotion_multiplier,
+      promotion_eligible_units: doubleUp.promotion_eligible_unit_count,
+      double_up_applied: doubleUp.double_up_applied,
+      happy_call_success_ymd: doubleUp.happy_call_success_ymd,
+      commission_unit_count: doubleUp.commission_unit_count,
+      bonus_unit_count: doubleUp.bonus_unit_count,
+      double_up_applied_reason: doubleUp.applied_reason,
     });
   }
   return out;
+}
+
+/** 승급 판정 walk 감사 (더블업 인정구좌 누적) */
+export function collectPromotionEligibleWalkAuditRows(
+  memberId: string,
+  treeRows: OrgTreeRow[],
+  joinRows: AttributedJoinContractRow[],
+  thresholdContractId: string,
+): PromotionWalkContractAuditRow[] {
+  return collectWalkAuditRows(memberId, treeRows, joinRows, thresholdContractId, 'eligible');
 }
 
 function collectExcludedFromCanonicalWalk(
@@ -546,7 +632,12 @@ export function promotionProvenAtThreshold(
   thresholdContractId: string,
   minUnits: number = LEADER_PROMOTION_MIN_UNITS,
 ): boolean {
-  const stats = computeWalkJoinStatsForMember(memberId, treeRows, joinRows, thresholdContractId);
+  const stats = computePromotionEligibleWalkJoinStatsForMember(
+    memberId,
+    treeRows,
+    joinRows,
+    thresholdContractId,
+  );
   if (stats.walk_cumulative_units_at_threshold === null) return false;
   if (
     thresholdCrossesPromotionBoundaryInWalk(
@@ -559,8 +650,14 @@ export function promotionProvenAtThreshold(
   ) {
     return true;
   }
-  const units = findContractUnitsById(thresholdContractId, joinRows) ?? 0;
-  return stats.walk_cumulative_units_at_threshold + units >= minUnits;
+  const thRow = joinRows.find((c) => c.id === thresholdContractId);
+  const eligibleUnits = promotionEligibleUnitsForContract({
+    unit_count: thRow?.unit_count ?? findContractUnitsById(thresholdContractId, joinRows) ?? 0,
+    happy_call_at: thRow?.happy_call_at,
+    happycall_result: thRow?.happycall_result,
+    status: thRow?.status,
+  });
+  return stats.walk_cumulative_units_at_threshold + eligibleUnits >= minUnits;
 }
 
 /**
@@ -584,14 +681,26 @@ export function validatePromotionEvent(params: {
   const walkNaturalId = walkNatural?.threshold_contract_id ?? null;
   const eventId = threshold.threshold_contract_id;
 
-  const canonicalStats = computeWalkJoinStatsForMember(
+  const canonicalStats = computePromotionEligibleWalkJoinStatsForMember(
     memberId,
     treeRows,
     joinAttributed,
     eventId,
   );
+  const actualStats = computeWalkJoinStatsForMember(
+    memberId,
+    treeRows,
+    joinAttributed,
+    eventId,
+    'actual',
+  );
   const thresholdInWalk = canonicalStats.walk_cumulative_units_at_threshold !== null;
-  const canonicalWalkRows = collectWalkAuditRows(memberId, treeRows, joinAttributed, eventId);
+  const canonicalWalkRows = collectPromotionEligibleWalkAuditRows(
+    memberId,
+    treeRows,
+    joinAttributed,
+    eventId,
+  );
   const excluded = collectExcludedFromCanonicalWalk(subtree, joinAttributed, joinStatusCandidates);
   const thresholdUnits = findContractUnitsById(eventId, joinAttributed);
 
@@ -622,8 +731,8 @@ export function validatePromotionEvent(params: {
     event_created_at: event.created_at ?? null,
     walk_total_join_units: canonicalStats.walk_total_join_units,
     walk_cumulative_units_at_threshold: canonicalStats.walk_cumulative_units_at_threshold,
-    legacy_total_join_units: canonicalStats.walk_total_join_units,
-    legacy_cumulative_units_at_threshold: canonicalStats.walk_cumulative_units_at_threshold,
+    legacy_total_join_units: actualStats.walk_total_join_units,
+    legacy_cumulative_units_at_threshold: actualStats.walk_cumulative_units_at_threshold,
     threshold_units_on_contract: thresholdUnits,
     canonical_walk_contracts: canonicalWalkRows,
     legacy_walk_contracts: canonicalWalkRows,
@@ -974,6 +1083,15 @@ export type PromotionCommissionSplit = {
   promotionReason: PromotionCommissionReason;
   prePromotionUnits: number;
   postPromotionUnits: number;
+  /** 더블업 감사 — 수당 계산은 unitCount(실제 구좌)만 사용 */
+  actualUnitCount?: number;
+  promotionMultiplier?: 1 | 2;
+  promotionEligibleUnitCount?: number;
+  doubleUpApplied?: boolean;
+  happyCallSuccessYmd?: string | null;
+  commissionUnitCount?: number;
+  bonusUnitCount?: number;
+  doubleUpAppliedReason?: string | null;
 };
 
 export const PROMOTION_SALES_COMMISSION_PER_UNIT = 300_000 as const;
@@ -1052,6 +1170,9 @@ export function debugPromotionThresholdPath(
   cum_before: number;
   cum_after: number;
   is_threshold: boolean;
+  promotion_eligible_units: number;
+  promotion_multiplier: 1 | 2;
+  double_up_applied: boolean;
 }> {
   const childrenByParent = buildChildrenByParentFromRows(treeRows);
   const subtree = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
@@ -1064,23 +1185,31 @@ export function debugPromotionThresholdPath(
     cum_before: number;
     cum_after: number;
     is_threshold: boolean;
+    promotion_eligible_units: number;
+    promotion_multiplier: 1 | 2;
+    double_up_applied: boolean;
   }> = [];
-  let cum = 0;
+  let eligibleCum = 0;
   for (const c of sorted) {
     if (!subtree.has(c.sales_member_id)) continue;
-    const units = Math.max(0, c.unit_count ?? 0);
-    const cumBefore = cum;
-    cum += units;
+    const actualUnits = Math.max(0, c.unit_count ?? 0);
+    const eligibleUnits = promotionEligibleUnitsForContract(c);
+    const doubleUp = buildDoubleUpPromotionAudit(c);
+    const cumBefore = eligibleCum;
+    eligibleCum += eligibleUnits;
     out.push({
       contract_id: c.id,
       order_ymd: contractJoinOrderYmd(c),
       invoice_registered_at: c.invoice_registered_at ?? null,
-      unit_count: units,
+      unit_count: actualUnits,
       cum_before: cumBefore,
-      cum_after: cum,
-      is_threshold: cum >= minUnits && cumBefore < minUnits,
+      cum_after: eligibleCum,
+      is_threshold: eligibleCum >= minUnits && cumBefore < minUnits,
+      promotion_eligible_units: eligibleUnits,
+      promotion_multiplier: doubleUp.promotion_multiplier,
+      double_up_applied: doubleUp.double_up_applied,
     });
-    if (cum >= minUnits) break;
+    if (eligibleCum >= minUnits) break;
   }
   return out;
 }
@@ -1170,6 +1299,27 @@ export function subtreeJoinUnitsJoinOnlyAsOf(
     if (!subtree.has(c.sales_member_id)) continue;
     const jd = c.join_date.slice(0, 10);
     if (jd <= cap) sum += Math.max(0, c.unit_count ?? 0);
+  }
+  return sum;
+}
+
+/**
+ * 정산월 말 시점까지 산하 승급 인정 walk 누적 (더블업 배수 반영, 해피콜 순서일 기준).
+ */
+export function subtreePromotionEligibleWalkUnitsAsOf(
+  memberId: string,
+  treeRows: OrgTreeRow[],
+  joinContractsAttributed: AttributedJoinContractRow[],
+  asOfInclusive: string,
+): number {
+  const sorted = [...joinContractsAttributed].sort(compareAttributedJoinRows);
+  const rows = collectMemberSubtreeWalkRows(memberId, treeRows, sorted);
+  const cap = asOfInclusive.slice(0, 10);
+  let sum = 0;
+  for (const c of rows) {
+    const orderYmd = contractJoinOrderYmd(c);
+    if (orderYmd > cap) continue;
+    sum += promotionEligibleUnitsForContract(c);
   }
   return sum;
 }
@@ -1310,20 +1460,28 @@ function computeThresholdForSubtree(
   sorted: AttributedJoinContractRow[],
   minUnits: number,
 ): SalesMemberPromotionThreshold | null {
-  let cum = 0;
+  let eligibleCum = 0;
+  let actualCum = 0;
   for (const c of sorted) {
     if (!subtree.has(c.sales_member_id)) continue;
-    const units = Math.max(0, c.unit_count ?? 0);
-    const cumBefore = cum;
-    cum += units;
-    if (cum >= minUnits) {
+    const actualUnits = Math.max(0, c.unit_count ?? 0);
+    if (actualUnits === 0) continue;
+    const eligibleUnits = promotionEligibleUnitsForContract(c);
+    const actualBefore = actualCum;
+    eligibleCum += eligibleUnits;
+    actualCum += actualUnits;
+    if (eligibleCum >= minUnits) {
       return {
         threshold_contract_id: c.id,
         threshold_join_date:
           normalizeCreatedAt(c.happy_call_at).slice(0, 10) || contractJoinOrderYmd(c),
         threshold_invoice_registered_at: c.invoice_registered_at ?? null,
         threshold_created_at: c.created_at ?? null,
-        threshold_pre_promotion_units_on_contract: minUnits - cumBefore,
+        threshold_pre_promotion_units_on_contract: prePromotionUnitsOnThresholdContract(
+          actualUnits,
+          actualBefore,
+          minUnits,
+        ),
       };
     }
   }
@@ -1367,24 +1525,7 @@ export function enrichThresholdPrePromotionUnits(
   const existingPre = threshold.threshold_pre_promotion_units_on_contract;
   if (existingPre != null && existingPre > 0) return threshold;
 
-  const recomputed = computePromotionThresholdForMember(
-    memberId,
-    treeRows,
-    joinContractsAttributed,
-    minUnits,
-  );
-  if (
-    recomputed &&
-    recomputed.threshold_contract_id === threshold.threshold_contract_id &&
-    recomputed.threshold_pre_promotion_units_on_contract != null &&
-    recomputed.threshold_pre_promotion_units_on_contract > 0
-  ) {
-    return {
-      ...threshold,
-      threshold_pre_promotion_units_on_contract: recomputed.threshold_pre_promotion_units_on_contract,
-    };
-  }
-
+  // 수당 walk는 실제 구좌 SSOT — pre 구좌도 실제 누적으로만 보강한다.
   const childrenByParent = buildChildrenByParentFromRows(treeRows);
   const subtree = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
   const sorted = [...joinContractsAttributed].sort(compareAttributedJoinRows);

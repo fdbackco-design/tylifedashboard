@@ -100,8 +100,12 @@ export interface LeaderPromotionSettlementDetail {
   leader_promotion_first_join_date: string | null;
   /** 위와 동일한 '승격 계약' 식별자(같은 가입일 구분용) */
   leader_promotion_threshold_contract_id: string | null;
-  /** 정산월 말(25일) 기준 산하 '가입' 구좌 합 */
+  /** 정산월 말(25일) 기준 산하 '가입' 실제 구좌 합 (보너스·유지장려 판정) */
   subtree_join_units_join_status_as_of_end: number;
+  /** 정산월 말 기준 산하 승급 인정 walk 누적 (더블업 반영) */
+  subtree_promotion_eligible_units_as_of_end?: number;
+  /** 더블업 안내 문구 (수당·보너스는 실제 구좌 기준) */
+  double_up_commission_note?: string | null;
   /** 표시용: 적용 단가 설명 */
   commission_rate_label: string;
   /** 적용 단가(대표값): 혼합 월은 null */

@@ -556,6 +556,88 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         </div>
       </div>
 
+      {calcDetail?.leader_promotion && (
+        <section className="mb-6 bg-white rounded-lg border border-indigo-100 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 bg-indigo-50 border-b border-indigo-100">
+            <h3 className="text-sm font-semibold text-indigo-900">승급·더블업 감사</h3>
+            <p className="text-xs text-indigo-700 mt-1">
+              {calcDetail.leader_promotion.double_up_commission_note ??
+                '승급 인정구좌와 수당·보너스 계산 구좌를 분리해 표시합니다.'}
+            </p>
+          </div>
+          <div className="px-4 py-3 grid gap-2 sm:grid-cols-2 text-xs text-gray-700">
+            <div>
+              실제 누적 구좌(말일):{' '}
+              <span className="font-semibold tabular-nums">
+                {calcDetail.leader_promotion.subtree_join_units_join_status_as_of_end.toLocaleString()}구좌
+              </span>
+            </div>
+            <div>
+              승급 인정 누적(더블업 반영):{' '}
+              <span className="font-semibold tabular-nums text-indigo-800">
+                {(calcDetail.leader_promotion.subtree_promotion_eligible_units_as_of_end ?? 0).toLocaleString()}구좌
+              </span>
+            </div>
+            {calcDetail.leader_promotion.leader_promotion_threshold_contract_id && (
+              <div className="sm:col-span-2">
+                승급 기준 계약:{' '}
+                <span className="font-mono text-gray-600">
+                  {calcDetail.leader_promotion.leader_promotion_threshold_contract_id}
+                </span>
+                {calcDetail.leader_promotion.leader_promotion_first_join_date && (
+                  <span className="ml-2 text-gray-500">
+                    ({calcDetail.leader_promotion.leader_promotion_first_join_date})
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+          {Array.isArray(calcDetail.leader_promotion.promotion_commission_audit) &&
+            calcDetail.leader_promotion.promotion_commission_audit.some((r) => r.doubleUpApplied) && (
+              <div className="overflow-x-auto border-t border-gray-100">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      {[
+                        '계약',
+                        '해피콜',
+                        '실제 구좌',
+                        '더블업',
+                        '배수',
+                        '승급 인정',
+                        '수당 구좌',
+                        '보너스 구좌',
+                      ].map((h) => (
+                        <th key={h} className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {calcDetail.leader_promotion.promotion_commission_audit
+                      .filter((r) => r.doubleUpApplied)
+                      .map((r) => (
+                        <tr key={r.contractId}>
+                          <td className="px-3 py-2 font-mono">{r.contractCode}</td>
+                          <td className="px-3 py-2">{r.happyCallSuccessYmd ?? '-'}</td>
+                          <td className="px-3 py-2 tabular-nums">{r.actualUnitCount ?? r.unitCount}</td>
+                          <td className="px-3 py-2">{r.doubleUpApplied ? '적용' : '-'}</td>
+                          <td className="px-3 py-2 tabular-nums">×{r.promotionMultiplier ?? 1}</td>
+                          <td className="px-3 py-2 tabular-nums text-indigo-800">
+                            {r.promotionEligibleUnitCount ?? r.unitCount}
+                          </td>
+                          <td className="px-3 py-2 tabular-nums">{r.commissionUnitCount ?? r.unitCount}</td>
+                          <td className="px-3 py-2 tabular-nums">{r.bonusUnitCount ?? r.unitCount}</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+        </section>
+      )}
+
       {/* ── 롤업수당 상세 (계약 단위 근거) ────────────────────────────────────── */}
       <section className="mb-6">
         <div className="mb-2 flex items-end justify-between gap-3">
