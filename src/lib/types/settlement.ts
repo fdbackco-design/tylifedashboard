@@ -118,7 +118,7 @@ export interface SettlementCalculationDetail {
   rollup_contract_items?: RollupContractItem[];
   incentive_applied: boolean;
   incentive_threshold: number | null;
-  /** 보너스 합계 = 리더 유지장려금 + 그룹 보너스(아래 group_bonus_amount) */
+  /** 보너스 합계 = 리더 유지장려금 + 그룹 보너스 + 센터장 산하 보너스 */
   incentive_amount: number;
   leader_promotion?: LeaderPromotionSettlementDetail | null;
   /**
@@ -126,6 +126,13 @@ export interface SettlementCalculationDetail {
    * 유지장려금과 별도로 계산되어 incentive_amount에 합산되어 들어간다.
    */
   group_bonus_amount?: number;
+  /**
+   * 센터장 월정산 보너스(산하 정산 대상 100구좌 이상 시 300만원).
+   * incentive_amount에 합산된다.
+   */
+  center_chief_subtree_bonus_amount?: number;
+  /** 센터장 보너스 판정에 사용한 당월 산하 정산 구좌 합 */
+  center_chief_subtree_units_in_month?: number;
   /** 특정 멤버 예외/수동 조정(합계 수당에 가감) */
   manual_adjustment_won?: number;
   manual_adjustment_reason?: string | null;

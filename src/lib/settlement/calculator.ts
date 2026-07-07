@@ -22,6 +22,7 @@ import {
 import type { CenterChiefPromotionThreshold } from './center-chief-promotion';
 import { splitContractUnitsByCenterChiefThreshold } from './center-chief-promotion';
 import { CENTER_CHIEF_ROLLUP_PER_UNIT } from './constants';
+import { calculateCenterChiefSubtreeBonus } from './center-chief-bonus';
 import {
   calculateGroupBonusForMember,
   type GroupBonusContractInput,
@@ -791,6 +792,8 @@ export function calculateMemberSettlement(
   const subordinateUnitCount = collectSubordinateUnits(orgNode, contractsByMember);
   const directUnitCount = eligible.reduce((s, c) => s + c.unit_count, 0);
   const totalUnitCount = directUnitCount + subordinateUnitCount;
+  /** 센터장 보너스 판정용: 정산월 대상 계약 기준 조직 subtree 전체(본인 직접 포함) */
+  const centerChiefSubtreeUnits = subordinateUnitCount;
 
   // 규칙장려(calcIncentive)는 UI에서 제거되었고, 유지장려(리더)와 혼동/중복을 유발한다.
   // 따라서 정산 합계에서는 규칙장려를 사용하지 않는다.
@@ -830,13 +833,26 @@ export function calculateMemberSettlement(
     ? calculateGroupBonusForMember(member.id, leaderOpts.groupBonusContracts, yearMonth)
     : 0;
 
-  let bonusAmountCombined = ruleIncentiveAmount + leaderMaintenanceBonus + groupBonus;
-  let totalAmount = baseCommission + rollupCommission + leaderMaintenanceBonus + groupBonus;
+  const centerChiefSubtreeBonus =
+    member.rank === '센터장'
+      ? calculateCenterChiefSubtreeBonus({
+          rank: member.rank,
+          subtreeSettlementUnits: centerChiefSubtreeUnits,
+        })
+      : 0;
+
+  let bonusAmountCombined =
+    ruleIncentiveAmount + leaderMaintenanceBonus + groupBonus + centerChiefSubtreeBonus;
+  let totalAmount =
+    baseCommission + rollupCommission + leaderMaintenanceBonus + groupBonus + centerChiefSubtreeBonus;
 
   const incentiveOverride = leaderOpts?.incentiveAmountOverrideByMemberId?.get(member.id);
   if (incentiveOverride != null && Number.isFinite(incentiveOverride)) {
     bonusAmountCombined = Math.round(incentiveOverride);
-    groupBonus = Math.max(0, bonusAmountCombined - ruleIncentiveAmount - leaderMaintenanceBonus);
+    groupBonus = Math.max(
+      0,
+      bonusAmountCombined - ruleIncentiveAmount - leaderMaintenanceBonus - centerChiefSubtreeBonus,
+    );
     totalAmount = baseCommission + rollupCommission + bonusAmountCombined;
   }
 
@@ -931,6 +947,9 @@ export function calculateMemberSettlement(
     incentive_amount: bonusAmountCombined,
     leader_promotion: leaderPromotion,
     group_bonus_amount: groupBonus,
+    center_chief_subtree_bonus_amount: centerChiefSubtreeBonus > 0 ? centerChiefSubtreeBonus : undefined,
+    center_chief_subtree_units_in_month:
+      member.rank === '센터장' ? centerChiefSubtreeUnits : undefined,
     manual_adjustment_won: manualAdjustment !== 0 ? manualAdjustment : undefined,
     manual_adjustment_reason: manualAdjustment !== 0 ? '고객 김동건 정산 예외(-60만원)' : undefined,
   };
