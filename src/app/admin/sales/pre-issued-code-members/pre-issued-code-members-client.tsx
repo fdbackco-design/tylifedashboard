@@ -776,54 +776,6 @@ export default function PreIssuedCodeMembersClient(props: {
         </div>
       ) : null}
 
-      {props.pendingAccounts?.length ? (
-        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
-          <div className="font-semibold">계정은 발급됐지만 조직원 매핑(member_id)이 없는 계정</div>
-          <div className="text-[11px] text-amber-800 mt-1 leading-relaxed">
-            아래 계정은 <span className="font-semibold">user_profiles.member_id가 NULL(PENDING)</span> 상태입니다.
-            여기서 <span className="font-semibold">예약 등록</span>을 해두면, 이후 <span className="font-semibold">계정 발급 → 매핑</span>에서
-            조직원(member_id)으로 매핑되는 순간 자동으로 본 설정으로 승격됩니다.
-          </div>
-          <div className="mt-2 overflow-x-auto">
-            <table className="w-full text-[11px]">
-              <thead className="text-amber-900/80">
-                <tr>
-                  {['이름', '로그인코드', '전화', '상태', ''].map((h) => (
-                    <th key={h} className="py-1 pr-3 text-left font-semibold whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="text-amber-900/90">
-                {props.pendingAccounts.slice(0, 8).map((p) => (
-                  <tr key={p.id}>
-                    <td className="py-1 pr-3 whitespace-nowrap">
-                      {extractName(p.pre_issued_name ?? p.display_name ?? '-') || '-'}
-                    </td>
-                    <td className="py-1 pr-3 font-mono whitespace-nowrap">{p.login_code}</td>
-                    <td className="py-1 pr-3 whitespace-nowrap">{maskPhone(p.pre_issued_phone ?? p.phone)}</td>
-                    <td className="py-1 pr-3 whitespace-nowrap">{p.mapping_status}</td>
-                    <td className="py-1 pr-3 whitespace-nowrap">
-                      <button
-                        type="button"
-                        onClick={() => reserveForPendingAccount(p)}
-                        className="rounded-md border border-amber-300 bg-white px-2 py-1 text-[11px] font-semibold text-amber-900 hover:bg-amber-100"
-                      >
-                        예약 등록
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="mt-2">
-            <a className="text-amber-900 underline font-semibold" href="/admin/account-issue">
-              계정 발급/매핑 화면으로 이동
-            </a>
-          </div>
-        </div>
-      ) : null}
-
       <PreIssuedCodeMembersTable
         rows={settings}
         onEdit={(r) => fillFromRow(r)}
