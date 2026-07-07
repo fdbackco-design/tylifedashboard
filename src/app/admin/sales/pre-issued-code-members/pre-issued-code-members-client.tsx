@@ -373,7 +373,6 @@ export default function PreIssuedCodeMembersClient(props: {
 
     setSaving(true);
     try {
-      const changeReason = window.prompt('변경 사유를 입력해주세요.', changeType) ?? changeType;
       const res = await fetch('/api/admin/sales/pre-issued-code-pending', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -388,7 +387,7 @@ export default function PreIssuedCodeMembersClient(props: {
           effective_to: effectiveTo || null,
           desired_status: status,
           note: note || null,
-          change_reason: `${changeType}:${changeReason}`,
+          change_reason: `${changeType}:RESERVED`,
         }),
       });
       const data = await res.json();
@@ -438,7 +437,6 @@ export default function PreIssuedCodeMembersClient(props: {
 
     setSaving(true);
     try {
-      const changeReason = window.prompt('변경 사유를 입력해주세요.', changeType) ?? changeType;
       const res = await fetch('/api/admin/sales/pre-issued-code-members', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -453,8 +451,8 @@ export default function PreIssuedCodeMembersClient(props: {
           status,
           note: note || null,
           change_reason: changeType,
-          changed_by: 'admin',
-          change_reason_text: changeReason,
+          changed_by: null,
+          change_reason_text: null,
         }),
       });
       const data = await res.json();
