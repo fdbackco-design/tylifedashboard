@@ -18,6 +18,7 @@ const NAV_ITEMS = [
   { href: '/admin/organization', label: '조직도' },
   { href: '/admin/settlement', label: '정산 현황' },
   { href: '/admin/settlement_sheet', label: '명세서 관리' },
+  { href: '/admin/promotion/summer-festival', label: '썸머 페스티벌(파타야)' },
   { href: '/admin/account-mapping', label: '계정 매핑 진단' },
   { href: '/admin/notice', label: '공지사항' },
   { href: '/admin/push', label: '푸시 발송' },
