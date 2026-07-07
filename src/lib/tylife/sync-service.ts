@@ -1065,7 +1065,7 @@ async function processItem(
     const { data: existingContract } = await db
       .from('contracts')
       .select(
-        'id, status, ty_source_status, unit_count, invoice_no, rental_request_no, item_name, happycall_result, happy_call_at, performance_path_json, settlement_deferred, deferred_reason',
+        'id, status, ty_source_status, unit_count, invoice_no, rental_request_no, item_name, happycall_result, happy_call_at, performance_path_json, settlement_deferred, deferred_reason, sales_member_id, sales_link_status',
       )
       .eq('contract_code', item.contract_code)
       .maybeSingle();
@@ -1082,7 +1082,14 @@ async function processItem(
       performance_path_json: unknown;
       settlement_deferred: boolean | null;
       deferred_reason: string | null;
+      sales_member_id: string | null;
+      sales_link_status: string | null;
     } | null;
+    const isExistingLinkedLocked = (ec?.sales_link_status ?? null) === 'linked' && !!ec?.sales_member_id;
+    if (isExistingLinkedLocked) {
+      finalSalesMemberId = ec!.sales_member_id as string;
+      salesLinkStatus = 'linked';
+    }
     const existingPathStamped = ec != null && ec.performance_path_json != null;
     const ecTySource = (ec?.ty_source_status ?? ec?.status ?? null) as string | null;
     const alreadyHasDetail =
@@ -1102,7 +1109,7 @@ async function processItem(
     const listStatus = normalizeStatus(item.status_raw ?? '');
     const skipDetailFetch = isTerminalContractStatus(listStatus) || isTerminalContractStatus(ec?.status ?? null);
 
-    if (item.external_id && !alreadyHasDetail && !skipDetailFetch) {
+    if (!isExistingLinkedLocked && item.external_id && !alreadyHasDetail && !skipDetailFetch) {
       try {
         let html = await fetchContractDetailHtml(item.external_id);
         // 상세 URL id vs HTML 내부 contractNo 불일치 케이스 보정 (backfill과 동일 정책)
