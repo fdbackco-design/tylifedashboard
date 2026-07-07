@@ -21,6 +21,7 @@ import {
 } from './leader-promotion';
 import type { CenterChiefPromotionThreshold } from './center-chief-promotion';
 import { splitContractUnitsByCenterChiefThreshold } from './center-chief-promotion';
+import { CENTER_CHIEF_ROLLUP_PER_UNIT } from './constants';
 import { calculateCenterChiefSubtreeBonus, subtreeSettlementUnitsForCenterChiefBonus } from './center-chief-bonus';
 import {
   calculateGroupBonusForMember,
@@ -480,9 +481,8 @@ function calcRollupItemsWithLeaderPromotion(
   const items: RollupItem[] = [];
   const contractItems: RollupContractItem[] = [];
   const nodeThreshold = promotionThresholdByMemberId.get(node.id) ?? null;
-  const nodeCenterChiefThreshold = centerChiefThresholdByMemberId?.get(node.id) ?? null;
-  /** DB 직급이 센터장일 때만 승급 전/후 롤업 단가 분기 (리더 시절 diff는 일반 리더와 동일) */
-  const useCenterChiefRollupSplit = node.rank === '센터장';
+  const nodeCenterChiefThreshold =
+    node.rank === '센터장' ? (centerChiefThresholdByMemberId?.get(node.id) ?? null) : null;
 
   const directChildIdSet = new Set((node.children ?? []).map((c) => c.id));
 
@@ -510,7 +510,17 @@ function calcRollupItemsWithLeaderPromotion(
       );
       if (eligibleUnits <= 0) continue;
 
-      // lower 는 직속 자식(child.id / child.rank) 기준. (ownerMemberId/ownerRank 는 표시용)
+      const upper = commissionPerUnitForDirectContract(
+        node.id,
+        node.rank,
+        contractPromotionRef(c),
+        rules,
+        refDate,
+        promotionUnitSplitByMemberId,
+        leaderRankEffectiveAtByMemberId,
+      );
+      // 산식 변경 금지: lower 는 직속 자식(child.id / child.rank) 기준 그대로 계산한다.
+      // (ownerMemberId/ownerRank 는 표시용 메타로만 사용)
       const lower = commissionPerUnitForDirectContract(
         child.id,
         child.rank,
@@ -520,49 +530,21 @@ function calcRollupItemsWithLeaderPromotion(
         promotionUnitSplitByMemberId,
         leaderRankEffectiveAtByMemberId,
       );
-      const centerChiefUpper = commissionPerUnitForDirectContract(
-        node.id,
-        node.rank,
-        contractPromotionRef(c),
-        rules,
-        refDate,
-        promotionUnitSplitByMemberId,
-        leaderRankEffectiveAtByMemberId,
-      );
-      const leaderUpper = commissionPerUnitForDirectContract(
-        node.id,
-        '리더',
-        contractPromotionRef(c),
-        rules,
-        refDate,
-        promotionUnitSplitByMemberId,
-        leaderRankEffectiveAtByMemberId,
-      );
-      const postDiff = Math.max(0, centerChiefUpper - lower);
-      const preDiff = Math.max(0, leaderUpper - lower);
-      const defaultDiff = postDiff;
+      const diff = Math.max(0, upper - lower);
 
-      let preUnits = 0;
-      let postUnits = 0;
+      const ccSplit =
+        nodeCenterChiefThreshold != null
+          ? splitContractUnitsByCenterChiefThreshold(
+              { ...ref, unit_count: eligibleUnits },
+              nodeCenterChiefThreshold,
+            )
+          : { preCenterChiefUnits: eligibleUnits, postCenterChiefUnits: 0 };
 
-      if (useCenterChiefRollupSplit) {
-        if (nodeCenterChiefThreshold) {
-          const ccSplit = splitContractUnitsByCenterChiefThreshold(
-            { ...ref, unit_count: eligibleUnits },
-            nodeCenterChiefThreshold,
-          );
-          preUnits = ccSplit.preCenterChiefUnits;
-          postUnits = ccSplit.postCenterChiefUnits;
-        } else {
-          postUnits = eligibleUnits;
-        }
-      } else {
-        preUnits = eligibleUnits;
-      }
+      const preUnits = ccSplit.preCenterChiefUnits;
+      const postUnits = ccSplit.postCenterChiefUnits;
 
       if (preUnits > 0) {
-        const rollupPerUnit = useCenterChiefRollupSplit ? preDiff : defaultDiff;
-        const sub = rollupPerUnit * preUnits;
+        const sub = diff * preUnits;
         childUnits += preUnits;
         subtotal += sub;
         if (sub > 0) {
@@ -576,19 +558,15 @@ function calcRollupItemsWithLeaderPromotion(
             effective_sales_member_name: ownerName,
             effective_sales_member_rank: ownerRank,
             unit_count: preUnits,
-            rollup_amount_per_unit: rollupPerUnit,
+            rollup_amount_per_unit: diff,
             subtotal: sub,
-            included_reason: useCenterChiefRollupSplit
-              ? 'center_chief_pre_threshold'
-              : childThreshold
-                ? 'direct_child_pre_promotion'
-                : 'direct_child',
+            included_reason: childThreshold ? 'direct_child_pre_promotion' : 'direct_child',
           });
         }
       }
 
       if (postUnits > 0) {
-        const rollupPerUnit = postDiff;
+        const rollupPerUnit = CENTER_CHIEF_ROLLUP_PER_UNIT;
         const sub = rollupPerUnit * postUnits;
         childUnits += postUnits;
         subtotal += sub;

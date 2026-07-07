@@ -7,6 +7,7 @@ import {
 import {
   CENTER_CHIEF_PROMOTION_MIN_LEADERS,
   contractJoinOrderYmd,
+  isContractAtOrAfterPromotionThreshold,
   isCustomerVirtualOrgMember,
   type PromotionOrderContractRef,
   type SalesMemberPromotionThreshold,
@@ -121,44 +122,15 @@ export function centerChiefThresholdToPromotionRef(
   };
 }
 
-/** 승급 계약(5번째 리더) 해피콜 완료일(YMD) 기준 다음날 — 센터장 20만 롤업 시작일 */
-export function addOneCalendarDayYmd(ymd: string): string {
-  const parts = ymd.slice(0, 10).split('-').map((x) => Number(x));
-  const y = parts[0] ?? 0;
-  const m = parts[1] ?? 1;
-  const d = parts[2] ?? 1;
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  dt.setUTCDate(dt.getUTCDate() + 1);
-  return dt.toISOString().slice(0, 10);
-}
-
-export function centerChiefPostRollupStartsYmd(threshold: CenterChiefPromotionThreshold): string {
-  return addOneCalendarDayYmd(threshold.threshold_join_date);
-}
-
-/**
- * 센터장 20만 롤업 적용 구간: 승급 계약 해피콜 완료일 **다음날**부터(포함).
- * 순서일은 contractJoinOrderYmd(해피콜 YMD 우선)와 동일.
- */
-export function isContractAtOrAfterCenterChiefPostRollup(
-  contract: PromotionOrderContractRef,
-  threshold: CenterChiefPromotionThreshold | null,
-): boolean {
-  if (!threshold) return false;
-  const aj = contractJoinOrderYmd(contract);
-  const start = centerChiefPostRollupStartsYmd(threshold);
-  return aj >= start;
-}
-
-/** @deprecated isContractAtOrAfterCenterChiefPostRollup 사용 */
 export function isContractAtOrAfterCenterChiefThreshold(
   contract: PromotionOrderContractRef,
   threshold: CenterChiefPromotionThreshold | null,
 ): boolean {
-  return isContractAtOrAfterCenterChiefPostRollup(contract, threshold);
+  if (!threshold) return false;
+  return isContractAtOrAfterPromotionThreshold(contract, centerChiefThresholdToPromotionRef(threshold));
 }
 
-/** 센터장 승급 전(10만)/이후(20만) 구좌 분할 — 경계는 승급 계약 해피콜 다음날 */
+/** 센터장 달성 전/후 구좌 분할(롤업 단가 분기용) */
 export function splitContractUnitsByCenterChiefThreshold(
   contract: PromotionOrderContractRef & { unit_count: number },
   threshold: CenterChiefPromotionThreshold | null,
@@ -167,7 +139,7 @@ export function splitContractUnitsByCenterChiefThreshold(
   if (!threshold || total === 0) {
     return { preCenterChiefUnits: total, postCenterChiefUnits: 0 };
   }
-  if (isContractAtOrAfterCenterChiefPostRollup(contract, threshold)) {
+  if (isContractAtOrAfterCenterChiefThreshold(contract, threshold)) {
     return { preCenterChiefUnits: 0, postCenterChiefUnits: total };
   }
   return { preCenterChiefUnits: total, postCenterChiefUnits: 0 };

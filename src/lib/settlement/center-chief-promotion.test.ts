@@ -5,13 +5,11 @@ import type { RankType } from '@/lib/types/organization';
 import {
   computeCenterChiefThresholdForMember,
   compareSubtreeLeaderPromotionOrder,
-  centerChiefPostRollupStartsYmd,
-  isContractAtOrAfterCenterChiefPostRollup,
+  isContractAtOrAfterCenterChiefThreshold,
   splitContractUnitsByCenterChiefThreshold,
   type CenterChiefPromotionThreshold,
 } from './center-chief-promotion';
 import type { SalesMemberPromotionThreshold } from './leader-promotion';
-import { getRollupAmountPerUnit } from './calculator';
 
 const CENTER = 'center-leader';
 const L1 = 'leader-1';
@@ -99,7 +97,7 @@ describe('center chief promotion', () => {
     assert.equal(th.threshold_contract_id, 'c-l5');
   });
 
-  it('승급 계약 해피콜 다음날부터 postCenterChiefUnits (당일은 pre)', () => {
+  it('센터장 달성 이후 계약은 postCenterChiefUnits', () => {
     const ccTh: CenterChiefPromotionThreshold = {
       threshold_leader_member_id: L5,
       threshold_join_date: '2026-06-20',
@@ -107,8 +105,6 @@ describe('center chief promotion', () => {
       threshold_invoice_registered_at: '2026-06-20T10:00:00Z',
       threshold_created_at: '2026-06-20T10:00:01Z',
     };
-
-    assert.equal(centerChiefPostRollupStartsYmd(ccTh), '2026-06-21');
 
     const before = {
       id: 'before',
@@ -124,38 +120,24 @@ describe('center chief promotion', () => {
       created_at: '2026-06-20T10:00:01Z',
       unit_count: 1,
     };
-    const onNextDay = {
-      id: 'next-day',
+    const after = {
+      id: 'after',
       join_date: '2026-06-21',
       happy_call_at: '2026-06-21',
       unit_count: 1,
     };
 
-    assert.equal(isContractAtOrAfterCenterChiefPostRollup(before, ccTh), false);
-    assert.equal(isContractAtOrAfterCenterChiefPostRollup(onThreshold, ccTh), false);
-    assert.equal(isContractAtOrAfterCenterChiefPostRollup(onNextDay, ccTh), true);
+    assert.equal(isContractAtOrAfterCenterChiefThreshold(before, ccTh), false);
+    assert.equal(isContractAtOrAfterCenterChiefThreshold(onThreshold, ccTh), true);
+    assert.equal(isContractAtOrAfterCenterChiefThreshold(after, ccTh), true);
 
     assert.deepEqual(splitContractUnitsByCenterChiefThreshold(before, ccTh), {
       preCenterChiefUnits: 2,
       postCenterChiefUnits: 0,
     });
-    assert.deepEqual(splitContractUnitsByCenterChiefThreshold(onThreshold, ccTh), {
-      preCenterChiefUnits: 1,
-      postCenterChiefUnits: 0,
-    });
-    assert.deepEqual(splitContractUnitsByCenterChiefThreshold(onNextDay, ccTh), {
+    assert.deepEqual(splitContractUnitsByCenterChiefThreshold(after, ccTh), {
       preCenterChiefUnits: 0,
       postCenterChiefUnits: 1,
     });
-  });
-
-  it('센터장 승급 후 롤업은 직속 자식 직급 기준 차액 (조명희 예시)', () => {
-    const rules: never[] = [];
-    const refDate = '2026-06-30';
-    // 직속 영업사원 라인: 센터장 20만
-    assert.equal(getRollupAmountPerUnit('센터장', '영업사원', rules, refDate), 200_000);
-    // 직속 리더 라인(리더 산하 영업사원 계약): 센터장 10만 + 리더 10만
-    assert.equal(getRollupAmountPerUnit('센터장', '리더', rules, refDate), 100_000);
-    assert.equal(getRollupAmountPerUnit('리더', '영업사원', rules, refDate), 100_000);
   });
 });

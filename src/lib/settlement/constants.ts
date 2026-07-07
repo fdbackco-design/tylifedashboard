@@ -11,6 +11,9 @@ export const BASE_AMOUNT_PER_UNIT = 715_000;
  * 직급별 기본 수당 (1구좌당 원).
  * 사업본부장은 DB(settlement_rules)에서 조회 — 이 상수에 넣지 않음.
  */
+/** 센터장 달성(산하 리더 5명) 이후 롤업 수당 — 구좌당 고정 */
+export const CENTER_CHIEF_ROLLUP_PER_UNIT = 200_000;
+
 export const DEFAULT_COMMISSION_BY_RANK: Partial<Record<RankType, number>> = {
   영업사원: 300_000,
   리더: 400_000,
