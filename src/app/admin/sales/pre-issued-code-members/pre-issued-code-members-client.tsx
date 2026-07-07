@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 
 type MemberRow = {
   id: string;
@@ -310,6 +310,7 @@ export default function PreIssuedCodeMembersClient(props: {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
+  const unitPriceRef = useRef<HTMLInputElement | null>(null);
 
   const memberOptions = members
     .filter((m) => (m.rank ?? '') !== '본사')
@@ -334,6 +335,7 @@ export default function PreIssuedCodeMembersClient(props: {
     setStatus(r.status ?? 'active');
     setNote(r.note ?? '');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    setTimeout(() => unitPriceRef.current?.focus(), 50);
   }
 
   function resetForm() {
@@ -609,6 +611,7 @@ export default function PreIssuedCodeMembersClient(props: {
             type="number"
             value={unitPrice}
             onChange={(e) => setUnitPrice(Number(e.target.value))}
+            ref={unitPriceRef}
             className="rounded-md border border-gray-200 px-2 py-2 tabular-nums"
           />
           <span className="text-[11px] text-gray-500">현재 입력: {fmtWon(unitPrice)}</span>
@@ -898,7 +901,7 @@ export function PreIssuedCodeMembersTable(props: {
                       onClick={() => props.onEdit(r)}
                       className="rounded-md border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
                     >
-                      수정
+                      단가/구좌 수정
                     </button>
                     {r.status === 'active' ? (
                       <button
