@@ -37,6 +37,100 @@ function fmtWon(n: number): string {
   return `₩${Math.round(n).toLocaleString()}`;
 }
 
+function maskPhone(phone: string | null | undefined): string {
+  const p = String(phone ?? '').trim();
+  if (!p) return '-';
+  // 01012341234 / 010-1234-1234 모두 대응
+  const digits = p.replace(/\D/g, '');
+  if (digits.length >= 11) {
+    return `${digits.slice(0, 3)}-****-${digits.slice(-4)}`;
+  }
+  if (p.includes('-')) {
+    const parts = p.split('-');
+    if (parts.length === 3) return `${parts[0]}-****-${parts[2]}`;
+  }
+  return p;
+}
+
+function MemberSearchPicker(props: {
+  label: string;
+  members: Array<{ id: string; name: string; rank: string; phone?: string | null }>;
+  selectedId: string;
+  onSelect: (id: string) => void;
+  placeholder?: string;
+}) {
+  const [q, setQ] = useState('');
+  const selected = props.members.find((m) => m.id === props.selectedId) ?? null;
+  const results = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return [];
+    return props.members
+      .filter((m) => {
+        const hay = `${m.name} ${m.rank} ${maskPhone(m.phone)}`.toLowerCase();
+        return hay.includes(s);
+      })
+      .slice(0, 10);
+  }, [q, props.members]);
+
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="font-semibold text-gray-700">{props.label}</span>
+      {selected ? (
+        <div className="flex items-center justify-between gap-2 rounded-md border border-gray-200 bg-white px-2 py-2">
+          <div className="min-w-0">
+            <div className="text-xs font-semibold text-gray-800 whitespace-nowrap truncate">
+              {selected.name}{' '}
+              <span className="text-gray-500 font-medium">({selected.rank})</span>
+              <span className="ml-2 text-[11px] text-gray-400">{maskPhone(selected.phone)}</span>
+            </div>
+            <div className="text-[11px] font-mono text-gray-400 truncate">{selected.id}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => props.onSelect('')}
+            className="shrink-0 rounded-md border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
+          >
+            변경
+          </button>
+        </div>
+      ) : (
+        <>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder={props.placeholder ?? '이름/직급/연락처로 검색…'}
+            className="rounded-md border border-gray-200 px-2 py-2"
+          />
+          {results.length > 0 ? (
+            <div className="max-h-48 overflow-auto rounded-md border border-gray-200 bg-white">
+              {results.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => {
+                    props.onSelect(m.id);
+                    setQ('');
+                  }}
+                  className="w-full text-left px-2 py-2 hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
+                >
+                  <div className="text-xs font-semibold text-gray-800">
+                    {m.name}{' '}
+                    <span className="text-gray-500 font-medium">({m.rank})</span>
+                    <span className="ml-2 text-[11px] text-gray-400">{maskPhone(m.phone)}</span>
+                  </div>
+                  <div className="text-[11px] font-mono text-gray-400">{m.id}</div>
+                </button>
+              ))}
+            </div>
+          ) : q.trim() ? (
+            <div className="text-[11px] text-gray-500">검색 결과가 없습니다.</div>
+          ) : null}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function PreIssuedCodeMembersClient(props: { members: MemberRow[]; initialSettings: SettingRow[] }) {
   const members = useMemo(
     () =>
@@ -67,7 +161,12 @@ export default function PreIssuedCodeMembersClient(props: { members: MemberRow[]
 
   const memberOptions = members
     .filter((m) => (m.rank ?? '') !== '본사')
-    .map((m) => ({ id: m.id, label: `${m.name} (${m.rank})` }));
+    .map((m) => ({
+      id: m.id,
+      name: m.name,
+      rank: m.rank,
+      phone: m.phone ?? null,
+    }));
 
   function fillFromRow(r: SettingRow) {
     setEditingMemberId(r.member_id);
@@ -203,35 +302,24 @@ export default function PreIssuedCodeMembersClient(props: { members: MemberRow[]
         </div>
         <div className="px-4 py-3 grid gap-3 sm:grid-cols-2 text-xs">
         <label className="flex flex-col gap-1">
-          <span className="font-semibold text-gray-700">영업자</span>
-          <select
-            value={memberId}
-            onChange={(e) => setMemberId(e.target.value)}
-            className="rounded-md border border-gray-200 px-2 py-2"
-          >
-            <option value="">선택…</option>
-            {memberOptions.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+          <MemberSearchPicker
+            label="영업자"
+            members={memberOptions}
+            selectedId={memberId}
+            onSelect={(id) => {
+              setMemberId(id);
+              if (id) setEditingMemberId(id);
+            }}
+          />
         </label>
 
         <label className="flex flex-col gap-1">
-          <span className="font-semibold text-gray-700">상위리더(필수)</span>
-          <select
-            value={parentId}
-            onChange={(e) => setParentId(e.target.value)}
-            className="rounded-md border border-gray-200 px-2 py-2"
-          >
-            <option value="">선택…</option>
-            {memberOptions.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+          <MemberSearchPicker
+            label="상위리더(필수)"
+            members={memberOptions}
+            selectedId={parentId}
+            onSelect={(id) => setParentId(id)}
+          />
         </label>
 
         <label className="flex flex-col gap-1">
