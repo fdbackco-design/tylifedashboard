@@ -25,6 +25,7 @@ import {
   isLegacyMemberSafeToDeactivate,
   repairUserProfileMembership,
 } from '@/lib/account-issue/member-profile-repair';
+import { promotePreIssuedPendingSettingIfPossible } from '@/lib/pre-issued/pending-promote';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -133,6 +134,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const r = await repairUserProfileMembership(db, { profileId, newMemberId });
   if (!r.ok) return NextResponse.json({ ok: false, message: r.message }, { status: 500 });
+
+  // 코드 선발급 "예약 등록" 승격(있으면 자동 적용)
+  try {
+    await promotePreIssuedPendingSettingIfPossible({
+      db,
+      userProfileId: profileId,
+      changedBy: 'ADMIN_REPAIR',
+    });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn('[account-mapping/repair] pre-issued pending promote failed (repair is ok):', e);
+  }
 
   // 같은 customer 의 옛 임시 노드 자동 비활성화 (안전 조건 충족 시)
   let deactivatedMemberIds: string[] = [];

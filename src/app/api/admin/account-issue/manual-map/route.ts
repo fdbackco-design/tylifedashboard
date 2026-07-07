@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { isAdminAuthed } from '@/lib/admin-auth';
 import { backfillMemberPhoneFromUserProfile } from '@/lib/account-issue/member-profile-repair';
+import { promotePreIssuedPendingSettingIfPossible } from '@/lib/pre-issued/pending-promote';
 
 /**
  * 관리자 수동 매핑 / 매핑 해제 API
@@ -106,6 +107,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       if (uErr) throw new Error(uErr.message);
 
       await backfillMemberPhoneFromUserProfile(db, member_id);
+
+      // 3.5) 코드 선발급 "예약 등록" 승격(있으면 자동 적용)
+      try {
+        await promotePreIssuedPendingSettingIfPossible({
+          db,
+          userProfileId: user_profile_id,
+          changedBy: 'ADMIN',
+        });
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[manual-map] pre-issued pending promote failed (mapping is ok):', e);
+      }
 
       // 4) 감사 로그
       await db.from('account_mapping_logs').insert({

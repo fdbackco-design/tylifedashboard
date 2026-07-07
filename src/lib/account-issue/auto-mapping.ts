@@ -18,6 +18,7 @@
  */
 
 import { isSameNormalizedName, normalizeName, normalizePhone } from './normalize';
+import { promotePreIssuedPendingSettingIfPossible } from '@/lib/pre-issued/pending-promote';
 
 type AdminDb = any; // SupabaseClient<any, 'public', any> 캐스팅 회피용
 
@@ -416,6 +417,20 @@ export async function runPreIssuedAccountAutoMapping(
           // 한 행 실패가 전체를 막지 않도록 로그만 남기고 계속 진행
           // eslint-disable-next-line no-console
           console.warn(`[auto-mapping] user_profiles update 실패(${d.user_profile_id}): ${uErr.message}`);
+        }
+      }
+
+      // MATCHED 로 전환된 경우: 예약 등록된 코드 선발급 설정이 있으면 즉시 승격
+      if (d.mapping_status === 'MATCHED') {
+        try {
+          await promotePreIssuedPendingSettingIfPossible({
+            db: adminDb,
+            userProfileId: d.user_profile_id,
+            changedBy: 'AUTO_SYNC',
+          });
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn(`[auto-mapping] pending promote 실패(${d.user_profile_id}) (mapping은 정상):`, e);
         }
       }
 

@@ -12,6 +12,17 @@ type MemberRow = {
 
 type Status = 'active' | 'paused' | 'ended';
 
+type PendingAccountRow = {
+  id: string;
+  login_code: string;
+  display_name: string | null;
+  phone: string | null;
+  mapping_status: 'PENDING' | 'MANUAL_REVIEW';
+  pre_issued_name: string | null;
+  pre_issued_phone: string | null;
+  created_at: string;
+};
+
 type SettingRow = {
   id: string;
   member_id: string;
@@ -131,7 +142,11 @@ function MemberSearchPicker(props: {
   );
 }
 
-export default function PreIssuedCodeMembersClient(props: { members: MemberRow[]; initialSettings: SettingRow[] }) {
+export default function PreIssuedCodeMembersClient(props: {
+  members: MemberRow[];
+  initialSettings: SettingRow[];
+  pendingAccounts: PendingAccountRow[];
+}) {
   const members = useMemo(
     () =>
       (props.members ?? []).map((m) => ({
@@ -155,6 +170,7 @@ export default function PreIssuedCodeMembersClient(props: { members: MemberRow[]
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
   const [history, setHistory] = useState<any[] | null>(null);
   const [historyFor, setHistoryFor] = useState<string | null>(null);
+  const [pendingEditing, setPendingEditing] = useState<PendingAccountRow | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -193,6 +209,58 @@ export default function PreIssuedCodeMembersClient(props: { members: MemberRow[]
     setEffectiveTo('');
     setStatus('active');
     setNote('');
+  }
+
+  async function reserveForPendingAccount(p: PendingAccountRow) {
+    setError(null);
+    setOk(null);
+    setPendingEditing(p);
+    setMemberId('');
+    // 상위리더/단가/구좌 등은 기존 입력을 그대로 쓰되, 저장은 pending API로 보낸다.
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function submitPendingReservation(changeType: 'CREATE' | 'UPDATE' = 'CREATE') {
+    setError(null);
+    setOk(null);
+    if (!pendingEditing) return setError('예약 대상 계정을 선택해주세요.');
+    if (!parentId) return setError('상위리더를 선택해주세요.');
+    if (!reason.trim()) return setError('사유를 입력해주세요.');
+    if (!(Number(unitPrice) > 0)) return setError('적용단가는 0보다 커야 합니다.');
+    if (!(Number(unitLimit) > 0)) return setError('적용구좌는 0보다 커야 합니다.');
+
+    setSaving(true);
+    try {
+      const changeReason = window.prompt('변경 사유를 입력해주세요.', changeType) ?? changeType;
+      const res = await fetch('/api/admin/sales/pre-issued-code-pending', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'upsert',
+          user_profile_id: pendingEditing.id,
+          desired_parent_leader_member_id: parentId,
+          reason,
+          special_unit_price: Number(unitPrice),
+          special_unit_limit: Number(unitLimit),
+          effective_from: effectiveFrom || undefined,
+          effective_to: effectiveTo || null,
+          desired_status: status,
+          note: note || null,
+          change_reason: `${changeType}:${changeReason}`,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data?.success === false) {
+        throw new Error(data?.error ?? '예약 저장 실패');
+      }
+      setOk('예약 등록 완료. (member_id 매핑 후 자동 승격 대상)');
+      setPendingEditing(null);
+      resetForm();
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function submit(changeType: 'CREATE' | 'UPDATE' | 'SUSPEND' | 'RESUME' | 'END' | 'UPSERT') {
@@ -301,6 +369,17 @@ export default function PreIssuedCodeMembersClient(props: { members: MemberRow[]
           </div>
         </div>
         <div className="px-4 py-3 grid gap-3 sm:grid-cols-2 text-xs">
+        {pendingEditing ? (
+          <div className="sm:col-span-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            <div className="font-semibold">예약 등록 대상(미매핑 계정)</div>
+            <div className="mt-1 text-[11px] text-amber-800">
+              {extractName(pendingEditing.pre_issued_name ?? pendingEditing.display_name ?? '-')} · {pendingEditing.login_code} · {maskPhone(pendingEditing.pre_issued_phone ?? pendingEditing.phone)}
+            </div>
+            <div className="mt-1 text-[11px] text-amber-800">
+              이 계정은 아직 <span className="font-semibold">member_id가 없어</span> 특례/오버라이드가 적용되지 않습니다. 매핑되면 자동 승격됩니다.
+            </div>
+          </div>
+        ) : null}
         <label className="flex flex-col gap-1">
           <MemberSearchPicker
             label="영업자"
@@ -401,7 +480,15 @@ export default function PreIssuedCodeMembersClient(props: { members: MemberRow[]
             {ok ? <span className="text-emerald-700 font-semibold">{ok}</span> : null}
           </div>
           <div className="flex items-center gap-2">
-            {editingMemberId ? (
+            {pendingEditing ? (
+              <button
+                type="button"
+                onClick={() => setPendingEditing(null)}
+                className="rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700"
+              >
+                예약 취소
+              </button>
+            ) : editingMemberId ? (
               <button
                 type="button"
                 onClick={resetForm}
@@ -412,16 +499,68 @@ export default function PreIssuedCodeMembersClient(props: { members: MemberRow[]
             ) : null}
             <button
               type="button"
-              onClick={() => submit(editingMemberId ? 'UPDATE' : 'CREATE')}
+              onClick={() =>
+                pendingEditing
+                  ? submitPendingReservation('CREATE')
+                  : submit(editingMemberId ? 'UPDATE' : 'CREATE')
+              }
               disabled={saving}
               className="rounded-md bg-orange-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
             >
-              {saving ? '저장 중…' : editingMemberId ? '수정 저장' : '등록'}
+              {saving ? '저장 중…' : pendingEditing ? '예약 등록' : editingMemberId ? '수정 저장' : '등록'}
             </button>
           </div>
         </div>
       </div>
     </div>
+
+      {props.pendingAccounts?.length ? (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+          <div className="font-semibold">계정은 발급됐지만 조직원 매핑(member_id)이 없는 계정</div>
+          <div className="text-[11px] text-amber-800 mt-1 leading-relaxed">
+            아래 계정은 <span className="font-semibold">user_profiles.member_id가 NULL(PENDING)</span> 상태입니다.
+            여기서 <span className="font-semibold">예약 등록</span>을 해두면, 이후 <span className="font-semibold">계정 발급 → 매핑</span>에서
+            조직원(member_id)으로 매핑되는 순간 자동으로 본 설정으로 승격됩니다.
+          </div>
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full text-[11px]">
+              <thead className="text-amber-900/80">
+                <tr>
+                  {['이름', '로그인코드', '전화', '상태', ''].map((h) => (
+                    <th key={h} className="py-1 pr-3 text-left font-semibold whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="text-amber-900/90">
+                {props.pendingAccounts.slice(0, 8).map((p) => (
+                  <tr key={p.id}>
+                    <td className="py-1 pr-3 whitespace-nowrap">
+                      {extractName(p.pre_issued_name ?? p.display_name ?? '-') || '-'}
+                    </td>
+                    <td className="py-1 pr-3 font-mono whitespace-nowrap">{p.login_code}</td>
+                    <td className="py-1 pr-3 whitespace-nowrap">{maskPhone(p.pre_issued_phone ?? p.phone)}</td>
+                    <td className="py-1 pr-3 whitespace-nowrap">{p.mapping_status}</td>
+                    <td className="py-1 pr-3 whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => reserveForPendingAccount(p)}
+                        className="rounded-md border border-amber-300 bg-white px-2 py-1 text-[11px] font-semibold text-amber-900 hover:bg-amber-100"
+                      >
+                        예약 등록
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-2">
+            <a className="text-amber-900 underline font-semibold" href="/admin/account-issue">
+              계정 발급/매핑 화면으로 이동
+            </a>
+          </div>
+        </div>
+      ) : null}
 
       <PreIssuedCodeMembersTable
         rows={settings}
