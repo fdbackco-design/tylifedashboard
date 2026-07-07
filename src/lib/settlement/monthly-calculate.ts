@@ -22,6 +22,11 @@ import {
   type JoinStatusContractCandidate,
   isContractStrictlyAfterPromotionThreshold,
 } from '@/lib/settlement/leader-promotion';
+import {
+  computeCenterChiefPromotionThresholds,
+  mergeCenterChiefPromotionEventThresholds,
+  type CenterChiefPromotionEventRecord,
+} from '@/lib/settlement/center-chief-promotion';
 import type { Contract, OrganizationMember, SettlementRule } from '@/lib/types';
 import type { RankType } from '@/lib/types/organization';
 import type { GroupBonusContractInput } from '@/lib/settlement/group-bonus';
@@ -286,7 +291,7 @@ export async function calculateMonthlySettlement(params: {
   const [membersRes, edgesRes] = await Promise.all([
     db
       .from('organization_members')
-      .select('id, name, rank, external_id, phone, source_customer_id, leader_rank_effective_at')
+      .select('id, name, rank, external_id, phone, source_customer_id, leader_rank_effective_at, lock_center_chief_promotion')
       .eq('is_active', true),
     db.from('organization_edges').select('parent_id, child_id'),
   ]);
@@ -559,6 +564,145 @@ export async function calculateMonthlySettlement(params: {
     );
   }
 
+  const leaderRankEffectiveAtByMemberId = new Map<string, string | null>();
+  for (const m of membersRaw as OrganizationMember[]) {
+    const at = m.leader_rank_effective_at;
+    if (at != null && String(at).trim() !== '') {
+      leaderRankEffectiveAtByMemberId.set(m.id, String(at).trim());
+    }
+  }
+
+  const rankByIdForCenterChief = new Map<string, RankType>();
+  for (const m of membersRaw as OrganizationMember[]) {
+    rankByIdForCenterChief.set(m.id, m.rank as RankType);
+  }
+  const externalIdByMemberId = new Map<string, string | null>(
+    (membersRaw as OrganizationMember[]).map((m) => [m.id, (m.external_id ?? null) as string | null]),
+  );
+  const lockedCenterChiefSet = new Set(
+    (membersRaw as OrganizationMember[])
+      .filter((m) => Boolean((m as { lock_center_chief_promotion?: boolean }).lock_center_chief_promotion))
+      .map((m) => m.id),
+  );
+
+  const { data: ccPromoEvents } = await db
+    .from('center_chief_promotion_events')
+    .select(
+      'member_id, previous_parent_id, threshold_leader_member_id, threshold_join_date, threshold_contract_id, created_at',
+    );
+  const centerChiefEventsByMemberId = new Map<string, CenterChiefPromotionEventRecord>();
+  for (const r of (ccPromoEvents ?? []) as any[]) {
+    if (!r?.member_id || !r?.threshold_leader_member_id || !r?.threshold_join_date) continue;
+    centerChiefEventsByMemberId.set(String(r.member_id), {
+      member_id: String(r.member_id),
+      previous_parent_id: (r.previous_parent_id ?? null) as string | null,
+      threshold_leader_member_id: String(r.threshold_leader_member_id),
+      threshold_join_date: String(r.threshold_join_date).slice(0, 10),
+      threshold_contract_id: (r.threshold_contract_id ?? null) as string | null,
+      created_at: (r.created_at ?? null) as string | null,
+    });
+  }
+
+  const centerChiefThresholdByMemberId = computeCenterChiefPromotionThresholds(
+    treeRows,
+    rankByIdForCenterChief,
+    promotionThresholdByMemberId,
+    leaderRankEffectiveAtByMemberId,
+    externalIdByMemberId,
+  );
+
+  const ccEventRowsWithThreshold = ((ccPromoEvents ?? []) as any[]).filter(
+    (r) => r?.member_id && r?.threshold_leader_member_id && r?.threshold_join_date,
+  );
+  const ccThresholdContractIds = [
+    ...new Set(
+      ccEventRowsWithThreshold
+        .map((r) => (r.threshold_contract_id ? String(r.threshold_contract_id) : null))
+        .filter((v): v is string => !!v),
+    ),
+  ];
+  const missingCcContractIds = ccThresholdContractIds.filter((id) => !thresholdContractMetaById.has(id));
+  if (missingCcContractIds.length > 0) {
+    const { data: ccThContractRows, error: ccThCErr } = await db
+      .from('contracts')
+      .select('id, created_at, join_date, happy_call_at, invoice_registered_at')
+      .in('id', missingCcContractIds);
+    if (ccThCErr) throw new Error(`센터장 달성 계약(created_at) 조회 실패: ${ccThCErr.message}`);
+    for (const row of (ccThContractRows ?? []) as any[]) {
+      if (!row?.id) continue;
+      thresholdContractMetaById.set(String(row.id), {
+        join_date: String(row.join_date ?? '').slice(0, 10),
+        happy_call_at: (row.happy_call_at ?? null) as string | null,
+        invoice_registered_at: (row.invoice_registered_at ?? null) as string | null,
+        created_at: (row.created_at ?? null) as string | null,
+      });
+    }
+  }
+  mergeCenterChiefPromotionEventThresholds(
+    centerChiefThresholdByMemberId,
+    (ccPromoEvents ?? []) as any[],
+    thresholdContractMetaById,
+  );
+
+  const parentByChildForCc = new Map<string, string | null>();
+  for (const e of edgesRaw) parentByChildForCc.set(e.child_id, e.parent_id ?? null);
+
+  const newCcPromoRows: Array<{
+    member_id: string;
+    previous_parent_id: string | null;
+    threshold_leader_member_id: string;
+    threshold_join_date: string;
+    threshold_contract_id: string | null;
+  }> = [];
+  const newCcMemberIds: string[] = [];
+  for (const m of membersRaw as OrganizationMember[]) {
+    if (centerChiefEventsByMemberId.has(m.id)) continue;
+    if (m.rank !== '리더' && m.rank !== '센터장') continue;
+    const th = centerChiefThresholdByMemberId.get(m.id) ?? null;
+    if (!th) continue;
+    newCcPromoRows.push({
+      member_id: m.id,
+      previous_parent_id: parentByChildForCc.get(m.id) ?? null,
+      threshold_leader_member_id: th.threshold_leader_member_id,
+      threshold_join_date: th.threshold_join_date,
+      threshold_contract_id: th.threshold_contract_id ?? null,
+    });
+    newCcMemberIds.push(m.id);
+    centerChiefEventsByMemberId.set(m.id, {
+      member_id: m.id,
+      previous_parent_id: parentByChildForCc.get(m.id) ?? null,
+      threshold_leader_member_id: th.threshold_leader_member_id,
+      threshold_join_date: th.threshold_join_date,
+      threshold_contract_id: th.threshold_contract_id ?? null,
+      created_at: null,
+    });
+  }
+  if (newCcPromoRows.length > 0) {
+    const { error: newCcErr } = await db
+      .from('center_chief_promotion_events')
+      .upsert(newCcPromoRows as any, { onConflict: 'member_id' });
+    if (newCcErr) {
+      throw new Error(`walk 기반 center_chief_promotion_events 생성 실패: ${newCcErr.message}`);
+    }
+    const toCenterChiefRankUp = newCcMemberIds.filter((id) => {
+      if (lockedCenterChiefSet.has(id)) return false;
+      const m = (membersRaw as OrganizationMember[]).find((x) => x.id === id);
+      return m?.rank === '리더';
+    });
+    if (toCenterChiefRankUp.length > 0) {
+      await db
+        .from('organization_members')
+        .update({ rank: '센터장' })
+        .in('id', toCenterChiefRankUp)
+        .eq('rank', '리더');
+      for (const id of toCenterChiefRankUp) {
+        rankByIdForCenterChief.set(id, '센터장');
+        const m = (membersRaw as OrganizationMember[]).find((x) => x.id === id);
+        if (m) m.rank = '센터장';
+      }
+    }
+  }
+
   const promotionCommissionMemberIds = (membersRaw as OrganizationMember[])
     .filter((m) => m.rank === '영업사원' || m.rank === '리더')
     .map((m) => m.id);
@@ -615,14 +759,6 @@ export async function calculateMonthlySettlement(params: {
     }
   }
 
-  const leaderRankEffectiveAtByMemberId = new Map<string, string | null>();
-  for (const m of membersRaw as OrganizationMember[]) {
-    const at = m.leader_rank_effective_at;
-    if (at != null && String(at).trim() !== '') {
-      leaderRankEffectiveAtByMemberId.set(m.id, String(at).trim());
-    }
-  }
-
   // 2026-06 한정 그룹 보너스 입력: 정산 대상 계약 + 고객명을 묶어 전달.
   // - 그룹 보너스는 group-bonus.ts에서 sales_member_id, join_date, customer_name으로 그룹화.
   // - 해약은 제외(가입 인정 계약 기준).
@@ -673,6 +809,7 @@ export async function calculateMonthlySettlement(params: {
     leaderRankEffectiveAtByMemberId,
     groupBonusContracts,
     incentiveAmountOverrideByMemberId,
+    centerChiefThresholdByMemberId,
   };
 
   const contractsByMember = new Map<string, Contract[]>();

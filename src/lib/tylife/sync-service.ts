@@ -49,6 +49,7 @@ import {
   isPromotionAccumulationJoinContractRow,
   type AttributedJoinContractRow,
 } from '../settlement/leader-promotion';
+import { computeCenterChiefPromotionThresholds } from '../settlement/center-chief-promotion';
 import type { RankType } from '../types/organization';
 import { hasValidInvoiceNo, normalizeInvoiceNo } from '../utils/invoice-no';
 import {
@@ -1783,6 +1784,44 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
           rankById,
           externalIdByMemberId,
         ).filter((id) => !lockedCenterChiefSet.has(String(id)));
+
+        const { data: existingCcEvents } = await db
+          .from('center_chief_promotion_events')
+          .select('member_id');
+        const existingCcEventIds = new Set(
+          ((existingCcEvents ?? []) as Array<{ member_id: string }>).map((r) => String(r.member_id)),
+        );
+
+        const centerChiefThresholdByMemberId = computeCenterChiefPromotionThresholds(
+          treeRows,
+          rankById,
+          promotionThresholdByMemberId,
+          undefined,
+          externalIdByMemberId,
+        );
+
+        const ccPromoRows = toCenterChief
+          .filter((id) => !existingCcEventIds.has(id))
+          .map((id) => {
+            const th = centerChiefThresholdByMemberId.get(id) ?? null;
+            if (!th) return null;
+            return {
+              member_id: id,
+              previous_parent_id: parentByChild.get(id) ?? null,
+              threshold_leader_member_id: th.threshold_leader_member_id,
+              threshold_join_date: th.threshold_join_date,
+              threshold_contract_id: th.threshold_contract_id ?? null,
+            };
+          })
+          .filter((row): row is NonNullable<typeof row> => row != null);
+
+        if (ccPromoRows.length > 0) {
+          const { error: ccPromoErr } = await db
+            .from('center_chief_promotion_events')
+            .upsert(ccPromoRows as any, { onConflict: 'member_id' });
+          if (ccPromoErr) throw new Error(`center_chief_promotion_events 기록 실패: ${ccPromoErr.message}`);
+        }
+
         if (toCenterChief.length > 0) {
           const { error: ccErr } = await db
             .from('organization_members')

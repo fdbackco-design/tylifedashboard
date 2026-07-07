@@ -19,6 +19,9 @@ import {
   resolvePromotionUnitSplit,
   promotionCommissionSplitForNonWalkContract,
 } from './leader-promotion';
+import type { CenterChiefPromotionThreshold } from './center-chief-promotion';
+import { splitContractUnitsByCenterChiefThreshold } from './center-chief-promotion';
+import { CENTER_CHIEF_ROLLUP_PER_UNIT } from './constants';
 import {
   calculateGroupBonusForMember,
   type GroupBonusContractInput,
@@ -299,6 +302,8 @@ export interface LeaderSettlementOpts {
   promotionEventWalkMismatchByMemberId?: Map<string, PromotionEventWalkMismatch>;
   /** 승급 이벤트 신뢰도·감사 전체 (멤버별) */
   promotionEventValidationByMemberId?: Map<string, PromotionEventValidation>;
+  /** 센터장 달성(산하 리더 5명) 이후 롤업 단가 분기용 */
+  centerChiefThresholdByMemberId?: Map<string, CenterChiefPromotionThreshold | null>;
 }
 
 const LEADER_MAINTENANCE_BONUS_WON = 1_000_000;
@@ -469,11 +474,14 @@ function calcRollupItemsWithLeaderPromotion(
   leaderRankEffectiveAtByMemberId?: Map<string, string | null>,
   orgNodeByMemberId?: Map<string, OrgTreeNode>,
   promotionUnitSplitByMemberId?: Map<string, Map<string, PromotionUnitSplit>>,
+  centerChiefThresholdByMemberId?: Map<string, CenterChiefPromotionThreshold | null>,
 ): { items: RollupItem[]; total: number; contractItems: RollupContractItem[] } {
   const refDate = monthEndDate(yearMonth);
   const items: RollupItem[] = [];
   const contractItems: RollupContractItem[] = [];
   const nodeThreshold = promotionThresholdByMemberId.get(node.id) ?? null;
+  const nodeCenterChiefThreshold =
+    node.rank === '센터장' ? (centerChiefThresholdByMemberId?.get(node.id) ?? null) : null;
 
   const directChildIdSet = new Set((node.children ?? []).map((c) => c.id));
 
@@ -501,7 +509,6 @@ function calcRollupItemsWithLeaderPromotion(
       );
       if (eligibleUnits <= 0) continue;
 
-      childUnits += eligibleUnits;
       const upper = commissionPerUnitForDirectContract(
         node.id,
         node.rank,
@@ -523,23 +530,61 @@ function calcRollupItemsWithLeaderPromotion(
         leaderRankEffectiveAtByMemberId,
       );
       const diff = Math.max(0, upper - lower);
-      const sub = diff * eligibleUnits;
-      subtotal += sub;
-      if (sub > 0) {
-        localContractItems.push({
-          contract_id: c.id,
-          contract_code: c.contract_code,
-          from_member_id: child.id,
-          from_member_name: child.name,
-          from_rank: child.rank,
-          effective_sales_member_id: ownerMemberId,
-          effective_sales_member_name: ownerName,
-          effective_sales_member_rank: ownerRank,
-          unit_count: eligibleUnits,
-          rollup_amount_per_unit: diff,
-          subtotal: sub,
-          included_reason: childThreshold ? 'direct_child_pre_promotion' : 'direct_child',
-        });
+
+      const ccSplit =
+        nodeCenterChiefThreshold != null
+          ? splitContractUnitsByCenterChiefThreshold(
+              { ...ref, unit_count: eligibleUnits },
+              nodeCenterChiefThreshold,
+            )
+          : { preCenterChiefUnits: eligibleUnits, postCenterChiefUnits: 0 };
+
+      const preUnits = ccSplit.preCenterChiefUnits;
+      const postUnits = ccSplit.postCenterChiefUnits;
+
+      if (preUnits > 0) {
+        const sub = diff * preUnits;
+        childUnits += preUnits;
+        subtotal += sub;
+        if (sub > 0) {
+          localContractItems.push({
+            contract_id: c.id,
+            contract_code: c.contract_code,
+            from_member_id: child.id,
+            from_member_name: child.name,
+            from_rank: child.rank,
+            effective_sales_member_id: ownerMemberId,
+            effective_sales_member_name: ownerName,
+            effective_sales_member_rank: ownerRank,
+            unit_count: preUnits,
+            rollup_amount_per_unit: diff,
+            subtotal: sub,
+            included_reason: childThreshold ? 'direct_child_pre_promotion' : 'direct_child',
+          });
+        }
+      }
+
+      if (postUnits > 0) {
+        const rollupPerUnit = CENTER_CHIEF_ROLLUP_PER_UNIT;
+        const sub = rollupPerUnit * postUnits;
+        childUnits += postUnits;
+        subtotal += sub;
+        if (sub > 0) {
+          localContractItems.push({
+            contract_id: c.id,
+            contract_code: c.contract_code,
+            from_member_id: child.id,
+            from_member_name: child.name,
+            from_rank: child.rank,
+            effective_sales_member_id: ownerMemberId,
+            effective_sales_member_name: ownerName,
+            effective_sales_member_rank: ownerRank,
+            unit_count: postUnits,
+            rollup_amount_per_unit: rollupPerUnit,
+            subtotal: sub,
+            included_reason: 'center_chief_post_threshold',
+          });
+        }
       }
     }
 
@@ -705,6 +750,7 @@ export function calculateMemberSettlement(
     (hasAttributedOrigin ||
       member.rank === '영업사원' ||
       member.rank === '리더' ||
+      member.rank === '센터장' ||
       thForMember !== null);
 
   if (useLeaderRates) {
@@ -731,6 +777,7 @@ export function calculateMemberSettlement(
       leaderEffectiveMap,
       leaderOpts?.orgNodeByMemberId,
       promotionUnitSplitByMemberId,
+      leaderOpts?.centerChiefThresholdByMemberId,
     ));
   } else {
     ({ items: directItems, total: baseCommission } = calcDirectContracts(eligible, rule));
