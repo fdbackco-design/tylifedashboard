@@ -127,11 +127,11 @@ export interface SettlementCalculationDetail {
    */
   group_bonus_amount?: number;
   /**
-   * 센터장 월정산 보너스(산하 정산 대상 100구좌 이상 시 300만원).
+   * 센터장 월정산 보너스(산하 정산 대상 100구좌 이상 시 300만원, 하위 센터장 조직 제외).
    * incentive_amount에 합산된다.
    */
   center_chief_subtree_bonus_amount?: number;
-  /** 센터장 보너스 판정에 사용한 당월 산하 정산 구좌 합 */
+  /** 센터장 보너스 판정에 사용한 당월 산하 정산 구좌 합(하위 센터장 제외) */
   center_chief_subtree_units_in_month?: number;
   /** 특정 멤버 예외/수동 조정(합계 수당에 가감) */
   manual_adjustment_won?: number;
