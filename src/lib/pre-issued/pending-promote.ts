@@ -7,6 +7,10 @@ import {
 type AdminDb = any; // SupabaseClient<any, 'public', any>
 type Status = 'active' | 'paused' | 'ended';
 
+function isUuid(v: string): boolean {
+  return /^[0-9a-fA-F-]{36}$/.test(v);
+}
+
 function toYmd(v: unknown): string {
   return String(v ?? '').slice(0, 10);
 }
@@ -67,6 +71,7 @@ export async function promotePreIssuedPendingSettingIfPossible(params: {
   changedBy: string;
 }): Promise<{ ok: boolean; promoted: boolean; message: string }> {
   const { db, userProfileId, changedBy } = params;
+  const changedByUuid = isUuid(changedBy) ? changedBy : null;
 
   const { data: pending, error: pErr } = await db
     .from('pre_issued_code_pending_settings')
@@ -97,7 +102,7 @@ export async function promotePreIssuedPendingSettingIfPossible(params: {
       .update({
         last_promotion_error: cycleErr,
         updated_at: new Date().toISOString(),
-        updated_by: changedBy,
+        updated_by: changedByUuid,
       })
       .eq('id', (pending as any).id);
     return { ok: false, promoted: false, message: cycleErr };
@@ -134,7 +139,7 @@ export async function promotePreIssuedPendingSettingIfPossible(params: {
       .update({
         last_promotion_error: sErr.message,
         updated_at: new Date().toISOString(),
-        updated_by: changedBy,
+        updated_by: changedByUuid,
       })
       .eq('id', (pending as any).id);
     return { ok: false, promoted: false, message: sErr.message };
@@ -144,7 +149,7 @@ export async function promotePreIssuedPendingSettingIfPossible(params: {
     await db.from('pre_issued_code_member_settings_audit').insert({
       setting_id: (after as any).id,
       member_id: memberId,
-      changed_by: changedBy,
+      changed_by: changedByUuid,
       change_reason: 'PROMOTED_FROM_PENDING',
       before_json: before ?? null,
       after_json: after ?? null,
@@ -163,7 +168,7 @@ export async function promotePreIssuedPendingSettingIfPossible(params: {
       promoted_setting_id: (after as any).id,
       last_promotion_error: null,
       updated_at: new Date().toISOString(),
-      updated_by: changedBy,
+      updated_by: changedByUuid,
     })
     .eq('id', (pending as any).id);
 

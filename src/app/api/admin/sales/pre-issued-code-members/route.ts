@@ -127,7 +127,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const special_unit_price = Number(body.special_unit_price ?? 100000);
   const special_unit_limit = Number(body.special_unit_limit ?? 10);
   const note = body.note != null ? String(body.note) : null;
-  const changed_by = String(body.changed_by ?? 'admin').trim() || 'admin';
+  const changed_by_raw = String(body.changed_by ?? '').trim();
+  const changed_by = isUuid(changed_by_raw) ? changed_by_raw : null;
   const change_reason = String(body.change_reason ?? 'CREATED').trim() || 'CREATED';
   const change_reason_text = String(body.change_reason_text ?? '').trim() || null;
 

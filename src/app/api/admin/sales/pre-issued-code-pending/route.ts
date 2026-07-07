@@ -59,7 +59,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const action = String(body.action ?? 'upsert').trim();
-  const changed_by = String(body.changed_by ?? 'admin').trim() || 'admin';
+  const changed_by_raw = String(body.changed_by ?? '').trim();
+  const changed_by = isUuid(changed_by_raw) ? changed_by_raw : null;
 
   if (action === 'promote') {
     const user_profile_id = String(body.user_profile_id ?? '').trim();
@@ -67,7 +68,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const res = await promotePreIssuedPendingSettingIfPossible({
       db,
       userProfileId: user_profile_id,
-      changedBy: changed_by,
+      changedBy: changed_by ?? '',
     });
     return NextResponse.json({ success: res.ok && res.promoted, message: res.message });
   }
