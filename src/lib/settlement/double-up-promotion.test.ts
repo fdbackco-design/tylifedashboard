@@ -3,6 +3,7 @@ import { describe, it } from 'vitest';
 import type { OrgTreeRow } from '@/lib/types';
 import {
   buildPromotionCommissionWalkForMember,
+  collectLeaderPromotionApplyCandidates,
   computePromotionThresholdForMember,
   isLeaderMaintenanceBonusEligible,
   LEADER_PROMOTION_MIN_UNITS,
@@ -104,6 +105,28 @@ describe('double-up leader promotion threshold', () => {
     }
     assert.equal(actualTotal, 18);
     assert.equal(eligibleTotal, 20);
+  });
+
+  it('인정 20구좌 달성 시 이벤트·직급 반영 후보 수집', () => {
+    const contracts: AttributedJoinContractRow[] = [];
+    for (let i = 0; i < 8; i++) {
+      contracts.push(row(`pre-${i}`, 2, '2026-06-01'));
+    }
+    contracts.push(row('double', 2, '2026-06-26'));
+
+    const parentByChild = new Map<string, string | null>([[MEMBER, null]]);
+    const { rankUpMemberIds, eventRows } = collectLeaderPromotionApplyCandidates({
+      treeRows,
+      joinAttributed: contracts,
+      members: [{ id: MEMBER, rank: '영업사원' }],
+      parentByChild,
+    });
+
+    assert.deepEqual(rankUpMemberIds, [MEMBER]);
+    assert.equal(eventRows.length, 1);
+    assert.equal(eventRows[0]?.member_id, MEMBER);
+    assert.equal(eventRows[0]?.threshold_contract_id, 'double');
+    assert.equal(eventRows[0]?.threshold_join_date, '2026-06-26');
   });
 });
 

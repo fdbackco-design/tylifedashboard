@@ -7,6 +7,7 @@ import {
 import { buildOrgStructuralTreeContext } from '@/lib/organization/org-structural-tree';
 import {
   computeLeaderPromotionThresholds,
+  collectLeaderPromotionApplyCandidates,
   mergeLeaderPromotionEventThresholds,
   refreshPromotionThresholdsFromJoinAttributed,
   isPromotionAccumulationJoinContractRow,
@@ -410,46 +411,37 @@ export async function calculateMonthlySettlement(params: {
     }
   }
 
-  // 신규 승급 자동화(A): walk 누적 20구좌 최초 도달 시 leader_promotion_events 생성
-  const walkThresholdsForNewEvents = computeLeaderPromotionThresholds(
+  // 신규 승급 자동화(A): 승급 인정 walk(더블업 반영) 누적 20구좌 최초 도달 시 leader_promotion_events 생성 + 직급 리더 반영
+  const parentByChildForPromo = new Map<string, string | null>();
+  for (const e of edgesRaw) parentByChildForPromo.set(e.child_id, e.parent_id ?? null);
+
+  const {
+    thresholds: walkThresholdsForNewEvents,
+    rankUpMemberIds,
+    eventRows: leaderPromotionEventRows,
+  } = collectLeaderPromotionApplyCandidates({
     treeRows,
     joinAttributed,
-    (membersRaw as OrganizationMember[]).map((m) => ({
+    members: (membersRaw as OrganizationMember[]).map((m) => ({
       id: m.id,
       rank: m.rank as RankType,
       external_id: m.external_id ?? null,
     })),
-  );
-  const parentByChildForPromo = new Map<string, string | null>();
-  for (const e of edgesRaw) parentByChildForPromo.set(e.child_id, e.parent_id ?? null);
-  const newPromoRows: Array<{
-    member_id: string;
-    previous_parent_id: string | null;
-    threshold_contract_id: string;
-    threshold_join_date: string;
-  }> = [];
-  const newPromoMemberIds: string[] = [];
-  for (const m of membersRaw as OrganizationMember[]) {
-    if (promotionEventsByMemberId.has(m.id)) continue;
-    const th = walkThresholdsForNewEvents.get(m.id) ?? null;
-    if (!th) continue;
-    if (m.rank !== '영업사원' && m.rank !== '리더') continue;
-    newPromoRows.push({
-      member_id: m.id,
-      previous_parent_id: parentByChildForPromo.get(m.id) ?? null,
-      threshold_contract_id: th.threshold_contract_id,
-      threshold_join_date: th.threshold_join_date,
-    });
-    newPromoMemberIds.push(m.id);
-    promotionEventsByMemberId.set(m.id, {
-      member_id: m.id,
-      threshold_contract_id: th.threshold_contract_id,
-      threshold_join_date: th.threshold_join_date,
-      previous_parent_id: parentByChildForPromo.get(m.id) ?? null,
+    parentByChild: parentByChildForPromo,
+  });
+
+  const newPromoRows = leaderPromotionEventRows.filter((row) => !promotionEventsByMemberId.has(row.member_id));
+  for (const row of newPromoRows) {
+    promotionEventsByMemberId.set(row.member_id, {
+      member_id: row.member_id,
+      threshold_contract_id: row.threshold_contract_id,
+      threshold_join_date: row.threshold_join_date,
+      previous_parent_id: row.previous_parent_id,
       created_at: null,
     });
-    policyPromotedLeaderIds.add(m.id);
+    policyPromotedLeaderIds.add(row.member_id);
   }
+
   if (newPromoRows.length > 0) {
     const { error: newPromoErr } = await db
       .from('leader_promotion_events')
@@ -457,13 +449,14 @@ export async function calculateMonthlySettlement(params: {
     if (newPromoErr) {
       throw new Error(`walk 기반 leader_promotion_events 생성 실패: ${newPromoErr.message}`);
     }
-    const toRankUp = newPromoMemberIds.filter((id) => {
-      const m = (membersRaw as OrganizationMember[]).find((x) => x.id === id);
-      return m?.rank === '영업사원';
-    });
-    if (toRankUp.length > 0) {
-      await db.from('organization_members').update({ rank: '리더' }).in('id', toRankUp).eq('rank', '영업사원');
-    }
+  }
+
+  if (rankUpMemberIds.length > 0) {
+    await db
+      .from('organization_members')
+      .update({ rank: '리더' })
+      .in('id', rankUpMemberIds)
+      .eq('rank', '영업사원');
   }
 
   const joinStatusCandidates: JoinStatusContractCandidate[] = [];

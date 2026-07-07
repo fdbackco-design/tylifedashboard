@@ -1758,6 +1758,56 @@ export function computeLeaderPromotionThresholds(
   return out;
 }
 
+export type LeaderPromotionEventInsertRow = {
+  member_id: string;
+  previous_parent_id: string | null;
+  threshold_contract_id: string;
+  threshold_join_date: string;
+};
+
+/**
+ * 더블업 반영 승급 인정 walk(20구좌) 기준으로 리더 승급 이벤트·직급 반영 후보를 수집한다.
+ */
+export function collectLeaderPromotionApplyCandidates(params: {
+  treeRows: OrgTreeRow[];
+  joinAttributed: AttributedJoinContractRow[];
+  members: ReadonlyArray<{ id: string; rank: RankType; external_id?: string | null }>;
+  parentByChild: ReadonlyMap<string, string | null>;
+  minUnits?: number;
+}): {
+  thresholds: Map<string, SalesMemberPromotionThreshold | null>;
+  rankUpMemberIds: string[];
+  eventRows: LeaderPromotionEventInsertRow[];
+} {
+  const minUnits = params.minUnits ?? LEADER_PROMOTION_MIN_UNITS;
+  const thresholds = computeLeaderPromotionThresholds(
+    params.treeRows,
+    params.joinAttributed,
+    params.members,
+    minUnits,
+  );
+  const rankUpMemberIds: string[] = [];
+  const eventRows: LeaderPromotionEventInsertRow[] = [];
+
+  for (const m of params.members) {
+    if (isCustomerVirtualOrgMember(m.external_id)) continue;
+    if (m.rank !== '영업사원' && m.rank !== '리더') continue;
+    const th = thresholds.get(m.id) ?? null;
+    if (!th) continue;
+    if (m.rank === '영업사원') {
+      rankUpMemberIds.push(m.id);
+    }
+    eventRows.push({
+      member_id: m.id,
+      previous_parent_id: params.parentByChild.get(m.id) ?? null,
+      threshold_contract_id: th.threshold_contract_id,
+      threshold_join_date: th.threshold_join_date,
+    });
+  }
+
+  return { thresholds, rankUpMemberIds, eventRows };
+}
+
 /**
  * 산하(본인 제외)에 rank가 '리더'인 멤버가 CENTER_CHIEF_PROMOTION_MIN_LEADERS 이상이면
  * 해당 멤버(현재 직급이 리더인 경우)를 센터장으로 승격 대상으로 본다.
