@@ -29,7 +29,7 @@ export default async function PreIssuedCodeMembersPage({ searchParams }: PagePro
 
   // 후보 영업자/리더 검색 대상:
   // - 조직도(active) 멤버 + 계정 발급된(user_profiles.member_id 존재) 멤버(계약/산하가 없어도 포함)
-  const [membersRes, settingsRes, issuedProfilesRes, pendingProfilesRes] = await Promise.all([
+  const [membersRes, settingsRes, issuedProfilesRes, pendingProfilesRes, pendingSettingsRes] = await Promise.all([
     db
       .from('organization_members')
       .select('id,name,rank,phone,external_id,is_active')
@@ -55,6 +55,13 @@ export default async function PreIssuedCodeMembersPage({ searchParams }: PagePro
       .in('mapping_status', ['PENDING', 'MANUAL_REVIEW'])
       .order('created_at', { ascending: false })
       .limit(500),
+    db
+      .from('pre_issued_code_pending_settings')
+      .select(
+        'id,user_profile_id,desired_parent_leader_member_id,reason,special_unit_price,special_unit_limit,effective_from,effective_to,desired_status,note,promoted,promoted_at,promoted_member_id,promoted_setting_id,last_promotion_error,updated_at',
+      )
+      .order('updated_at', { ascending: false })
+      .limit(2000),
   ]);
 
   if (membersRes.error) {
@@ -68,6 +75,9 @@ export default async function PreIssuedCodeMembersPage({ searchParams }: PagePro
   }
   if (pendingProfilesRes.error) {
     return <div className="p-6 text-sm text-red-600">미매핑 계정 조회 실패: {pendingProfilesRes.error.message}</div>;
+  }
+  if (pendingSettingsRes.error) {
+    return <div className="p-6 text-sm text-red-600">예약 설정 조회 실패: {pendingSettingsRes.error.message}</div>;
   }
 
   const memberById = new Map<string, any>();
@@ -210,6 +220,7 @@ export default async function PreIssuedCodeMembersPage({ searchParams }: PagePro
         members={selectableMembers as any[]}
         initialSettings={rows as any[]}
         pendingAccounts={(pendingProfilesRes.data ?? []) as any[]}
+        pendingSettings={(pendingSettingsRes.data ?? []) as any[]}
       />
 
     </div>

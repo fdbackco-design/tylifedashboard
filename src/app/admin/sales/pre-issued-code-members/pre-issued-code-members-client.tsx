@@ -142,10 +142,145 @@ function MemberSearchPicker(props: {
   );
 }
 
+type SalesTargetOption =
+  | { key: `member:${string}`; kind: 'member'; id: string; name: string; rank: string; phone?: string | null }
+  | {
+      key: `pending:${string}`;
+      kind: 'pending';
+      id: string; // user_profile_id
+      name: string;
+      rank: '미매핑';
+      phone?: string | null;
+      login_code: string;
+      mapping_status: string;
+    };
+
+function SalesTargetSearchPicker(props: {
+  label: string;
+  memberOptions: Array<{ id: string; name: string; rank: string; phone?: string | null }>;
+  pendingAccounts: PendingAccountRow[];
+  selectedKey: string; // member:<uuid> | pending:<uuid> | ''
+  onSelect: (opt: SalesTargetOption | null) => void;
+}) {
+  const [q, setQ] = useState('');
+
+  const options = useMemo<SalesTargetOption[]>(() => {
+    const members: SalesTargetOption[] = props.memberOptions.map((m) => ({
+      key: `member:${m.id}`,
+      kind: 'member',
+      id: m.id,
+      name: m.name,
+      rank: m.rank,
+      phone: m.phone ?? null,
+    }));
+    const pendings: SalesTargetOption[] = (props.pendingAccounts ?? []).map((p) => ({
+      key: `pending:${p.id}`,
+      kind: 'pending',
+      id: p.id,
+      name: extractName(p.pre_issued_name ?? p.display_name ?? '-') || '-',
+      rank: '미매핑',
+      phone: p.pre_issued_phone ?? p.phone ?? null,
+      login_code: p.login_code,
+      mapping_status: p.mapping_status,
+    }));
+    return [...members, ...pendings];
+  }, [props.memberOptions, props.pendingAccounts]);
+
+  const selected = useMemo(() => options.find((o) => o.key === props.selectedKey) ?? null, [options, props.selectedKey]);
+
+  const results = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return [];
+    return options
+      .filter((o) => {
+        const phone = maskPhone(o.phone);
+        const extra = o.kind === 'pending' ? `${o.login_code} ${o.mapping_status}` : '';
+        const hay = `${o.name} ${o.rank} ${phone} ${extra}`.toLowerCase();
+        return hay.includes(s);
+      })
+      .slice(0, 12);
+  }, [q, options]);
+
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="font-semibold text-gray-700">{props.label}</span>
+      {selected ? (
+        <div className="flex items-center justify-between gap-2 rounded-md border border-gray-200 bg-white px-2 py-2">
+          <div className="min-w-0">
+            <div className="text-xs font-semibold text-gray-800 whitespace-nowrap truncate">
+              {selected.name}{' '}
+              <span className="text-gray-500 font-medium">
+                ({selected.kind === 'pending' ? '미매핑 계정' : selected.rank})
+              </span>
+              <span className="ml-2 text-[11px] text-gray-400">{maskPhone(selected.phone)}</span>
+              {selected.kind === 'pending' ? (
+                <span className="ml-2 text-[11px] text-amber-700 font-semibold">
+                  {selected.login_code} · {selected.mapping_status}
+                </span>
+              ) : null}
+            </div>
+            <div className="text-[11px] font-mono text-gray-400 truncate">{selected.kind === 'pending' ? `user_profile:${selected.id}` : selected.id}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => props.onSelect(null)}
+            className="shrink-0 rounded-md border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
+          >
+            변경
+          </button>
+        </div>
+      ) : (
+        <>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="이름/직급/연락처/로그인코드로 검색…"
+            className="rounded-md border border-gray-200 px-2 py-2"
+          />
+          {results.length > 0 ? (
+            <div className="max-h-56 overflow-auto rounded-md border border-gray-200 bg-white">
+              {results.map((o) => (
+                <button
+                  key={o.key}
+                  type="button"
+                  onClick={() => {
+                    props.onSelect(o);
+                    setQ('');
+                  }}
+                  className="w-full text-left px-2 py-2 hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
+                >
+                  <div className="text-xs font-semibold text-gray-800">
+                    {o.name}{' '}
+                    <span className="text-gray-500 font-medium">
+                      ({o.kind === 'pending' ? '미매핑 계정' : o.rank})
+                    </span>
+                    <span className="ml-2 text-[11px] text-gray-400">{maskPhone(o.phone)}</span>
+                    {o.kind === 'pending' ? (
+                      <span className="ml-2 text-[11px] text-amber-700 font-semibold">
+                        {o.login_code} · {o.mapping_status}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="text-[11px] font-mono text-gray-400">
+                    {o.kind === 'pending' ? `user_profile:${o.id}` : o.id}
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : q.trim() ? (
+            <div className="text-[11px] text-gray-500">검색 결과가 없습니다.</div>
+          ) : null}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function PreIssuedCodeMembersClient(props: {
   members: MemberRow[];
   initialSettings: SettingRow[];
   pendingAccounts: PendingAccountRow[];
+  pendingSettings: any[];
 }) {
   const members = useMemo(
     () =>
@@ -171,6 +306,7 @@ export default function PreIssuedCodeMembersClient(props: {
   const [history, setHistory] = useState<any[] | null>(null);
   const [historyFor, setHistoryFor] = useState<string | null>(null);
   const [pendingEditing, setPendingEditing] = useState<PendingAccountRow | null>(null);
+  const [salesTargetKey, setSalesTargetKey] = useState<string>(''); // member:<id> | pending:<id> | ''
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -187,6 +323,8 @@ export default function PreIssuedCodeMembersClient(props: {
   function fillFromRow(r: SettingRow) {
     setEditingMemberId(r.member_id);
     setMemberId(r.member_id);
+    setSalesTargetKey(`member:${r.member_id}`);
+    setPendingEditing(null);
     setParentId(r.parent_leader_member_id);
     setReason(r.reason ?? '');
     setUnitPrice(Number(r.special_unit_price ?? 100000));
@@ -209,6 +347,8 @@ export default function PreIssuedCodeMembersClient(props: {
     setEffectiveTo('');
     setStatus('active');
     setNote('');
+    setPendingEditing(null);
+    setSalesTargetKey('');
   }
 
   async function reserveForPendingAccount(p: PendingAccountRow) {
@@ -216,6 +356,8 @@ export default function PreIssuedCodeMembersClient(props: {
     setOk(null);
     setPendingEditing(p);
     setMemberId('');
+    setEditingMemberId(null);
+    setSalesTargetKey(`pending:${p.id}`);
     // 상위리더/단가/구좌 등은 기존 입력을 그대로 쓰되, 저장은 pending API로 보낸다.
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -254,8 +396,29 @@ export default function PreIssuedCodeMembersClient(props: {
         throw new Error(data?.error ?? '예약 저장 실패');
       }
       setOk('예약 등록 완료. (member_id 매핑 후 자동 승격 대상)');
-      setPendingEditing(null);
-      resetForm();
+      // 예약 목록이 같은 페이지에서 바로 보여야 혼동이 없음 → 저장 후 새로고침
+      window.location.reload();
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function promotePendingNow(userProfileId: string) {
+    setError(null);
+    setOk(null);
+    setSaving(true);
+    try {
+      const res = await fetch('/api/admin/sales/pre-issued-code-pending', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'promote', user_profile_id: userProfileId }),
+      });
+      const data = await res.json();
+      if (!res.ok || data?.success === false) throw new Error(data?.error ?? data?.message ?? '승격 실패');
+      setOk(data?.message ?? '승격 완료');
+      window.location.reload();
     } catch (e: any) {
       setError(String(e?.message ?? e));
     } finally {
@@ -381,13 +544,32 @@ export default function PreIssuedCodeMembersClient(props: {
           </div>
         ) : null}
         <label className="flex flex-col gap-1">
-          <MemberSearchPicker
+          <SalesTargetSearchPicker
             label="영업자"
-            members={memberOptions}
-            selectedId={memberId}
-            onSelect={(id) => {
-              setMemberId(id);
-              if (id) setEditingMemberId(id);
+            memberOptions={memberOptions}
+            pendingAccounts={props.pendingAccounts ?? []}
+            selectedKey={salesTargetKey}
+            onSelect={(opt) => {
+              setError(null);
+              setOk(null);
+              if (!opt) {
+                setSalesTargetKey('');
+                setMemberId('');
+                setEditingMemberId(null);
+                setPendingEditing(null);
+                return;
+              }
+              setSalesTargetKey(opt.key);
+              if (opt.kind === 'pending') {
+                const p = (props.pendingAccounts ?? []).find((x) => x.id === opt.id) ?? null;
+                setPendingEditing(p);
+                setMemberId('');
+                setEditingMemberId(null);
+              } else {
+                setPendingEditing(null);
+                setMemberId(opt.id);
+                setEditingMemberId(opt.id);
+              }
             }}
           />
         </label>
@@ -513,6 +695,86 @@ export default function PreIssuedCodeMembersClient(props: {
         </div>
       </div>
     </div>
+
+      {props.pendingSettings?.length ? (
+        <div className="mb-4 rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+            <div className="text-xs font-semibold text-gray-800">예약 등록(미매핑 계정) 목록</div>
+            <div className="text-[11px] text-gray-500 mt-1">
+              여기의 항목은 <span className="font-semibold">정산/오버라이드에 적용되지 않으며</span>, member_id 매핑 시 자동 승격됩니다.
+            </div>
+          </div>
+          <div className="px-4 py-3 overflow-x-auto">
+            <table className="w-full text-[11px]">
+              <thead className="text-gray-600">
+                <tr>
+                  {['계정', '상위리더', '단가/한도', '기간', '상태', '승격', '오류'].map((h) => (
+                    <th key={h} className="py-1 pr-3 text-left font-semibold whitespace-nowrap">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="text-gray-800/90">
+                {(props.pendingSettings ?? []).slice(0, 30).map((r: any) => {
+                  const p =
+                    (props.pendingAccounts ?? []).find((x) => x.id === String(r.user_profile_id)) ??
+                    null;
+                  const parent = members.find((m) => m.id === String(r.desired_parent_leader_member_id)) ?? null;
+                  const name = extractName(p?.pre_issued_name ?? p?.display_name ?? '미매핑 계정');
+                  const login = p?.login_code ?? '';
+                  const phone = maskPhone(p?.pre_issued_phone ?? p?.phone);
+                  return (
+                    <tr key={String(r.id)} className="border-t border-gray-100">
+                      <td className="py-2 pr-3 whitespace-nowrap">
+                        <div className="font-semibold">{name}</div>
+                        <div className="text-[10px] text-gray-500 font-mono">
+                          {login ? `${login} · ` : ''}
+                          {phone}
+                        </div>
+                      </td>
+                      <td className="py-2 pr-3 whitespace-nowrap">
+                        {parent ? (
+                          <span className="font-semibold">
+                            {parent.name} ({parent.rank})
+                          </span>
+                        ) : (
+                          <span className="text-gray-500">-</span>
+                        )}
+                      </td>
+                      <td className="py-2 pr-3 whitespace-nowrap">
+                        <span className="font-semibold">{fmtWon(Number(r.special_unit_price ?? 0))}</span> /{' '}
+                        {Number(r.special_unit_limit ?? 0)}구좌
+                      </td>
+                      <td className="py-2 pr-3 whitespace-nowrap tabular-nums">
+                        {String(r.effective_from ?? '').slice(0, 10)}
+                        {r.effective_to ? ` ~ ${String(r.effective_to).slice(0, 10)}` : ''}
+                      </td>
+                      <td className="py-2 pr-3 whitespace-nowrap">{String(r.desired_status ?? '')}</td>
+                      <td className="py-2 pr-3 whitespace-nowrap">
+                        {r.promoted ? (
+                          <span className="text-emerald-700 font-semibold">승격완료</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => promotePendingNow(String(r.user_profile_id))}
+                            className="rounded-md border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
+                          >
+                            지금 승격 시도
+                          </button>
+                        )}
+                      </td>
+                      <td className="py-2 pr-3 text-[10px] text-red-600">
+                        {String(r.last_promotion_error ?? '')}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
 
       {props.pendingAccounts?.length ? (
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
