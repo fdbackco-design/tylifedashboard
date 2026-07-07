@@ -11,8 +11,12 @@ export const BASE_AMOUNT_PER_UNIT = 715_000;
  * 직급별 기본 수당 (1구좌당 원).
  * 사업본부장은 DB(settlement_rules)에서 조회 — 이 상수에 넣지 않음.
  */
-/** 센터장 달성(산하 리더 5명) 이후 롤업 수당 — 구좌당 고정 */
-export const CENTER_CHIEF_ROLLUP_PER_UNIT = 200_000;
+/** 센터장 승급 전(리더 시절) 롤업 오버라이드 — 구좌당 고정 */
+export const CENTER_CHIEF_ROLLUP_PER_UNIT_PRE = 100_000;
+/** 센터장 승급 이후 롤업 오버라이드 — 구좌당 고정 (승급 계약 해피콜 완료일 다음날부터) */
+export const CENTER_CHIEF_ROLLUP_PER_UNIT_POST = 200_000;
+/** @deprecated CENTER_CHIEF_ROLLUP_PER_UNIT_POST 사용 */
+export const CENTER_CHIEF_ROLLUP_PER_UNIT = CENTER_CHIEF_ROLLUP_PER_UNIT_POST;
 
 export const DEFAULT_COMMISSION_BY_RANK: Partial<Record<RankType, number>> = {
   영업사원: 300_000,

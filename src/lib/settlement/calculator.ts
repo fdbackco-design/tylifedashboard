@@ -21,7 +21,10 @@ import {
 } from './leader-promotion';
 import type { CenterChiefPromotionThreshold } from './center-chief-promotion';
 import { splitContractUnitsByCenterChiefThreshold } from './center-chief-promotion';
-import { CENTER_CHIEF_ROLLUP_PER_UNIT } from './constants';
+import {
+  CENTER_CHIEF_ROLLUP_PER_UNIT_PRE,
+  CENTER_CHIEF_ROLLUP_PER_UNIT_POST,
+} from './constants';
 import { calculateCenterChiefSubtreeBonus, subtreeSettlementUnitsForCenterChiefBonus } from './center-chief-bonus';
 import {
   calculateGroupBonusForMember,
@@ -481,8 +484,9 @@ function calcRollupItemsWithLeaderPromotion(
   const items: RollupItem[] = [];
   const contractItems: RollupContractItem[] = [];
   const nodeThreshold = promotionThresholdByMemberId.get(node.id) ?? null;
-  const nodeCenterChiefThreshold =
-    node.rank === '센터장' ? (centerChiefThresholdByMemberId?.get(node.id) ?? null) : null;
+  const nodeCenterChiefThreshold = centerChiefThresholdByMemberId?.get(node.id) ?? null;
+  /** DB 직급이 센터장일 때만 롤업 10만/20만 오버라이드 (리더 시절은 기존 diff) */
+  const useCenterChiefRollupOverride = node.rank === '센터장';
 
   const directChildIdSet = new Set((node.children ?? []).map((c) => c.id));
 
@@ -532,19 +536,30 @@ function calcRollupItemsWithLeaderPromotion(
       );
       const diff = Math.max(0, upper - lower);
 
-      const ccSplit =
-        nodeCenterChiefThreshold != null
-          ? splitContractUnitsByCenterChiefThreshold(
-              { ...ref, unit_count: eligibleUnits },
-              nodeCenterChiefThreshold,
-            )
-          : { preCenterChiefUnits: eligibleUnits, postCenterChiefUnits: 0 };
+      let preUnits = 0;
+      let postUnits = 0;
 
-      const preUnits = ccSplit.preCenterChiefUnits;
-      const postUnits = ccSplit.postCenterChiefUnits;
+      if (useCenterChiefRollupOverride) {
+        if (nodeCenterChiefThreshold) {
+          const ccSplit = splitContractUnitsByCenterChiefThreshold(
+            { ...ref, unit_count: eligibleUnits },
+            nodeCenterChiefThreshold,
+          );
+          preUnits = ccSplit.preCenterChiefUnits;
+          postUnits = ccSplit.postCenterChiefUnits;
+        } else {
+          // 센터장이나 threshold 이벤트 없이 승급된 경우 — 전량 20만
+          postUnits = eligibleUnits;
+        }
+      } else {
+        preUnits = eligibleUnits;
+      }
 
       if (preUnits > 0) {
-        const sub = diff * preUnits;
+        const rollupPerUnit = useCenterChiefRollupOverride
+          ? CENTER_CHIEF_ROLLUP_PER_UNIT_PRE
+          : diff;
+        const sub = rollupPerUnit * preUnits;
         childUnits += preUnits;
         subtotal += sub;
         if (sub > 0) {
@@ -558,15 +573,19 @@ function calcRollupItemsWithLeaderPromotion(
             effective_sales_member_name: ownerName,
             effective_sales_member_rank: ownerRank,
             unit_count: preUnits,
-            rollup_amount_per_unit: diff,
+            rollup_amount_per_unit: rollupPerUnit,
             subtotal: sub,
-            included_reason: childThreshold ? 'direct_child_pre_promotion' : 'direct_child',
+            included_reason: useCenterChiefRollupOverride
+              ? 'center_chief_pre_threshold'
+              : childThreshold
+                ? 'direct_child_pre_promotion'
+                : 'direct_child',
           });
         }
       }
 
       if (postUnits > 0) {
-        const rollupPerUnit = CENTER_CHIEF_ROLLUP_PER_UNIT;
+        const rollupPerUnit = CENTER_CHIEF_ROLLUP_PER_UNIT_POST;
         const sub = rollupPerUnit * postUnits;
         childUnits += postUnits;
         subtotal += sub;
