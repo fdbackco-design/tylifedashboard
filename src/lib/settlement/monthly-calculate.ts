@@ -353,7 +353,7 @@ export async function calculateMonthlySettlement(params: {
 
   // 리더 승격(20구좌) walk: 가입 인정 계약만 누적.
   // - 조직도와 동일: settlement override → resolveContractSalesMemberId(HQ/고객노드 치환)
-  // - status=가입 → 포함 / 준비·대기 → happycall 성공+송장
+  // - status=가입 → 포함 / 준비·대기 → 해피콜 성공·완료 등(SETTLEMENT_VALID_HAPPYCALL_RESULTS)+송장
   const joinAttributed: AttributedJoinContractRow[] = [];
   for (const row of (allContractRows ?? []) as any[]) {
     if (!isPromotionAccumulationJoinContractRow(row)) continue;

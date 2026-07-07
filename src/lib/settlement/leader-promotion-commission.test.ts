@@ -61,7 +61,7 @@ describe('leader promotion commission (walk SSOT)', () => {
     assert.equal(audit[1]?.contractId, 'B');
   });
 
-  it('2) 준비/대기 + 해피콜 성공 + 송장 → 가입 인정·누적 포함', () => {
+  it('2) 준비/대기 + 해피콜 성공/완료 + 송장 → 가입 인정·누적 포함', () => {
     const waitRow = {
       status: '대기',
       sales_member_id: MEMBER,
@@ -69,6 +69,15 @@ describe('leader promotion commission (walk SSOT)', () => {
       invoice_no: 'INV-OK',
     };
     assert.equal(isPromotionAccumulationJoinContractRow(waitRow), true);
+    assert.equal(
+      isPromotionAccumulationJoinContractRow({
+        status: '대기',
+        sales_member_id: MEMBER,
+        happycall_result: '완료',
+        invoice_no: 'INV-OK',
+      }),
+      true,
+    );
     const r = row('wait-ok', 1, {
       happy_call_at: '2026-06-01',
       status: '대기',

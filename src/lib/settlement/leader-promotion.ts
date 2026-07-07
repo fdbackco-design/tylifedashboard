@@ -4,7 +4,10 @@ import {
   buildChildrenByParentFromRows,
   collectSubtreeMemberIdsDownstream,
 } from '@/lib/settlement/settlement-org-tree';
-import { happycallYmdSeoul } from '@/lib/settlement/settlement-eligibility-v2';
+import {
+  happycallYmdSeoul,
+  SETTLEMENT_VALID_HAPPYCALL_RESULTS,
+} from '@/lib/settlement/settlement-eligibility-v2';
 import { hasValidInvoiceNo } from '@/lib/utils/invoice-no';
 
 /** 리더 승격/유지 판정에 쓰는 '가입' 계약만 (status === 가입, 귀속된 담당자 기준) */
@@ -315,7 +318,8 @@ export function explainPromotionAccumulationExclusion(row: {
     return { eligible: true, exclusion_reason: null };
   }
   if (status === '준비' || status === '대기') {
-    if (String(row.happycall_result ?? '').trim() !== '성공') {
+    const hc = String(row.happycall_result ?? '').trim();
+    if (!SETTLEMENT_VALID_HAPPYCALL_RESULTS.has(hc)) {
       return { eligible: false, exclusion_reason: 'HAPPYCALL_NOT_SUCCESS' };
     }
     if (!hasValidInvoiceNo(row.invoice_no)) {
