@@ -10,7 +10,7 @@
  *   1. fetchContractList(page) → data.listHtml
  *   2. parseContractListHtml(listHtml) → ParsedListItem[]
  *   3. 각 항목:
- *      a. customer upsert (ssn_masked 기준)
+ *      a. customer upsert ((ssn_masked, phone) 기준)
  *      b. organization_member upsert (external_id 기준 or 이름 조회)
  *      c. contract upsert (contract_code 기준) — source_snapshot_json 포함
  *      d. 상세 HTML fetch → unit_count / item_name 보강 (실패 시 계속)
@@ -706,20 +706,28 @@ async function findExistingMemberForCustomer(
   }
 
   const phoneDigits = normalizePhoneDigits(customerPhone);
+  const desiredNameForPhone = stripCustomerNamePrefix(customerName);
 
-  // 3. 전화번호 정규화 동일
-  if (phoneDigits.length >= 4) {
+  // 3. 전화번호 정규화 동일 + 이름(prefix 제거) 동일
+  //    전화번호만 같고 이름이 다른 경우(가족 공용번호 등)까지 "같은 사람"으로 보면
+  //    서로 다른 직원 노드를 고객 노드로 hijack 하게 되므로 이름 일치를 반드시 요구한다.
+  //    (예: 고객 "김미옥"이 담당자 "김태화"와 전화번호가 겹쳐 김태화 노드를 덮어쓰던 버그 방지)
+  if (phoneDigits.length >= 4 && desiredNameForPhone) {
     const last4 = phoneDigits.slice(-4);
     const { data, error } = await db
       .from('organization_members')
-      .select('id, phone')
+      .select('id, name, phone')
       .not('phone', 'is', null)
       .neq('rank', '본사')
       .ilike('phone', `%${last4}%`)
       .limit(100);
     if (error) throw new Error(`organization_members lookup(phone) 실패: ${error.message}`);
-    const rows = (data ?? []) as Array<{ id: string; phone: string | null }>;
-    const hit = rows.find((r) => normalizePhoneDigits(r.phone) === phoneDigits);
+    const rows = (data ?? []) as Array<{ id: string; name: string | null; phone: string | null }>;
+    const hit = rows.find(
+      (r) =>
+        normalizePhoneDigits(r.phone) === phoneDigits &&
+        stripCustomerNamePrefix(r.name) === desiredNameForPhone,
+    );
     if (hit) return hit.id;
   }
 
@@ -782,9 +790,13 @@ async function reconcileExistingMemberForCustomer(
 
   const next: Record<string, unknown> = {};
 
+  // 이름 갱신은 "같은 사람의 [고객] prefix 정리" 또는 "빈 이름 채우기"에만 허용한다.
+  // 서로 다른 이름으로 덮어쓰면(예: 김태화 → 김미옥) 실제 직원 노드를 hijack 하게 되므로 금지.
   const desiredName = stripCustomerNamePrefix(customer.customerName);
   const curName = String(curRow.name ?? '');
-  if (desiredName && curName !== desiredName) {
+  const curNameStripped = stripCustomerNamePrefix(curName);
+  const curNameEmpty = curName.trim() === '';
+  if (desiredName && curName !== desiredName && (curNameEmpty || curNameStripped === desiredName)) {
     next.name = desiredName;
   }
 
@@ -835,7 +847,9 @@ async function upsertCustomer(
 ): Promise<string> {
   const { data, error } = await db
     .from('customers')
-    .upsert(customerData, { onConflict: 'ssn_masked' })
+    // 중복 판별 키: (ssn_masked, phone). ssn_masked(생일+성별자리)만으로는
+    // 생일이 같은 다른 사람이 한 customer 로 병합되므로 phone 을 함께 사용한다.
+    .upsert(customerData, { onConflict: 'ssn_masked,phone' })
     .select('id')
     .single();
   if (error) throw new Error(`customers upsert 실패: ${error.message}`);

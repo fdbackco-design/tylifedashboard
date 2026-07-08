@@ -46,7 +46,7 @@ export type AdminOrgDisplayContext = {
   hqIdForTree: string | null;
   remapMemberId: (id: string) => string;
   resolveContractSalesMemberId: (c: ContractSalesRemapInput) => string;
-  remapCustomerMemberId: (customerId: string) => string;
+  remapCustomerMemberId: (customerId: string, expectedName?: string | null) => string;
   salesMemberDisplayName: (salesMemberId: string | null | undefined) => string;
 };
 

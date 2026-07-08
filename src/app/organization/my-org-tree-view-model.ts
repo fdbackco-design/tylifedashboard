@@ -552,7 +552,10 @@ export async function buildMyOrganizationTreeViewModel(
       if (!contractsByMember[key]) contractsByMember[key] = [];
       contractsByMember[key].push(item);
 
-      const customerKeyRaw = remapCustomerMemberId((c as any).customer_id as string);
+      const customerKeyRaw = remapCustomerMemberId(
+        (c as any).customer_id as string,
+        (c as any).customers?.name ?? '',
+      );
       const customerKey = customerKeyRaw && subtreeIdSet.has(customerKeyRaw) ? customerKeyRaw : '';
       if (customerKey && customerKey !== key) {
         if (!contractsByMember[customerKey]) contractsByMember[customerKey] = [];

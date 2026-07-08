@@ -33,12 +33,26 @@ export function buildOrgContractSalesRemap(
   resolveContractSalesMemberId: (c: ContractSalesRemapInput) => string;
   /** 내 조직도 등: 귀속 id가 서브트리 밖(HQ)이면 가입 인정+고객 매핑으로 서브트리 내 id를 한 번 더 시도 */
   resolveContractOriginForSubtree: (c: ContractSalesRemapInput, subtreeMemberIds: Set<string>) => string;
-  remapCustomerMemberId: (customerId: string) => string;
+  remapCustomerMemberId: (customerId: string, expectedName?: string | null) => string;
   hqIds: Set<string>;
   membersFiltered: OrgMemberForContractRemap[];
 } {
   const toPhoneDigits = (v: string | null | undefined) => (v ?? '').replace(/\D/g, '');
   const normName = (v: string | null | undefined) => (v ?? '').replace(/^\[고객\]\s*/, '').trim();
+
+  // 노드 id → 정규화 이름 (자기구매 귀속 시 고객명/노드명 일치 검증용)
+  const normNameById = new Map<string, string>();
+  for (const m of membersRaw) normNameById.set(m.id, normName(m.name));
+
+  // customer_id 가 서로 다른 사람에게 공유될 수 있으므로(예: 주민번호 마스킹=생년월일 충돌),
+  // "고객 노드 자기구매 귀속"은 계약 고객명이 대상 노드명과 일치할 때만 적용한다.
+  const customerNameMatches = (memberId: string, expectedName: string | null | undefined): boolean => {
+    const expected = normName(expectedName);
+    if (!expected) return true; // 고객명이 없으면(구버전 호출) 기존 동작 유지
+    const actual = normNameById.get(memberId) ?? '';
+    if (!actual) return true;
+    return expected === actual;
+  };
 
   const employeesByKey = new Map<string, string>();
   const customerMergeTo = new Map<string, string>();
@@ -128,7 +142,12 @@ export function buildOrgContractSalesRemap(
 
   const resolveContractSalesMemberId = (c: ContractSalesRemapInput): string => {
     const customerMemberId = customerMemberIdByCustomerId.get(c.customer_id) ?? null;
-    if (customerMemberId) return remapMemberId(customerMemberId);
+    if (customerMemberId) {
+      const merged = remapMemberId(customerMemberId);
+      // 공유 customer_id 방어: 고객명이 대상 노드명과 일치할 때만 자기구매 귀속.
+      if (customerNameMatches(merged, c.customer_name)) return merged;
+      // 불일치면 아래 일반 담당자 귀속 로직으로 진행(예: 김미옥 계약 → 담당자 한진호).
+    }
 
     const joinEligible = isContractJoinCompleted({
       status: c.status,
@@ -170,8 +189,13 @@ export function buildOrgContractSalesRemap(
     return subtreeMemberIds.has(merged) ? merged : primary;
   };
 
-  const remapCustomerMemberId = (customerId: string) =>
-    remapMemberId(customerMemberIdByCustomerId.get(customerId) ?? '');
+  const remapCustomerMemberId = (customerId: string, expectedName?: string | null): string => {
+    const merged = remapMemberId(customerMemberIdByCustomerId.get(customerId) ?? '');
+    if (!merged) return '';
+    // 공유 customer_id 방어: 고객명이 지정되면 노드명과 일치할 때만 매핑을 인정.
+    if (expectedName !== undefined && !customerNameMatches(merged, expectedName)) return '';
+    return merged;
+  };
 
   return {
     remapMemberId,
