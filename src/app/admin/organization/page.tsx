@@ -15,6 +15,7 @@ import {
   buildAdminOrgDisplayContext,
   type AdminOrgRawContractRow,
 } from '@/lib/organization/admin-org-display-context';
+import { isParentOverrideActiveForYearMonth } from '@/lib/settlement/pre-issued-code-special';
 import YearMonthSelector from '@/components/YearMonthSelector';
 import {
   flattenOrgTreeNodes,
@@ -108,6 +109,33 @@ export default async function OrganizationPage({
     db.rpc('get_organization_kpis', { p_start_date: start_date, p_end_date: end_date }),
   ]);
 
+  // 코드 선발급자: 월말 기준 활성 설정은 해당 월 조직도에도 동일하게 반영한다.
+  const preIssuedRes = await db
+    .from('pre_issued_code_member_settings')
+    .select('member_id,parent_leader_member_id,effective_from,effective_to,status')
+    .limit(5000);
+  const parentOverrideByChildId = new Map<string, string | null>();
+  if (!preIssuedRes.error) {
+    for (const s of (preIssuedRes.data ?? []) as any[]) {
+      const st = String(s.status ?? 'active');
+      const setting = {
+        id: 'n/a',
+        member_id: String(s.member_id ?? ''),
+        parent_leader_member_id: String(s.parent_leader_member_id ?? ''),
+        reason: '',
+        special_unit_price: 0,
+        special_unit_limit: 0,
+        effective_from: String(s.effective_from ?? '').slice(0, 10),
+        effective_to: s.effective_to ? String(s.effective_to).slice(0, 10) : null,
+        status: st as any,
+        note: null,
+      };
+      if (!setting.member_id || !setting.parent_leader_member_id) continue;
+      if (!isParentOverrideActiveForYearMonth(setting as any, label_year_month)) continue;
+      parentOverrideByChildId.set(setting.member_id, setting.parent_leader_member_id);
+    }
+  }
+
   // 안성준은 TY Life 시스템상 영업사원이지만 실제로는 본사(최상위)로 취급
   const membersRaw = ((membersRes.data ?? []) as unknown as OrganizationMember[]).map((m) =>
     m.name === '안성준' ? { ...m, rank: '본사' as const } : m,
@@ -138,6 +166,7 @@ export default async function OrganizationPage({
     membersRaw,
     edgesRaw,
     rawContractRows,
+    parentOverrideByChildId,
   });
 
   const contractsByMember: Record<string, ContractItem[]> = {};

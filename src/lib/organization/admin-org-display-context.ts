@@ -54,12 +54,14 @@ export function buildAdminOrgDisplayContext(params: {
   membersRaw: OrganizationMember[];
   edgesRaw: { parent_id: string | null; child_id: string }[];
   rawContractRows: AdminOrgRawContractRow[];
+  parentOverrideByChildId?: ReadonlyMap<string, string | null>;
 }): AdminOrgDisplayContext {
-  const { membersRaw, edgesRaw, rawContractRows } = params;
+  const { membersRaw, edgesRaw, rawContractRows, parentOverrideByChildId } = params;
 
   const orgStructural = buildOrgStructuralTreeContext({
     membersRaw: membersRaw as unknown as OrgMemberForContractRemap[],
     edgesRaw,
+    parentOverrideByChildId,
   });
   const {
     treeRows: treeRowsBase,
