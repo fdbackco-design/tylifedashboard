@@ -37,7 +37,7 @@ function unitPrice(productType, happyCallAt, itemName, snapshotProduct) {
   }
   for (const text of texts) {
     if (text.includes('올라이프케어')) return PRICES.olife;
-    if (text.includes('일반가전')) return PRICES.appliance;
+    if (text.includes('스페셜라이프케어')) return PRICES.appliance;
   }
   return ymd && ymd >= TY_INCREASE ? PRICES.tyFrom : PRICES.tyBefore;
 }
@@ -54,7 +54,7 @@ function assertEq(label, actual, expected) {
 assertEq('TY 2026-06-25', revenue('TY갤럭시케어', '2026-06-25', 2), 1_430_000);
 assertEq('TY 2026-06-26', revenue('TY갤럭시케어', '2026-06-26', 1), 770_000);
 assertEq('올라이프케어', revenue('올라이프케어', '2026-06-26', 3), 1_815_000);
-assertEq('일반가전', unitPrice('일반가전', '2026-01-01'), 550_000);
+assertEq('스페셜라이프케어', unitPrice('스페셜라이프케어', '2026-01-01'), 550_000);
 assertEq('갤럭시케어 라이트', unitPrice('갤럭시케어 라이트', '2026-01-01'), 500_000);
 assertEq('TY갤럭시케어_무', revenue('무', '2026-06-26', 1, null, 'TY갤럭시케어_무'), 770_000);
 assertEq('TY갤럭시케어_ALL', revenue('TY갤럭시케어', '2026-06-26', 1, null, 'TY갤럭시케어_ALL'), 770_000);

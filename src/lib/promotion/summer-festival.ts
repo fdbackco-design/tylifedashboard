@@ -147,7 +147,7 @@ export function summerFestivalProductKind(c: Pick<
     item_name: c.item_name ?? null,
     source_snapshot_json: c.source_snapshot_json ?? null,
   });
-  if (kind === '일반가전') return 'general_appliance';
+  if (kind === '스페셜라이프케어') return 'general_appliance';
   if (kind === 'TY갤럭시케어' || kind === '올라이프케어' || kind === '갤럭시케어 라이트') {
     return 'care_or_light';
   }
@@ -160,7 +160,7 @@ export function summerFestivalBaseWeight(c: Pick<
 >): number {
   const pk = summerFestivalProductKind(c);
   if (pk === 'general_appliance') return 0.5;
-  // 기본 규칙: 일반가전 외(갤럭시케어/올라이프/라이트 등) = 1.0
+  // 기본 규칙: 스페셜라이프케어 외(갤럭시케어/올라이프/라이트 등) = 1.0
   return 1.0;
 }
 
@@ -215,7 +215,7 @@ export function buildSummerFestivalContractAuditRow(
     .join(' / ');
   const standardCategory =
     summerFestivalProductKind(c) === 'general_appliance'
-      ? '일반가전'
+      ? '스페셜라이프케어'
       : summerFestivalProductKind(c) === 'care_or_light'
         ? '케어·라이트'
         : '검토 필요';

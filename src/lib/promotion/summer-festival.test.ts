@@ -23,7 +23,7 @@ function contract(params: Partial<Parameters<typeof buildSummerFestivalContractA
     happy_call_at: params.happy_call_at ?? '2026-07-10T12:00:00+09:00',
     happycall_result: params.happycall_result ?? '성공',
     invoice_no: params.invoice_no ?? 'INV-1',
-    product_type: params.product_type ?? '일반가전',
+    product_type: params.product_type ?? '스페셜라이프케어',
     item_name: params.item_name ?? null,
     source_snapshot_json: params.source_snapshot_json ?? null,
   };
@@ -131,9 +131,9 @@ describe('product weights and period multipliers', () => {
     assert.equal(r.summer_units, 10);
   });
 
-  it('일반가전 10구좌 (7/10 ×2) → min(1, 0.5×2)=1.0 → 10', () => {
+  it('스페셜라이프케어 10구좌 (7/10 ×2) → min(1, 0.5×2)=1.0 → 10', () => {
     const r = buildSummerFestivalContractAuditRow(
-      contract({ id: 'c1', unit_count: 10, product_type: '일반가전', happy_call_at: '2026-07-10T12:00:00+09:00' }),
+      contract({ id: 'c1', unit_count: 10, product_type: '스페셜라이프케어', happy_call_at: '2026-07-10T12:00:00+09:00' }),
     );
     assert.equal(r.eligible, true);
     assert.equal(r.base_weight, 0.5);
@@ -142,9 +142,9 @@ describe('product weights and period multipliers', () => {
     assert.equal(r.summer_units, 10);
   });
 
-  it('일반가전 10구좌 (8/05 ×1) → min(1, 0.5×1)=0.5 → 5', () => {
+  it('스페셜라이프케어 10구좌 (8/05 ×1) → min(1, 0.5×1)=0.5 → 5', () => {
     const r = buildSummerFestivalContractAuditRow(
-      contract({ id: 'c1', unit_count: 10, product_type: '일반가전', happy_call_at: '2026-08-05T12:00:00+09:00' }),
+      contract({ id: 'c1', unit_count: 10, product_type: '스페셜라이프케어', happy_call_at: '2026-08-05T12:00:00+09:00' }),
     );
     assert.equal(r.eligible, true);
     assert.equal(r.base_weight, 0.5);

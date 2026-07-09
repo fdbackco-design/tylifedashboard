@@ -19,14 +19,14 @@ export const TY_GALAXY_CARE_HQ_PRICE_INCREASE_DATE = '2026-06-26';
 export const HQ_REVENUE_UNIT_PRICES = {
   TY갤럭시케어: { beforeIncrease: 715_000, fromIncrease: 770_000 },
   올라이프케어: 605_000,
-  일반가전: 550_000,
+  스페셜라이프케어: 550_000,
   '갤럭시케어 라이트': 500_000,
 } as const;
 
 export type HqProductKind =
   | 'TY갤럭시케어'
   | '올라이프케어'
-  | '일반가전'
+  | '스페셜라이프케어'
   | '갤럭시케어 라이트'
   | 'unknown_review';
 
@@ -35,7 +35,7 @@ const PRODUCT_MATCHERS: ReadonlyArray<{ kind: HqProductKind; includes: string }>
   { kind: '갤럭시케어 라이트', includes: '갤럭시케어 라이트' },
   { kind: 'TY갤럭시케어', includes: 'TY갤럭시케어' },
   { kind: '올라이프케어', includes: '올라이프케어' },
-  { kind: '일반가전', includes: '일반가전' },
+  { kind: '스페셜라이프케어', includes: '스페셜라이프케어' },
 ];
 
 export type HqProductResolveInput = {
@@ -120,7 +120,7 @@ export function getHqRevenueUnitPrice(
   }
 
   if (kind === '올라이프케어') return HQ_REVENUE_UNIT_PRICES.올라이프케어;
-  if (kind === '일반가전') return HQ_REVENUE_UNIT_PRICES.일반가전;
+  if (kind === '스페셜라이프케어') return HQ_REVENUE_UNIT_PRICES.스페셜라이프케어;
   if (kind === '갤럭시케어 라이트') return HQ_REVENUE_UNIT_PRICES['갤럭시케어 라이트'];
 
   // 미식별·레거시: 과거 단일 상품(TY갤럭시케어) 처리와 동일하게 날짜 분기 단가 적용
@@ -338,7 +338,7 @@ export function runHqRevenueSelfCheck(): { ok: boolean; failures: string[] } {
     unit_count: 3,
   }), 1_815_000);
 
-  assertEq('일반가전', getHqRevenueUnitPrice('일반가전', '2026-01-01'), 550_000);
+  assertEq('스페셜라이프케어', getHqRevenueUnitPrice('스페셜라이프케어', '2026-01-01'), 550_000);
   assertEq('갤럭시케어 라이트', getHqRevenueUnitPrice('갤럭시케어 라이트', '2026-01-01'), 500_000);
   assertKind('라이트 우선', resolveHqProductKind('갤럭시케어 라이트'), '갤럭시케어 라이트');
   assertKind('TY갤럭시케어_무', resolveHqProductKindFromContract({ product_type: '무' }), 'TY갤럭시케어');

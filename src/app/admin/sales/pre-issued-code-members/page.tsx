@@ -80,6 +80,27 @@ export default async function PreIssuedCodeMembersPage({ searchParams }: PagePro
     return <div className="p-6 text-sm text-red-600">예약 설정 조회 실패: {pendingSettingsRes.error.message}</div>;
   }
 
+  // 예약 목록 표시는 승격 여부와 무관하게 user_profiles 정보가 필요하다.
+  // (승격되면 member_id가 채워져 pendingProfilesRes(member_id IS NULL)에서 빠지므로 별도 조회)
+  const pendingUserProfileIds = Array.from(
+    new Set(((pendingSettingsRes.data ?? []) as any[]).map((r) => String(r.user_profile_id ?? '').trim()).filter(Boolean)),
+  );
+  const pendingProfilesAllRes =
+    pendingUserProfileIds.length > 0
+      ? await db
+          .from('user_profiles')
+          .select('id, member_id, login_code, display_name, phone, mapping_status, pre_issued_name, pre_issued_phone, created_at')
+          .in('id', pendingUserProfileIds)
+          .limit(5000)
+      : { data: [], error: null };
+  if ((pendingProfilesAllRes as any).error) {
+    return (
+      <div className="p-6 text-sm text-red-600">
+        예약 계정 정보 조회 실패: {(pendingProfilesAllRes as any).error.message}
+      </div>
+    );
+  }
+
   const memberById = new Map<string, any>();
   for (const m of (membersRes.data ?? []) as any[]) memberById.set(String(m.id), m);
 
@@ -221,6 +242,7 @@ export default async function PreIssuedCodeMembersPage({ searchParams }: PagePro
         initialSettings={rows as any[]}
         pendingAccounts={(pendingProfilesRes.data ?? []) as any[]}
         pendingSettings={(pendingSettingsRes.data ?? []) as any[]}
+        pendingProfilesAll={((pendingProfilesAllRes as any).data ?? []) as any[]}
       />
 
     </div>

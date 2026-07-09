@@ -281,6 +281,7 @@ export default function PreIssuedCodeMembersClient(props: {
   initialSettings: SettingRow[];
   pendingAccounts: PendingAccountRow[];
   pendingSettings: any[];
+  pendingProfilesAll?: any[];
 }) {
   const members = useMemo(
     () =>
@@ -702,7 +703,8 @@ export default function PreIssuedCodeMembersClient(props: {
           <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
             <div className="text-xs font-semibold text-gray-800">예약 등록(미매핑 계정) 목록</div>
             <div className="text-[11px] text-gray-500 mt-1">
-              여기의 항목은 <span className="font-semibold">정산/오버라이드에 적용되지 않으며</span>, member_id 매핑 시 자동 승격됩니다.
+              미매핑 계정은 <span className="font-semibold">정산/오버라이드에 적용되지 않으며</span>, member_id 매핑 시 자동 승격됩니다.{' '}
+              <span className="font-semibold">승격완료</span> 건은 이미 본 설정에 반영된 기록입니다.
             </div>
           </div>
           <div className="px-4 py-3 overflow-x-auto">
@@ -718,13 +720,19 @@ export default function PreIssuedCodeMembersClient(props: {
               </thead>
               <tbody className="text-gray-800/90">
                 {(props.pendingSettings ?? []).slice(0, 30).map((r: any) => {
+                  const uid = String(r.user_profile_id ?? '');
                   const p =
-                    (props.pendingAccounts ?? []).find((x) => x.id === String(r.user_profile_id)) ??
+                    (props.pendingProfilesAll ?? []).find((x) => String(x.id) === uid) ??
+                    (props.pendingAccounts ?? []).find((x) => x.id === uid) ??
                     null;
                   const parent = members.find((m) => m.id === String(r.desired_parent_leader_member_id)) ?? null;
                   const name = extractName(p?.pre_issued_name ?? p?.display_name ?? '미매핑 계정');
                   const login = p?.login_code ?? '';
                   const phone = maskPhone(p?.pre_issued_phone ?? p?.phone);
+                  const promotedMember =
+                    r.promoted_member_id
+                      ? members.find((m) => m.id === String(r.promoted_member_id)) ?? null
+                      : null;
                   return (
                     <tr key={String(r.id)} className="border-t border-gray-100">
                       <td className="py-2 pr-3 whitespace-nowrap">
@@ -733,6 +741,11 @@ export default function PreIssuedCodeMembersClient(props: {
                           {login ? `${login} · ` : ''}
                           {phone}
                         </div>
+                        {r.promoted && promotedMember && (
+                          <div className="mt-0.5 text-[10px] text-emerald-700">
+                            승격됨: {promotedMember.name} ({promotedMember.rank})
+                          </div>
+                        )}
                       </td>
                       <td className="py-2 pr-3 whitespace-nowrap">
                         {parent ? (
@@ -754,7 +767,7 @@ export default function PreIssuedCodeMembersClient(props: {
                       <td className="py-2 pr-3 whitespace-nowrap">{String(r.desired_status ?? '')}</td>
                       <td className="py-2 pr-3 whitespace-nowrap">
                         {r.promoted ? (
-                          <span className="text-emerald-700 font-semibold">승격완료</span>
+                          <span className="text-emerald-700 font-semibold">승격완료(적용중)</span>
                         ) : (
                           <button
                             type="button"

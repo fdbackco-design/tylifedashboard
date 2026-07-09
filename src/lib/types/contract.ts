@@ -13,7 +13,7 @@ export type ContractStatus =
 export type ProductType =
   | 'TY갤럭시케어'
   | '올라이프케어'
-  | '일반가전'
+  | '스페셜라이프케어'
   | '갤럭시케어 라이트'
   | '무'
   | '일반'

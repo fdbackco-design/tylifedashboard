@@ -230,7 +230,7 @@ export default async function SummerFestivalPage({ searchParams }: PageProps) {
                     '썸머 인정구좌',
                     '참가 상태',
                     '잔여 필요 구좌',
-                    '일반가전 인정',
+                    '스페셜라이프케어 인정',
                     '케어·라이트 인정',
                     '더블업 기간 계약 수',
                   ].map((h) => (
