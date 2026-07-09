@@ -64,6 +64,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
       sequence_no,
       contract_code,
       join_date,
+      product_type,
       item_name,
       rental_request_no,
       invoice_no,
@@ -123,6 +124,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
     sequence_no: number | null;
     join_date: string;
     affiliation_name: string | null;
+    product_type: string | null;
     item_name: string | null;
     unit_count: number;
     join_method: string;
@@ -178,6 +180,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
           affiliation_name: ((c as { affiliation_name?: string | null }).affiliation_name ?? null) as
             | string
             | null,
+          product_type: ((c as { product_type?: string | null }).product_type ?? null) as string | null,
           item_name: ((c as { item_name?: string | null }).item_name ?? null) as string | null,
           rental_request_no: ((c as { rental_request_no?: string | null }).rental_request_no ?? null) as
             | string
@@ -201,6 +204,9 @@ export default async function ContractsPage({ searchParams }: PageProps) {
       existing.unit_count += ((c as { unit_count?: number }).unit_count ?? 0) as number;
       if (!existing.item_name) {
         existing.item_name = ((c as { item_name?: string | null }).item_name ?? null) as string | null;
+      }
+      if (!existing.product_type) {
+        existing.product_type = ((c as { product_type?: string | null }).product_type ?? null) as string | null;
       }
       if (!existing.rental_request_no) {
         existing.rental_request_no = ((c as { rental_request_no?: string | null }).rental_request_no ?? null) as
@@ -313,6 +319,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
                   '가입일',
                   '고객명',
                   '담당사원',
+                  'product_type',
                   '물품명',
                   '구좌수',
                   '가입방법',
@@ -330,7 +337,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
             <tbody className="divide-y divide-gray-100">
               {aggregated.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-gray-400">
+                  <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
                     계약 데이터가 없습니다.
                   </td>
                 </tr>
@@ -376,6 +383,9 @@ export default async function ContractsPage({ searchParams }: PageProps) {
                       ) : (
                         (member?.name ?? '-')
                       )}
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                      {c.product_type ?? '-'}
                     </td>
                     <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
                       {c.item_name ?? '-'}
