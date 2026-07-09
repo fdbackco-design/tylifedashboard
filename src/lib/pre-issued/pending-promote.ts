@@ -125,7 +125,8 @@ export async function promotePreIssuedPendingSettingIfPossible(params: {
     status: String((pending as any).desired_status ?? 'active') as Status,
     note: (pending as any).note ?? null,
     updated_at: new Date().toISOString(),
-    updated_by: changedBy,
+    // UUID 컬럼에는 UUID만 저장 (빈 문자열/임의 문자열 금지)
+    updated_by: changedByUuid,
   } as any;
 
   const { data: after, error: sErr } = await db
