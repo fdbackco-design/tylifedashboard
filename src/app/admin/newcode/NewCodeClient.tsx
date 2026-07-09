@@ -129,14 +129,23 @@ export default function NewCodeClient() {
   };
 
   const eligibleIds = useMemo(
-    () => items.filter((i) => !i.synced_to_sheet).map((i) => i.id),
+    () => items.filter((i) => i.status === '신청중' && !i.synced_to_sheet).map((i) => i.id),
     [items],
   );
   const selectedCount = eligibleIds.filter((id) => checked[id]).length;
 
   const toggleAllEligible = (on: boolean) => {
+    if (!on) {
+      const next: Record<string, boolean> = { ...checked };
+      for (const id of eligibleIds) next[id] = false;
+      setChecked(next);
+      return;
+    }
+    // 동기화 가능 = 신청중 + 미동기화만 선택, 반려 등 나머지는 해제
     const next: Record<string, boolean> = { ...checked };
-    for (const id of eligibleIds) next[id] = on;
+    for (const it of items) {
+      next[it.id] = it.status === '신청중' && !it.synced_to_sheet;
+    }
     setChecked(next);
   };
 
@@ -418,7 +427,7 @@ export default function NewCodeClient() {
                       <td className="whitespace-nowrap px-2 py-2 align-top">
                         <input
                           type="checkbox"
-                          disabled={it.synced_to_sheet}
+                          disabled={it.synced_to_sheet || it.status !== '신청중'}
                           checked={!!checked[it.id]}
                           onChange={(e) => toggle(it.id, e.target.checked)}
                         />
