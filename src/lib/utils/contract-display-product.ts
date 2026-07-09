@@ -15,7 +15,17 @@ export function getContractDisplayProductName(c: ContractDisplayProductInput): s
     return 'TY갤럭시케어';
   }
 
-  const texts = [c.product_type, c.source_snapshot_json?.['상품명']]
+  const snapshotProduct = String(c.source_snapshot_json?.['상품명'] ?? '').trim();
+  if (snapshotProduct) {
+    // 화면에는 스크래핑 원본 '상품명'을 우선 노출한다 (정규화/레거시 매핑보다 신뢰도가 높음).
+    // 단, 갤럭시케어 계열의 _무/_ALL 은 화면 표기를 TY갤럭시케어로 통일한다.
+    if (snapshotProduct.includes('TY갤럭시케어_무') || snapshotProduct.includes('TY갤럭시케어_ALL')) {
+      return 'TY갤럭시케어';
+    }
+    return snapshotProduct;
+  }
+
+  const texts = [c.product_type]
     .map((t) => String(t ?? '').trim())
     .filter(Boolean);
 

@@ -16,7 +16,13 @@ export type ProductType =
   | '일반가전'
   | '갤럭시케어 라이트'
   | '무'
-  | '일반';
+  | '일반'
+  /**
+   * TY 원본 '상품명'을 그대로 저장하는 케이스를 허용한다.
+   * (과거 normalizeProductType에서 'TY' 포함만으로 TY갤럭시케어로 강제 매핑되어 오염된 사례가 있어,
+   *  정규화되지 않은 원본 문자열도 DB에 보존한다.)
+   */
+  | (string & {});
 
 export type WatchFitType = '갤럭시워치' | '갤럭시핏' | '해당없음';
 

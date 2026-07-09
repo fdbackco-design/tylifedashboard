@@ -57,9 +57,11 @@ export function normalizeProductType(raw: string): ProductType {
   if (text.includes('올라이프케어')) return '올라이프케어';
   if (text.includes('일반가전')) return '일반가전';
   if (text === '무') return '무';
-  // 레거시: 갤럭시케어/TY 단독 표기
-  if (text.includes('갤럭시케어') || text.includes('TY')) return 'TY갤럭시케어';
-  return '일반';
+  // 레거시: '갤럭시케어' 단독 표기
+  if (text.includes('갤럭시케어')) return 'TY갤럭시케어';
+
+  // 그 외: 원본 상품명을 그대로 보존 (빈 값이면 '일반')
+  return (text || '일반') as ProductType;
 }
 
 export function normalizeWatchFit(raw: string): WatchFitType {
