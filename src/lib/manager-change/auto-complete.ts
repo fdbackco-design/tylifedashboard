@@ -1,7 +1,12 @@
 /**
  * TY 동기화 시점에 "접수완료(RECEIVED)" 상태의 담당자 변경 신청이
- * 실제 계약 담당자 변경(contracts.sales_member_id)으로 반영되었는지 확인하고,
+ * 실제 계약 담당자 변경으로 반영되었는지 확인하고,
  * 반영된 경우 자동으로 COMPLETED 처리 + 영업자 푸시 알림을 보낸다.
+ *
+ * 완료 판정(하나라도 일치하면 COMPLETED):
+ * 1) 신청의 contract_id 또는 contract_codes 그룹 중 아무 계약이라도
+ * 2) TY 원본 담당자(source_snapshot_json.담당자) 또는 sales_member 이름이
+ * 3) after_manager_name(슬래시 앞)과 정규화 후 일치
  */
 
 import 'server-only';
@@ -9,7 +14,31 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { notifyRequesterOfManagerChangeCompleted } from '@/lib/manager-change/notify';
 
 function normalizeName(s: string | null | undefined): string {
-  return String(s ?? '').replace(/^\[고객\]\s*/, '').trim();
+  return String(s ?? '')
+    .normalize('NFC')
+    .replace(/^\[고객\]\s*/u, '')
+    .replace(/\s+/g, '')
+    .trim();
+}
+
+function afterManagerNameOnly(raw: string | null | undefined): string {
+  // "이름 / 전화" 형태로 들어간 경우 슬래시 앞만 사용
+  return normalizeName(String(raw ?? '').split('/')[0] ?? '');
+}
+
+function parseContractCodes(raw: string | null | undefined): string[] {
+  return String(raw ?? '')
+    .split('/')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function snapshotManagerName(sourceSnapshot: unknown): string {
+  if (!sourceSnapshot || typeof sourceSnapshot !== 'object') return '';
+  const snap = sourceSnapshot as Record<string, unknown>;
+  return normalizeName(
+    (snap['담당자'] ?? snap['담당 사원'] ?? null) as string | null,
+  );
 }
 
 export async function autoCompleteReceivedManagerChangeRequests(
@@ -17,14 +46,16 @@ export async function autoCompleteReceivedManagerChangeRequests(
 ): Promise<{ scanned: number; completed: number; notified: number; skipped: number }> {
   const { data: rows, error } = await db
     .from('manager_change_requests')
-    .select('id, contract_id, after_manager_name, status')
+    .select('id, contract_id, contract_codes, after_manager_name, status')
     .eq('status', 'RECEIVED')
-    .limit(500);
+    .order('created_at', { ascending: true })
+    .limit(2000);
   if (error) throw new Error(error.message);
 
   const list = (rows ?? []) as Array<{
     id: string;
     contract_id: string | null;
+    contract_codes: string | null;
     after_manager_name: string | null;
     status: string | null;
   }>;
@@ -36,46 +67,91 @@ export async function autoCompleteReceivedManagerChangeRequests(
 
   for (const r of list) {
     const requestId = String(r.id ?? '').trim();
+    if (!requestId) {
+      skipped++;
+      continue;
+    }
+
+    const afterName = afterManagerNameOnly(r.after_manager_name);
+    if (!afterName) {
+      skipped++;
+      continue;
+    }
+
+    const contractCodes = parseContractCodes(r.contract_codes);
     const contractId = String(r.contract_id ?? '').trim();
-    if (!requestId || !contractId) {
+
+    // 신청에 묶인 계약 전체를 후보로 본다 (대표 contract_id + codes)
+    let contractRows: Array<{
+      id: string;
+      sales_member_id: string | null;
+      source_snapshot_json: unknown;
+    }> = [];
+
+    if (contractCodes.length > 0) {
+      const { data, error: cErr } = await db
+        .from('contracts')
+        .select('id, sales_member_id, source_snapshot_json')
+        .in('contract_code', contractCodes);
+      if (cErr) {
+        skipped++;
+        continue;
+      }
+      contractRows = (data ?? []) as typeof contractRows;
+    }
+
+    if (contractId) {
+      const already = contractRows.some((c) => c.id === contractId);
+      if (!already) {
+        const { data: cRow, error: cErr } = await db
+          .from('contracts')
+          .select('id, sales_member_id, source_snapshot_json')
+          .eq('id', contractId)
+          .maybeSingle();
+        if (!cErr && cRow) {
+          contractRows.push(cRow as (typeof contractRows)[number]);
+        }
+      }
+    }
+
+    if (contractRows.length === 0) {
       skipped++;
       continue;
     }
 
-    const afterName = normalizeName(r.after_manager_name).split('/')[0]?.trim() ?? '';
+    const salesMemberIds = [
+      ...new Set(
+        contractRows
+          .map((c) => String(c.sales_member_id ?? '').trim())
+          .filter(Boolean),
+      ),
+    ];
 
-    const { data: cRow, error: cErr } = await db
-      .from('contracts')
-      .select('id, sales_member_id')
-      .eq('id', contractId)
-      .maybeSingle();
-    if (cErr || !cRow) {
-      skipped++;
-      continue;
+    const nameByMemberId = new Map<string, string>();
+    if (salesMemberIds.length > 0) {
+      const { data: members, error: mErr } = await db
+        .from('organization_members')
+        .select('id, name')
+        .in('id', salesMemberIds);
+      if (mErr) {
+        skipped++;
+        continue;
+      }
+      for (const m of (members ?? []) as Array<{ id: string; name: string | null }>) {
+        nameByMemberId.set(String(m.id), normalizeName(m.name));
+      }
     }
 
-    const salesMemberId = String((cRow as any)?.sales_member_id ?? '').trim();
-    if (!salesMemberId) {
-      skipped++;
-      continue;
-    }
+    const matched = contractRows.some((c) => {
+      const snapName = snapshotManagerName(c.source_snapshot_json);
+      if (snapName && snapName === afterName) return true;
+      const mid = String(c.sales_member_id ?? '').trim();
+      if (!mid) return false;
+      const memberName = nameByMemberId.get(mid) ?? '';
+      return memberName !== '' && memberName === afterName;
+    });
 
-    const { data: mRow, error: mErr } = await db
-      .from('organization_members')
-      .select('name, phone')
-      .eq('id', salesMemberId)
-      .maybeSingle();
-    if (mErr || !mRow) {
-      skipped++;
-      continue;
-    }
-
-    const currentName = normalizeName((mRow as any)?.name ?? null);
-
-    // 확인 규칙:
-    // - 계약의 현재 담당자명이 신청서의 변경 후 담당자명(슬래시 앞)과 일치하면 완료로 본다.
-    // - 연락처는 비교하지 않는다(사용자 요구사항).
-    if (!(afterName !== '' && currentName === afterName)) {
+    if (!matched) {
       skipped++;
       continue;
     }
@@ -101,4 +177,3 @@ export async function autoCompleteReceivedManagerChangeRequests(
 
   return { scanned: list.length, completed, notified, skipped };
 }
-
