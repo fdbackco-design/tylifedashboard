@@ -15,6 +15,10 @@ import { buildChildrenByParentFromRows } from '@/lib/settlement/settlement-org-t
 import { stripOrgTreeNodesForDisplay } from '@/lib/organization/org-tree-display';
 import { buildOrgContractSalesRemap } from '@/lib/organization/org-contract-sales-remap';
 import { stripCustomerMemberNamePrefix } from '@/lib/dashboard/display-format';
+import {
+  isParentOverrideActiveForYearMonth,
+  type PreIssuedCodeMemberSetting,
+} from '@/lib/settlement/pre-issued-code-special';
 
 type OrgMemberRow = {
   id: string;
@@ -182,6 +186,38 @@ export async function buildMyOrganizationTreeViewModel(
       const parent_id =
         e.parent_id && memberIdSetFiltered.has(e.parent_id) ? e.parent_id : null;
       edgeByChild.set(child_id, parent_id);
+    }
+
+    // 코드 선발급자: 월말 기준 활성 상위리더 예외 연결을 /admin/organization 과 동일하게 반영
+    const { data: preIssuedRows } = await adminDb
+      .from('pre_issued_code_member_settings')
+      .select(
+        'id,member_id,parent_leader_member_id,reason,special_unit_price,special_unit_limit,effective_from,effective_to,status,note,updated_at',
+      )
+      .limit(5000);
+    for (const r of (preIssuedRows ?? []) as any[]) {
+      if (!r?.member_id || !r?.parent_leader_member_id) continue;
+      const setting: PreIssuedCodeMemberSetting = {
+        id: String(r.id),
+        member_id: String(r.member_id),
+        parent_leader_member_id: String(r.parent_leader_member_id),
+        reason: String(r.reason ?? ''),
+        special_unit_price: Number(r.special_unit_price ?? 100000),
+        special_unit_limit: Number(r.special_unit_limit ?? 10),
+        effective_from: String(r.effective_from ?? '').slice(0, 10),
+        effective_to: r.effective_to != null ? String(r.effective_to).slice(0, 10) : null,
+        status: String(r.status ?? 'active') as PreIssuedCodeMemberSetting['status'],
+        note: (r.note ?? null) as string | null,
+        updated_at: (r.updated_at ?? null) as string | null,
+      };
+      if (!isParentOverrideActiveForYearMonth(setting, label_year_month)) continue;
+      const childId = remapMemberId(setting.member_id);
+      if (!memberIdSetFiltered.has(childId)) continue;
+      const parentId = remapMemberId(setting.parent_leader_member_id);
+      edgeByChild.set(
+        childId,
+        parentId && memberIdSetFiltered.has(parentId) ? parentId : parentId || null,
+      );
     }
 
     const treeRows = treeRowsBase.map((r) => ({
@@ -570,9 +606,16 @@ export async function buildMyOrganizationTreeViewModel(
     }, 0);
 
     // edges/subtree는 calculateOrgNodeMetrics에 넣을 때도 서브트리만 유지
-    const subtreeEdges = edgesRemapped.filter(
-      (e) => e.child_id && subtreeIdSet.has(e.child_id) && e.parent_id && subtreeIdSet.has(e.parent_id),
-    );
+    // (코드 선발급 parent 오버라이드가 반영된 edgeByChild 기준)
+    const subtreeEdges = [...edgeByChild.entries()]
+      .map(([child_id, parent_id]) => ({ parent_id, child_id }))
+      .filter(
+        (e) =>
+          e.child_id &&
+          subtreeIdSet.has(e.child_id) &&
+          e.parent_id &&
+          subtreeIdSet.has(e.parent_id),
+      );
     const orgMetricsById = calculateOrgNodeMetrics({
       roots: treeForDisplay as any[],
       members: subtreeMembers.map((m) => ({
