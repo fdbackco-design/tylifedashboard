@@ -5,10 +5,9 @@
  * 로직(`calculateMonthlySettlement`)을 서버에서 직접 호출한다.
  *
  * 자동으로 처리하는 정산월:
- * - 오늘(서울) 기준 이번 정산월
- * - 그 한 달 전 정산월
+ * - 오늘(서울) 기준 이번 정산월 (`/admin/settlement` 기본 기준월과 동일)
  *
- * 예: 오늘(서울 시각)이 2026-06-... 이면 `2026-06`, `2026-05` 두 월을 재계산.
+ * 예: 오늘(서울 시각)이 2026-06-... 이면 `2026-06` 만 재계산.
  *
  * 인증: `Authorization: Bearer …` 가 다음과 일치해야 한다.
  * - `CRON_SECRET`이 있으면 그 값 (Vercel Cron이 자동으로 이 헤더를 붙일 때 사용)
@@ -18,8 +17,7 @@
  * - `monthly_settlements.is_finalized = true` 인 월은 자동 재계산을 건너뛴다.
  *   (수동 버튼과 동일한 정책: `/api/settlement/calculate` 의 force=false 동작과 동일)
  *
- * 스케줄: 매일 한국시간 10:10 → UTC 01:10 (`10 1 * * *`)
- *  - `tylife-sync` (KST 10:00) 완료 직후에 동작해 그 날 동기화된 신규 계약까지 반영되도록 살짝 늦춰둠.
+ * 스케줄: 10분마다 (vercel.json: `[asterisk]/10 [asterisk] [asterisk] [asterisk] [asterisk]`) — tylife-sync 와 동일 주기.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -29,18 +27,8 @@ import { getSettlementWindowSeoul } from '@/lib/settlement/settlement-window';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
-/** 두 개월 연속 재계산이 길어질 수 있으므로 sync 와 동일한 상한을 사용한다. */
+/** 재계산이 길어질 수 있으므로 sync 와 동일한 상한을 사용한다. */
 export const maxDuration = 300;
-
-function addMonthsToLabel(label: string, delta: number): string {
-  const [ys, ms] = label.split('-');
-  const y = parseInt(ys, 10);
-  const m = parseInt(ms, 10);
-  const idx = y * 12 + (m - 1) + delta;
-  const ny = Math.floor(idx / 12);
-  const nm = (idx % 12) + 1;
-  return `${String(ny).padStart(4, '0')}-${String(nm).padStart(2, '0')}`;
-}
 
 type Outcome =
   | { year_month: string; status: 'recalculated'; updated_count: number }
@@ -61,8 +49,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const db = createAdminSupabaseClient();
   const currentLabel = getSettlementWindowSeoul().label_year_month;
-  const previousLabel = addMonthsToLabel(currentLabel, -1);
-  const targets = [currentLabel, previousLabel];
+  const targets = [currentLabel];
 
   // eslint-disable-next-line no-console
   console.log('[api/cron/settlement-recalculate] invoked', {

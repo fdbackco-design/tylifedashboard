@@ -634,7 +634,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
               </p>
             )}
           </div>
-          <RecalcButton yearMonth={yearMonth} />
+          <RecalcButton yearMonth={yearMonth} todayYearMonth={todayYearMonth} />
         </div>
       </section>
 

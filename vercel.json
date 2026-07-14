@@ -10,7 +10,7 @@
     },
     {
       "path": "/api/cron/settlement-recalculate",
-      "schedule": "10 1 * * *"
+      "schedule": "*/10 * * * *"
     }
   ]
 }
