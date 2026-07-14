@@ -19,6 +19,8 @@ import { syncContractPage } from '@/lib/tylife/sync-service';
 import { getTyLifeCookie } from '@/lib/tylife/env';
 import type { SyncRun } from '@/lib/types/sync';
 import { notifyAdminsOfNewContracts } from '@/lib/push/admin-event-notify';
+import { autoCompleteReceivedManagerChangeRequests } from '@/lib/manager-change/auto-complete';
+import { runPreIssuedAccountAutoMapping } from '@/lib/account-issue/auto-mapping';
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!getTyLifeCookie()) {
@@ -60,6 +62,54 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       totals.total_errors > 0 &&
       totals.total_fetched === totals.total_errors;
 
+    // UI 페이지 분할 동기화는 runSync() 후처리를 타지 않으므로 finish 시점에 실행한다.
+    // (담당자 변경 자동완료 / 사전발급 계정 자동매핑)
+    let managerChangeAutoComplete: Awaited<
+      ReturnType<typeof autoCompleteReceivedManagerChangeRequests>
+    > | null = null;
+    if (!allFailed) {
+      try {
+        const r = await runPreIssuedAccountAutoMapping(db);
+        await db.from('sync_logs').insert({
+          run_id: body.runId,
+          level: 'info',
+          message: '사전 발급 계정 자동 매핑 완료',
+          context: {
+            scanned: r.scanned_count,
+            matched: r.matched_count,
+            manual_review: r.manual_review_count,
+            pending: r.pending_count,
+          },
+        });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        console.error('[api/sync/run] pre-issued auto mapping failed', message);
+        await db.from('sync_logs').insert({
+          run_id: body.runId,
+          level: 'warn',
+          message: `사전 발급 계정 자동 매핑 실패(동기화는 완료 처리): ${message}`,
+        });
+      }
+
+      try {
+        managerChangeAutoComplete = await autoCompleteReceivedManagerChangeRequests(db);
+        await db.from('sync_logs').insert({
+          run_id: body.runId,
+          level: 'info',
+          message: '담당자 변경 신청 자동 완료 확인',
+          context: managerChangeAutoComplete,
+        });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        console.error('[api/sync/run] manager-change auto-complete failed', message);
+        await db.from('sync_logs').insert({
+          run_id: body.runId,
+          level: 'warn',
+          message: `담당자 변경 신청 자동 완료 확인 실패(동기화는 완료 처리): ${message}`,
+        });
+      }
+    }
+
     await db
       .from('sync_runs')
       .update({
@@ -78,7 +128,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
     }
 
-    return NextResponse.json({ success: true, runId: body.runId, finished: true, adminNotify });
+    return NextResponse.json({
+      success: true,
+      runId: body.runId,
+      finished: true,
+      adminNotify,
+      managerChangeAutoComplete,
+    });
   }
 
   // ── 새 run 생성 또는 기존 run 이어서 ──────────────────

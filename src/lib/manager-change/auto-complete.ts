@@ -34,11 +34,19 @@ function parseContractCodes(raw: string | null | undefined): string[] {
 }
 
 function snapshotManagerName(sourceSnapshot: unknown): string {
-  if (!sourceSnapshot || typeof sourceSnapshot !== 'object') return '';
-  const snap = sourceSnapshot as Record<string, unknown>;
-  return normalizeName(
-    (snap['담당자'] ?? snap['담당 사원'] ?? null) as string | null,
-  );
+  let snap: Record<string, unknown> | null = null;
+  if (typeof sourceSnapshot === 'string') {
+    try {
+      const parsed = JSON.parse(sourceSnapshot);
+      if (parsed && typeof parsed === 'object') snap = parsed as Record<string, unknown>;
+    } catch {
+      return '';
+    }
+  } else if (sourceSnapshot && typeof sourceSnapshot === 'object') {
+    snap = sourceSnapshot as Record<string, unknown>;
+  }
+  if (!snap) return '';
+  return normalizeName((snap['담당자'] ?? snap['담당 사원'] ?? null) as string | null);
 }
 
 export async function autoCompleteReceivedManagerChangeRequests(
