@@ -55,13 +55,16 @@ export function normalizeProductType(raw: string): ProductType {
   if (text.includes('TY갤럭시케어_무') || text.endsWith('_무')) return '무';
   if (text.includes('TY갤럭시케어')) return 'TY갤럭시케어';
   if (text.includes('올라이프케어')) return '올라이프케어';
-  if (text.includes('스페셜라이프케어')) return '스페셜라이프케어';
+  // TY 원본 '스페셜라이프케어' / 레거시 '일반가전' → DB enum canonical
+  if (text.includes('스페셜라이프케어') || text.includes('일반가전')) {
+    return 'TY스페셜라이프케어';
+  }
   if (text === '무') return '무';
   // 레거시: '갤럭시케어' 단독 표기
   if (text.includes('갤럭시케어')) return 'TY갤럭시케어';
 
-  // 그 외: 원본 상품명을 그대로 보존 (빈 값이면 '일반')
-  return (text || '일반') as ProductType;
+  // enum에 없는 임의 문자열을 넣으면 upsert 가 실패하므로 알려진 값만 반환
+  return '일반';
 }
 
 export function normalizeWatchFit(raw: string): WatchFitType {
