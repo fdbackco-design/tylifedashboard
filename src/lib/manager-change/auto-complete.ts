@@ -42,7 +42,7 @@ export async function autoCompleteReceivedManagerChangeRequests(
       continue;
     }
 
-    const afterName = normalizeName(r.after_manager_name);
+    const afterName = normalizeName(r.after_manager_name).split('/')[0]?.trim() ?? '';
 
     const { data: cRow, error: cErr } = await db
       .from('contracts')

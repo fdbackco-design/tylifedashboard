@@ -1099,11 +1099,6 @@ async function processItem(
       sales_member_id: string | null;
       sales_link_status: string | null;
     } | null;
-    const isExistingLinkedLocked = (ec?.sales_link_status ?? null) === 'linked' && !!ec?.sales_member_id;
-    if (isExistingLinkedLocked) {
-      finalSalesMemberId = ec!.sales_member_id as string;
-      salesLinkStatus = 'linked';
-    }
     const existingPathStamped = ec != null && ec.performance_path_json != null;
     const ecTySource = (ec?.ty_source_status ?? ec?.status ?? null) as string | null;
     const alreadyHasDetail =
@@ -1115,6 +1110,18 @@ async function processItem(
       ec.item_name != null &&
       ec.item_name !== DEFAULT_ITEM_NAME_PLACEHOLDER;
 
+    // 담당 미확인(/admin/pending-sales)에서 수동 지정한 linked 계약 보호:
+    // - TY 쪽 이름이 동명이인/미확정이면(pending_mapping) 기존 sales_member_id 를 유지한다.
+    // - TY 쪽 이름이 단일 매칭으로 확정되면 그 값으로 갱신한다(담당자 변경 → 신청 자동완료용).
+    const keepExistingManualSalesLink =
+      (ec?.sales_link_status ?? null) === 'linked' &&
+      !!ec?.sales_member_id &&
+      (salesLinkStatus === 'pending_mapping' || !finalSalesMemberId);
+    if (keepExistingManualSalesLink) {
+      finalSalesMemberId = ec!.sales_member_id as string;
+      salesLinkStatus = 'linked';
+    }
+
     // ── 4. 상세 HTML → TY Life external_id 로 담당자 확정 (동명이인/미매칭 해소)
     let detail: ReturnType<typeof parseContractDetailHtml> | null = null;
     // 성능 최적화(캐싱):
@@ -1123,7 +1130,7 @@ async function processItem(
     const listStatus = normalizeStatus(item.status_raw ?? '');
     const skipDetailFetch = isTerminalContractStatus(listStatus) || isTerminalContractStatus(ec?.status ?? null);
 
-    if (!isExistingLinkedLocked && item.external_id && !alreadyHasDetail && !skipDetailFetch) {
+    if (!keepExistingManualSalesLink && item.external_id && !alreadyHasDetail && !skipDetailFetch) {
       try {
         let html = await fetchContractDetailHtml(item.external_id);
         // 상세 URL id vs HTML 내부 contractNo 불일치 케이스 보정 (backfill과 동일 정책)
