@@ -1733,19 +1733,8 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
             parentByChild,
           });
 
-        const toReparentToHq: string[] = [];
-        const rankByIdRaw = new Map<string, RankType>();
-        for (const m of membersRaw) rankByIdRaw.set(m.id, m.rank);
-
-        for (const memberId of rankUpMemberIds) {
-          const th = leaderPromotionEventRows.find((r) => r.member_id === memberId);
-          if (!th) continue;
-          const parentId = parentByChild.get(memberId) ?? null;
-          const parentRank = parentId ? (rankByIdRaw.get(parentId) ?? null) : null;
-          if (parentId && parentRank === '리더') {
-            toReparentToHq.push(memberId);
-          }
-        }
+        // 리더 승격 후에도 기존 상위(리더 포함) 산하 위치를 유지한다.
+        // (과거: 상위가 리더이면 본사 직속으로 재배치 → 리더 산하 리더가 안성준/본사 아래로 이동하던 동작 제거)
 
         if (rankUpMemberIds.length > 0) {
           const { error: upErr } = await db
@@ -1852,19 +1841,6 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
           });
         }
 
-        // 본사 직속 재배치 (추가 규칙)
-        if (toReparentToHq.length > 0) {
-          const hqId = await getHqMemberId(db);
-          if (hqId) {
-            const { error: eErr } = await db
-              .from('organization_edges')
-              .upsert(
-                toReparentToHq.map((id) => ({ parent_id: hqId, child_id: id })),
-                { onConflict: 'child_id' },
-              );
-            if (eErr) throw new Error(`승격자 본사 재배치 실패: ${eErr.message}`);
-          }
-        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         await log(db, runId, 'warn', `승격 반영 단계 실패(동기화는 완료 처리): ${message}`);
