@@ -1,17 +1,23 @@
 /**
  * TY 동기화 시점에 "접수완료(RECEIVED)" 상태의 담당자 변경 신청이
  * 실제 계약 담당자 변경으로 반영되었는지 확인하고,
- * 반영된 경우 자동으로 COMPLETED 처리 + 영업자 푸시 알림을 보낸다.
+ * 반영된 경우 자동으로 COMPLETED 처리 + 영업자 푸시 알림 + 고객 조직 노드 재배치를 한다.
  *
  * 완료 판정(하나라도 일치하면 COMPLETED):
  * 1) 신청의 contract_id 또는 contract_codes 그룹 중 아무 계약이라도
  * 2) TY 원본 담당자(source_snapshot_json.담당자) 또는 sales_member 이름이
  * 3) after_manager_name(슬래시 앞)과 정규화 후 일치
+ *
+ * 조직 재배치(최소 범위):
+ * - sales_member_id 이름이 after_manager 와 일치할 때만
+ * - 해당 customer 와 동일 신원 노드만 이동
+ *   (`customer:{id}` / `cust:{id}` / source_customer_id)
  */
 
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { notifyRequesterOfManagerChangeCompleted } from '@/lib/manager-change/notify';
+import { reparentCustomerOrgForManagerChange } from '@/lib/manager-change/reparent-org';
 
 function normalizeName(s: string | null | undefined): string {
   return String(s ?? '')
@@ -51,10 +57,10 @@ function snapshotManagerName(sourceSnapshot: unknown): string {
 
 export async function autoCompleteReceivedManagerChangeRequests(
   db: SupabaseClient,
-): Promise<{ scanned: number; completed: number; notified: number; skipped: number }> {
+): Promise<{ scanned: number; completed: number; notified: number; skipped: number; org_moved: number }> {
   const { data: rows, error } = await db
     .from('manager_change_requests')
-    .select('id, contract_id, contract_codes, after_manager_name, status')
+    .select('id, contract_id, customer_id, contract_codes, after_manager_name, status')
     .eq('status', 'RECEIVED')
     .order('created_at', { ascending: true })
     .limit(2000);
@@ -63,6 +69,7 @@ export async function autoCompleteReceivedManagerChangeRequests(
   const list = (rows ?? []) as Array<{
     id: string;
     contract_id: string | null;
+    customer_id: string | null;
     contract_codes: string | null;
     after_manager_name: string | null;
     status: string | null;
@@ -71,6 +78,7 @@ export async function autoCompleteReceivedManagerChangeRequests(
   let completed = 0;
   let notified = 0;
   let skipped = 0;
+  let orgMoved = 0;
   const now = new Date().toISOString();
 
   for (const r of list) {
@@ -150,16 +158,19 @@ export async function autoCompleteReceivedManagerChangeRequests(
       }
     }
 
-    const matched = contractRows.some((c) => {
-      const snapName = snapshotManagerName(c.source_snapshot_json);
-      if (snapName && snapName === afterName) return true;
+    const matchedByMember = contractRows.filter((c) => {
       const mid = String(c.sales_member_id ?? '').trim();
       if (!mid) return false;
       const memberName = nameByMemberId.get(mid) ?? '';
       return memberName !== '' && memberName === afterName;
     });
+    const matchedBySnapshot = contractRows.some((c) => {
+      const snapName = snapshotManagerName(c.source_snapshot_json);
+      return Boolean(snapName && snapName === afterName);
+    });
 
-    if (!matched) {
+    // 완료 판정: 스냅샷 또는 sales_member 이름 일치
+    if (matchedByMember.length === 0 && !matchedBySnapshot) {
       skipped++;
       continue;
     }
@@ -175,6 +186,25 @@ export async function autoCompleteReceivedManagerChangeRequests(
     }
 
     completed++;
+
+    // 조직도: sales_member_id 가 after_manager 와 일치할 때만 고객 노드 이동
+    // (스냅샷만 맞고 담당자 id 가 아직 옛값이면 잘못된 산하 이동을 막음)
+    const newSalesMemberId = String(matchedByMember[0]?.sales_member_id ?? '').trim();
+    const customerId = String(r.customer_id ?? '').trim();
+    if (newSalesMemberId && customerId) {
+      try {
+        const orgRes = await reparentCustomerOrgForManagerChange(db, {
+          customerId,
+          newSalesMemberId,
+          sourceContractId: matchedByMember[0]?.id ?? r.contract_id,
+        });
+        orgMoved += orgRes.moved;
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error('[manager-change-auto-complete] org reparent failed', requestId, e);
+      }
+    }
+
     try {
       const res = await notifyRequesterOfManagerChangeCompleted(db, requestId);
       if (!('skipped' in res)) notified += res.sent;
@@ -183,5 +213,5 @@ export async function autoCompleteReceivedManagerChangeRequests(
     }
   }
 
-  return { scanned: list.length, completed, notified, skipped };
+  return { scanned: list.length, completed, notified, skipped, org_moved: orgMoved };
 }
