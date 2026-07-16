@@ -111,6 +111,10 @@ export default function AccountIssueClient() {
 
   const [alertModal, setAlertModal] = useState<AlertModalState | null>(null);
 
+  // 비밀번호 초기화
+  const [resetLoginId, setResetLoginId] = useState('');
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+
   // 사전 계정 발급 모달
   const [preIssueOpen, setPreIssueOpen] = useState(false);
   const [preName, setPreName] = useState('');
@@ -171,6 +175,52 @@ export default function AccountIssueClient() {
 
   function showAlert(variant: AlertModalState['variant'], title: string, message: string) {
     setAlertModal({ variant, title, message });
+  }
+
+  async function resetPasswordToLoginCode() {
+    const raw = resetLoginId.trim();
+    if (!raw) {
+      showAlert('warning', '입력 확인', '로그인 ID(8자리)를 입력해 주세요.');
+      return;
+    }
+    const digits =
+      digitsFromLoginCode(raw.includes('@') ? raw : `${raw}@${emailDomain}`) ??
+      raw.replace(/\D/g, '');
+    if (!/^\d{8}$/.test(digits)) {
+      showAlert('warning', '입력 확인', '로그인 ID는 8자리 숫자여야 합니다. (예: 26984730)');
+      return;
+    }
+    if (!confirm(`로그인 ID ${digits} 의 비밀번호를 ${digits} 으로 초기화할까요?`)) return;
+
+    setIsResettingPassword(true);
+    try {
+      const res = await fetch('/api/admin/account-issue/reset-password', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ login_id: digits }),
+      });
+      const json = (await res.json()) as ApiResult<{
+        login_code: string;
+        display_name: string | null;
+        email: string;
+        password_hint: string;
+      }>;
+      if (!res.ok || !json.success) {
+        showAlert('warning', '초기화 실패', json.success ? '초기화 실패' : json.error);
+        return;
+      }
+      showAlert(
+        'success',
+        '비밀번호 초기화 완료',
+        `${json.data.display_name ?? '-'} (${json.data.email})\n비밀번호: ${json.data.password_hint}\n다음 로그인 시 비밀번호 변경을 안내합니다.`,
+      );
+      setResetLoginId('');
+    } catch (e) {
+      showAlert('warning', '초기화 실패', e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsResettingPassword(false);
+    }
   }
 
   async function loadExistingProfile(memberId: string, phoneOverride?: string | null) {
@@ -859,6 +909,41 @@ export default function AccountIssueClient() {
         </div>
 
         {searchError ? <p className="mt-3 text-sm text-red-600">{searchError}</p> : null}
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-xl p-4">
+        <div className="text-sm font-semibold text-gray-700 mb-1">비밀번호 초기화</div>
+        <p className="text-xs text-gray-500 mb-3">
+          로그인 ID(8자리)를 입력하면 비밀번호를 동일한 8자리로 초기화합니다.
+          (@tylifedashboard.local 계정은 이메일 재설정이 불가해 Admin API로 처리합니다.)
+        </p>
+        <div className="flex gap-2 items-end flex-wrap">
+          <div className="flex-1 min-w-[220px]">
+            <label className="block text-sm font-medium text-gray-700">로그인 ID</label>
+            <input
+              value={resetLoginId}
+              onChange={(e) => setResetLoginId(e.target.value)}
+              placeholder="예: 26984730"
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                void resetPasswordToLoginCode();
+              }}
+              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm font-mono"
+              disabled={isResettingPassword}
+            />
+          </div>
+          <LoadingButton
+            type="button"
+            isLoading={isResettingPassword}
+            loadingText="초기화 중…"
+            disabled={!resetLoginId.trim()}
+            onClick={() => void resetPasswordToLoginCode()}
+            className="px-4 py-2 rounded-md bg-rose-700 text-white text-sm font-semibold hover:bg-rose-800 disabled:opacity-50"
+          >
+            비밀번호 초기화
+          </LoadingButton>
+        </div>
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl p-4">
