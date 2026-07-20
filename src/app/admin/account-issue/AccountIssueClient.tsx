@@ -115,6 +115,11 @@ export default function AccountIssueClient() {
   const [resetLoginId, setResetLoginId] = useState('');
   const [isResettingPassword, setIsResettingPassword] = useState(false);
 
+  // Auth 이메일·비밀번호 + profile login_code 동시 정정
+  const [changeLoginUserId, setChangeLoginUserId] = useState('');
+  const [changeLoginId, setChangeLoginId] = useState('');
+  const [isChangingLoginId, setIsChangingLoginId] = useState(false);
+
   // 사전 계정 발급 모달
   const [preIssueOpen, setPreIssueOpen] = useState(false);
   const [preName, setPreName] = useState('');
@@ -220,6 +225,58 @@ export default function AccountIssueClient() {
       showAlert('warning', '초기화 실패', e instanceof Error ? e.message : String(e));
     } finally {
       setIsResettingPassword(false);
+    }
+  }
+
+  async function changeAccountLoginId() {
+    const userId = changeLoginUserId.trim();
+    const newLoginId = changeLoginId.replace(/\D/g, '');
+    if (!/^[0-9a-f-]{36}$/i.test(userId)) {
+      showAlert('warning', '입력 확인', 'Supabase Auth 사용자 UUID를 입력해 주세요.');
+      return;
+    }
+    if (!/^\d{8}$/.test(newLoginId)) {
+      showAlert('warning', '입력 확인', '새 로그인 ID는 8자리 숫자여야 합니다.');
+      return;
+    }
+    if (
+      !confirm(
+        `사용자 ${userId}의 로그인 ID와 초기 비밀번호를 ${newLoginId}로 함께 변경할까요?`,
+      )
+    ) {
+      return;
+    }
+
+    setIsChangingLoginId(true);
+    try {
+      const res = await fetch('/api/admin/account-issue/change-login-id', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, new_login_id: newLoginId }),
+      });
+      const json = (await res.json()) as ApiResult<{
+        previous_login_id: string;
+        login_id: string;
+        email: string;
+        password_hint: string;
+      }>;
+      if (!res.ok || !json.success) {
+        showAlert('warning', '로그인 ID 정정 실패', json.success ? '정정 실패' : json.error);
+        return;
+      }
+      showAlert(
+        'success',
+        '로그인 ID 정정 완료',
+        `이메일: ${json.data.email}\n초기 비밀번호: ${json.data.password_hint}`,
+      );
+      setChangeLoginUserId('');
+      setChangeLoginId('');
+      void loadIssuedAccounts();
+    } catch (e) {
+      showAlert('warning', '로그인 ID 정정 실패', e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsChangingLoginId(false);
     }
   }
 
@@ -942,6 +999,47 @@ export default function AccountIssueClient() {
             className="px-4 py-2 rounded-md bg-rose-700 text-white text-sm font-semibold hover:bg-rose-800 disabled:opacity-50"
           >
             비밀번호 초기화
+          </LoadingButton>
+        </div>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-xl p-4">
+        <div className="text-sm font-semibold text-gray-700 mb-1">로그인 ID 정정</div>
+        <p className="text-xs text-gray-500 mb-3">
+          Auth 이메일·초기 비밀번호와 user_profiles의 login_code를 새 8자리 ID로 함께 변경합니다.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-[minmax(260px,1fr)_minmax(180px,0.5fr)_auto] gap-2 items-end">
+          <div>
+            <label className="block text-sm font-medium text-gray-700">사용자 UUID</label>
+            <input
+              value={changeLoginUserId}
+              onChange={(e) => setChangeLoginUserId(e.target.value)}
+              placeholder="f14bb25a-7d80-4d41-a8e7-0d5357d35ecd"
+              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm font-mono"
+              disabled={isChangingLoginId}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">새 로그인 ID</label>
+            <input
+              value={changeLoginId}
+              onChange={(e) => setChangeLoginId(e.target.value)}
+              placeholder="26859589"
+              inputMode="numeric"
+              maxLength={8}
+              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm font-mono"
+              disabled={isChangingLoginId}
+            />
+          </div>
+          <LoadingButton
+            type="button"
+            isLoading={isChangingLoginId}
+            loadingText="정정 중…"
+            disabled={!changeLoginUserId.trim() || !changeLoginId.trim()}
+            onClick={() => void changeAccountLoginId()}
+            className="px-4 py-2 rounded-md bg-indigo-700 text-white text-sm font-semibold hover:bg-indigo-800 disabled:opacity-50"
+          >
+            로그인 ID 정정
           </LoadingButton>
         </div>
       </div>
