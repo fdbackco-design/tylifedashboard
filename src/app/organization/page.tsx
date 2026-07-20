@@ -76,8 +76,9 @@ export default async function OrganizationMyTreePage({
     ? buildEmptyMyOrganizationTreeViewModel({ yearMonth, displayName })
     : await buildMyOrganizationTreeViewModel(adminDb, { memberId: memberId as string, yearMonth });
 
-  // 본인 목표 구좌 조회 (NULL 이면 DEFAULT 로 폴백). 정산/누적 로직에는 영향 없음.
-  let myMonthlyTargetUnits = DEFAULT_MONTHLY_TARGET_UNITS;
+  // 미매핑 사전 발급 계정은 화면의 모든 수치를 0으로 표시한다.
+  // 매핑된 계정만 목표 구좌 기본값(20) 또는 저장값을 사용한다.
+  let myMonthlyTargetUnits = isUnmapped ? 0 : DEFAULT_MONTHLY_TARGET_UNITS;
   if (memberId) {
     const { data: targetRow } = await adminDb
       .from('organization_members')
