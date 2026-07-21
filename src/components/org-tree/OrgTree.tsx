@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { OrgTreeNode as OrgTreeNodeType } from '@/lib/types';
 import OrgTreeNode, {
   type ContractItem,
@@ -303,6 +304,8 @@ interface Props {
    * - 기존 드래그/휠/핀치 줌 동작과 분리되어 동작한다.
    */
   showSearch?: boolean;
+  /** 조직 관계 저장 성공 후 서버 트리·지표를 다시 불러오기 위한 콜백 */
+  onOrganizationChanged?: () => void;
 }
 
 export default function OrgTree({
@@ -320,7 +323,9 @@ export default function OrgTree({
   contractDetailPresentation = 'inline',
   contractDetailHideProductAndContractCode = false,
   showSearch = true,
+  onOrganizationChanged,
 }: Props) {
+  const router = useRouter();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -338,6 +343,9 @@ export default function OrgTree({
   const [editMessage, setEditMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [dragChildId, setDragChildId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [moveChildId, setMoveChildId] = useState<string | null>(null);
+  const [moveParentId, setMoveParentId] = useState<string | null>(null);
+  const [isMoving, setIsMoving] = useState(false);
   const dragRef = useRef<{ active: boolean; startX: number; startY: number; baseX: number; baseY: number }>({
     active: false,
     startX: 0,
@@ -430,6 +438,15 @@ export default function OrgTree({
     setSearchOpen(false);
   };
 
+  const chooseSearchResult = (memberId: string) => {
+    focusMember(memberId);
+    if (editMode && moveChildId) {
+      setMoveParentId(memberId);
+      setSelectedId(memberId);
+      setEditMessage(null);
+    }
+  };
+
   useEffect(() => {
     return () => {
       if (highlightTimerRef.current) {
@@ -474,11 +491,37 @@ export default function OrgTree({
     return [hqRoot];
   }, [roots]);
 
+  const moveChildNode = moveChildId ? findOrgTreeNode(displayRoots, moveChildId) : null;
+  const moveParentNode = moveParentId ? findOrgTreeNode(displayRoots, moveParentId) : null;
+  const invalidMoveTarget =
+    !!moveChildNode &&
+    !!moveParentId &&
+    collectSubtreeIds(moveChildNode).includes(moveParentId);
+
   function handleSelect(id: string) {
+    if (editMode) {
+      if (!moveChildId) {
+        if (id === '__hq_root__') {
+          setEditMessage({ ok: false, text: '본사는 이동할 조직으로 선택할 수 없습니다.' });
+          return;
+        }
+        setMoveChildId(id);
+        setMoveParentId(null);
+        setSelectedId(id);
+        setEditMessage(null);
+        return;
+      }
+      setMoveParentId(id);
+      setSelectedId(id);
+      setEditMessage(null);
+      return;
+    }
     setSelectedId((prev) => (prev === id ? null : id));
   }
 
-  async function handleMoveNode(params: { childId: string; parentId: string | null }) {
+  async function handleMoveNode(params: { childId: string; parentId: string | null }): Promise<boolean> {
+    if (isMoving) return false;
+    setIsMoving(true);
     setEditMessage(null);
     try {
       const res = await fetch('/api/organization', {
@@ -489,7 +532,7 @@ export default function OrgTree({
       const json = (await res.json()) as any;
       if (!res.ok || !json?.success) {
         setEditMessage({ ok: false, text: json?.error ?? '관계 변경 실패' });
-        return;
+        return false;
       }
       const ym = String(json?.year_month ?? '');
       const st = json?.settlement ?? null;
@@ -498,8 +541,42 @@ export default function OrgTree({
           ? `${ym} 정산 ${st.updated_count ?? 0}명 재계산`
           : (st?.skipped_reason ? `정산 재계산 스킵: ${st.skipped_reason}` : '정산 재계산 스킵');
       setEditMessage({ ok: true, text: `관계 변경 완료 · ${settlementMsg}` });
+      onOrganizationChanged?.();
+      router.refresh();
+      return true;
     } catch {
       setEditMessage({ ok: false, text: '네트워크 오류' });
+      return false;
+    } finally {
+      setIsMoving(false);
+    }
+  }
+
+  async function moveSelectedOrganization(): Promise<void> {
+    if (!moveChildNode || !moveParentNode) {
+      setEditMessage({ ok: false, text: '이동할 조직과 새 상위 조직을 모두 선택해 주세요.' });
+      return;
+    }
+    if (invalidMoveTarget) {
+      setEditMessage({ ok: false, text: '자기 자신이나 하위 조직 아래로는 이동할 수 없습니다.' });
+      return;
+    }
+
+    const childName = (moveChildNode.name ?? '').replace(/^\[고객\]\s*/, '');
+    const parentName =
+      moveParentNode.id === '__hq_root__'
+        ? '본사'
+        : (moveParentNode.name ?? '').replace(/^\[고객\]\s*/, '');
+    if (!window.confirm(`${childName} 조직 전체를 ${parentName} 아래로 이동하시겠습니까?`)) return;
+
+    const ok = await handleMoveNode({
+      childId: moveChildNode.id,
+      parentId: moveParentNode.id === '__hq_root__' ? null : moveParentNode.id,
+    });
+    if (ok) {
+      setMoveChildId(null);
+      setMoveParentId(null);
+      setSelectedId(null);
     }
   }
 
@@ -508,6 +585,9 @@ export default function OrgTree({
     if (!editMode) {
       setDragChildId(null);
       setDragOverId(null);
+      setMoveChildId(null);
+      setMoveParentId(null);
+      setIsMoving(false);
     }
   }, [editMode]);
 
@@ -540,14 +620,20 @@ export default function OrgTree({
       contractsByMember: contractsByMember as any,
     });
     const isDropTarget = editMode && !hideCard && dragOverId === node.id;
-    const isInvalidDrop = editMode && !!dragChildId && (dragChildId === node.id);
+    const isMoveSource = editMode && moveChildId === node.id;
+    const isMoveTarget = editMode && moveParentId === node.id;
+    const draggedNode = dragChildId ? findOrgTreeNode(displayRoots, dragChildId) : null;
+    const isInvalidDrop =
+      editMode &&
+      !!draggedNode &&
+      collectSubtreeIds(draggedNode).includes(node.id);
 
     return (
       <div className="flex flex-col items-center">
         {/* 노드 카드 */}
         {hideCard ? null : (
           <div
-            draggable={editMode && node.id !== '__hq_root__'}
+            draggable={editMode && !isMoving && node.id !== '__hq_root__'}
             onDragStart={(e) => {
               if (!editMode) return;
               e.dataTransfer.setData('text/org-child-id', node.id);
@@ -580,10 +666,13 @@ export default function OrgTree({
               const childId = e.dataTransfer.getData('text/org-child-id');
               const parentId = node.id === '__hq_root__' ? null : node.id;
               if (!childId) return;
-              if (childId === parentId) return;
+              if (isInvalidDrop) {
+                setEditMessage({ ok: false, text: '자기 자신이나 하위 조직 아래로는 이동할 수 없습니다.' });
+                return;
+              }
               setDragChildId(null);
               setDragOverId(null);
-              handleMoveNode({ childId, parentId });
+              void handleMoveNode({ childId, parentId });
             }}
             className={
               editMode
@@ -593,7 +682,13 @@ export default function OrgTree({
                       ? (isInvalidDrop
                           ? 'ring-2 ring-red-400 ring-offset-2 bg-red-50/40'
                           : 'ring-2 ring-emerald-400 ring-offset-2 bg-emerald-50/40')
-                      : 'outline outline-1 outline-transparent hover:outline-slate-300',
+                      : isMoveSource
+                        ? 'ring-2 ring-indigo-500 ring-offset-2 bg-indigo-50/40'
+                        : isMoveTarget
+                          ? invalidMoveTarget
+                            ? 'ring-2 ring-red-400 ring-offset-2 bg-red-50/40'
+                            : 'ring-2 ring-emerald-500 ring-offset-2 bg-emerald-50/40'
+                          : 'outline outline-1 outline-transparent hover:outline-slate-300',
                   ].join(' ')
                 : undefined
             }
@@ -730,7 +825,9 @@ export default function OrgTree({
     <div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-3">
         <div className="text-xs text-gray-500">
-          {editMode ? '편집 모드 : 노드를 드래그해서 부모 노드 위에 놓으면 소속이 변경됩니다.' : '보기 모드 : 한 손가락 이동 · 두 손가락 줌'}
+          {editMode
+            ? '편집 모드 : 이동할 조직을 선택한 뒤 새 상위 조직을 클릭하거나 검색하세요.'
+            : '보기 모드 : 한 손가락 이동 · 두 손가락 줌'}
         </div>
         <div className="flex flex-wrap items-center gap-2 justify-end">
           {editMessage && (
@@ -785,12 +882,12 @@ export default function OrgTree({
                   if (searchResults.length === 0) return;
                   // 정확 일치(대소문자 무시) 우선, 없으면 첫 결과
                   const exact = searchResults.find((m) => m.name.toLowerCase() === q.toLowerCase());
-                  focusMember((exact ?? searchResults[0]).id);
+                  chooseSearchResult((exact ?? searchResults[0]).id);
                 } else if (e.key === 'Escape') {
                   setSearchOpen(false);
                 }
               }}
-              placeholder="담당자 이름 검색"
+              placeholder={editMode && moveChildId ? '이동 대상 조직 검색' : '담당자 이름 검색'}
               aria-label="담당자 이름 검색"
               className="w-full h-9 rounded-lg border border-slate-300 bg-white pl-3 pr-8 text-sm shadow-sm outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200/80"
             />
@@ -823,7 +920,7 @@ export default function OrgTree({
                     <button
                       key={m.id}
                       type="button"
-                      onClick={() => focusMember(m.id)}
+                      onClick={() => chooseSearchResult(m.id)}
                       className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-slate-50"
                     >
                       <span className="font-medium text-slate-800">{m.name}</span>
@@ -833,6 +930,70 @@ export default function OrgTree({
                 )}
               </div>
             ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {editMode ? (
+        <div className="mb-3 rounded-xl border border-indigo-200 bg-indigo-50/70 p-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 text-xs text-slate-700">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-semibold text-indigo-900">이동할 조직</span>
+                <span className="rounded bg-white px-2 py-1 font-medium text-slate-800 ring-1 ring-indigo-100">
+                  {moveChildNode
+                    ? (moveChildNode.name ?? '').replace(/^\[고객\]\s*/, '')
+                    : '조직도에서 선택해 주세요'}
+                </span>
+                <span className="text-slate-400">→</span>
+                <span className="font-semibold text-indigo-900">새 상위 조직</span>
+                <span
+                  className={`rounded bg-white px-2 py-1 font-medium ring-1 ${
+                    invalidMoveTarget
+                      ? 'text-red-700 ring-red-200'
+                      : 'text-slate-800 ring-indigo-100'
+                  }`}
+                >
+                  {moveParentNode
+                    ? moveParentNode.id === '__hq_root__'
+                      ? '본사'
+                      : (moveParentNode.name ?? '').replace(/^\[고객\]\s*/, '')
+                    : moveChildNode
+                      ? '클릭 또는 검색으로 선택'
+                      : '-'}
+                </span>
+              </div>
+              {invalidMoveTarget ? (
+                <p className="mt-1.5 text-red-600">자기 자신이나 하위 조직은 새 상위 조직이 될 수 없습니다.</p>
+              ) : (
+                <p className="mt-1.5 text-slate-500">저장 전에는 조직 관계가 변경되지 않으며, 이동 버튼을 누르면 한 번만 반영됩니다.</p>
+              )}
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              {moveChildNode ? (
+                <button
+                  type="button"
+                  disabled={isMoving}
+                  onClick={() => {
+                    setMoveChildId(null);
+                    setMoveParentId(null);
+                    setSelectedId(null);
+                    setEditMessage(null);
+                  }}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  다시 선택
+                </button>
+              ) : null}
+              <button
+                type="button"
+                disabled={!moveChildNode || !moveParentNode || invalidMoveTarget || isMoving}
+                onClick={() => void moveSelectedOrganization()}
+                className="rounded-lg bg-indigo-700 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {isMoving ? '이동 중…' : '선택한 조직을 이 조직 아래로 이동'}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

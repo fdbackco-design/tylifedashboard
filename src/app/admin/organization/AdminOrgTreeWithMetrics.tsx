@@ -33,6 +33,7 @@ export default function AdminOrgTreeWithMetrics({
 }: Props) {
   const [metricsById, setMetricsById] = useState<Record<string, OrgNodeMetrics> | null>(null);
   const [metricsError, setMetricsError] = useState<string | null>(null);
+  const [organizationRevision, setOrganizationRevision] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -62,7 +63,7 @@ export default function AdminOrgTreeWithMetrics({
     return () => {
       cancelled = true;
     };
-  }, [yearMonth]);
+  }, [yearMonth, organizationRevision]);
 
   return (
     <div className="relative">
@@ -85,6 +86,7 @@ export default function AdminOrgTreeWithMetrics({
         showGoalUnitsLine={showGoalUnitsLine}
         showGoalProgressBar={showGoalProgressBar}
         showCommissionMetrics={showCommissionMetrics}
+        onOrganizationChanged={() => setOrganizationRevision((value) => value + 1)}
       />
     </div>
   );
