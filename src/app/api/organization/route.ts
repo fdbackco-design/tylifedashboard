@@ -9,6 +9,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { buildOrgTree } from '@/lib/settlement/calculator';
 import { calculateMonthlySettlement } from '@/lib/settlement/monthly-calculate';
 import type { OrgTreeRow } from '@/lib/types';
+import { isAdminAuthed } from '@/lib/admin-auth';
 
 // Route Handler 캐시 (URL 단위) — 조직도는 변경 빈도가 낮음
 export const revalidate = 60;
@@ -126,6 +127,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
  * body: { child_id: UUID, parent_id: UUID|null }
  */
 export async function PATCH(req: NextRequest): Promise<NextResponse> {
+  if (!(await isAdminAuthed(req))) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
   // 캐시/정적 라우트로 굳어지지 않도록
   const db = createAdminSupabaseClient();
 
