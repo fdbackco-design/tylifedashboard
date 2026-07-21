@@ -33,7 +33,11 @@ export function buildOrgContractSalesRemap(
   resolveContractSalesMemberId: (c: ContractSalesRemapInput) => string;
   /** 내 조직도 등: 귀속 id가 서브트리 밖(HQ)이면 가입 인정+고객 매핑으로 서브트리 내 id를 한 번 더 시도 */
   resolveContractOriginForSubtree: (c: ContractSalesRemapInput, subtreeMemberIds: Set<string>) => string;
-  remapCustomerMemberId: (customerId: string, expectedName?: string | null) => string;
+  remapCustomerMemberId: (
+    customerId: string,
+    expectedName?: string | null,
+    customerPhone?: string | null,
+  ) => string;
   hqIds: Set<string>;
   membersFiltered: OrgMemberForContractRemap[];
 } {
@@ -103,6 +107,7 @@ export function buildOrgContractSalesRemap(
 
   const customerNodeByCustomerId = new Map<string, string>();
   const customerMemberIdByCustomerId = new Map<string, string>();
+  const customerMemberIdsByNamePhone = new Map<string, Set<string>>();
   const nodeIdByPhoneDigits = new Map<string, string>();
 
   for (const m of membersFiltered) {
@@ -120,7 +125,15 @@ export function buildOrgContractSalesRemap(
         customerMemberIdByCustomerId.set(customerId, m.id);
       }
     }
+    const isCustomerIdentity =
+      Boolean(sid) || Boolean(ext?.startsWith('customer:')) || Boolean(ext?.startsWith('cust:'));
     const digits = toPhoneDigits(m.phone);
+    const namePhoneKey = `${normName(m.name)}|${digits}`;
+    if (isCustomerIdentity && m.rank !== '본사' && normName(m.name) && digits) {
+      const ids = customerMemberIdsByNamePhone.get(namePhoneKey) ?? new Set<string>();
+      ids.add(m.id);
+      customerMemberIdsByNamePhone.set(namePhoneKey, ids);
+    }
     if (digits) nodeIdByPhoneDigits.set(digits, m.id);
   }
 
@@ -189,12 +202,25 @@ export function buildOrgContractSalesRemap(
     return subtreeMemberIds.has(merged) ? merged : primary;
   };
 
-  const remapCustomerMemberId = (customerId: string, expectedName?: string | null): string => {
+  const remapCustomerMemberId = (
+    customerId: string,
+    expectedName?: string | null,
+    customerPhone?: string | null,
+  ): string => {
     const merged = remapMemberId(customerMemberIdByCustomerId.get(customerId) ?? '');
-    if (!merged) return '';
     // 공유 customer_id 방어: 고객명이 지정되면 노드명과 일치할 때만 매핑을 인정.
-    if (expectedName !== undefined && !customerNameMatches(merged, expectedName)) return '';
-    return merged;
+    if (merged && (expectedName === undefined || customerNameMatches(merged, expectedName))) {
+      return merged;
+    }
+
+    // TY Life에서 같은 사람이 새 customers 행으로 재생성될 수 있다. 이 경우 고객 ID는 달라도
+    // 이름과 전화번호가 모두 같고 후보가 하나뿐일 때 기존 조직 노드로 안전하게 연결한다.
+    const expected = normName(expectedName);
+    const digits = toPhoneDigits(customerPhone);
+    if (!expected || !digits) return '';
+    const candidates = customerMemberIdsByNamePhone.get(`${expected}|${digits}`);
+    if (!candidates || candidates.size !== 1) return '';
+    return remapMemberId(candidates.values().next().value ?? '');
   };
 
   return {

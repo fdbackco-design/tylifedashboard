@@ -12,7 +12,11 @@
     "audit:promotion-event": "vitest run --config vitest.integration.config.ts",
     "verify:hq-revenue": "node scripts/verify-hq-revenue.mjs",
     "bench:api": "node scripts/api-bench.mjs",
-    "cleanup:recruitment-nodes": "node scripts/cleanup-recruitment-nodes.mjs"
+    "cleanup:recruitment-nodes": "node scripts/cleanup-recruitment-nodes.mjs",
+    "sync:tylife-local": "node --conditions=react-server --import tsx scripts/tylife-local-sync.ts",
+    "sync:tylife-local-cookie": "node --conditions=react-server --import tsx scripts/tylife-local-cookie-sync.ts",
+    "sync:tylife-launchd:install": "node scripts/tylife-launchd.mjs install",
+    "sync:tylife-launchd:uninstall": "node scripts/tylife-launchd.mjs uninstall"
   },
   "dependencies": {
     "@ducanh2912/next-pwa": "^10.2.9",
@@ -24,6 +28,7 @@
     "node-html-parser": "^6.1.13",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "server-only": "^0.0.1",
     "web-push": "^3.6.7"
   },
   "devDependencies": {
@@ -34,9 +39,11 @@
     "autoprefixer": "^10.4.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.3",
+    "playwright": "^1.61.1",
     "postcss": "^8",
     "sharp": "^0.34.5",
     "tailwindcss": "^3.4.0",
+    "tsx": "^4.23.1",
     "typescript": "^5",
     "vitest": "^4.1.9"
   }

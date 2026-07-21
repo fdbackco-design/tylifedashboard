@@ -8,7 +8,11 @@ import type { OrgTreeRow } from '@/lib/types';
 export type OrgStructuralTreeContext = {
   treeRows: OrgTreeRow[];
   remapMemberId: (id: string) => string;
-  remapCustomerMemberId: (customerId: string, expectedName?: string | null) => string;
+  remapCustomerMemberId: (
+    customerId: string,
+    expectedName?: string | null,
+    customerPhone?: string | null,
+  ) => string;
   resolveContractSalesMemberId: (c: ContractSalesRemapInput) => string;
   resolveSettlementWalkSalesMemberId: (
     c: ContractSalesRemapInput & { settlement_sales_member_id?: string | null },

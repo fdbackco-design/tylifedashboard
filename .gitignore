@@ -17,6 +17,9 @@ build/
 .env.test.local
 .env.production.local
 
+# Playwright 로컬 TY Life 로그인 프로필(세션 쿠키 포함)
+.playwright/
+
 # Vercel
 .vercel
 

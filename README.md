@@ -99,6 +99,55 @@ curl -X POST http://localhost:3000/api/sync \
   -d '{"mode": "full"}'
 ```
 
+### Playwright 로컬 동기화
+
+TY Life의 Cloudflare Turnstile 때문에 Vercel 서버 로그인이 차단될 때 사용합니다. 로컬 Chrome에서
+사람이 직접 로그인하고, 동일 브라우저 세션으로 TY Life 데이터를 읽어 기존 `sync-service`를 실행합니다.
+
+1. `.env.local`에 운영 Supabase의 `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`와
+   `TYLIFE_BASE_URL=https://n.ty-life.co.kr`을 설정합니다.
+2. 의존성을 설치하고 로컬 동기화를 실행합니다.
+
+```bash
+npm install
+npm run sync:tylife-local
+```
+
+열린 Chrome에서 TY Life 로그인과 Turnstile 인증을 완료하면 최근 41일 범위가 자동 동기화됩니다.
+로그인 프로필은 `.playwright/`에 보관되어 다음 실행부터 재사용됩니다.
+
+Turnstile이 Playwright 제어 브라우저를 거부하는 경우에는 일반 Chrome에서 TY Life에 로그인한 뒤,
+Network의 `/contract/list` 요청에서 `Cookie`와 `User-Agent` 전체 값을 `.env.local`의
+`TYLIFE_COOKIE`, `TYLIFE_USER_AGENT`에 저장하고 다음 명령을 실행합니다.
+
+```bash
+npm run sync:tylife-local-cookie
+```
+
+이 방식은 일반 Chrome과 동일한 Mac의 공인 IP에서 실행되어야 합니다. 쿠키를 Vercel이나 다른
+컴퓨터에서 재사용하지 않습니다.
+
+10분마다 자동 실행하려면 macOS LaunchAgent를 등록합니다.
+
+```bash
+npm run sync:tylife-launchd:install
+```
+
+로그는 `.playwright/tylife-launchd.log`와 `.playwright/tylife-launchd-error.log`에서 확인합니다.
+스크립트 내부 잠금 파일이 이전 실행 중에는 다음 실행을 건너뛰므로 중복 동기화되지 않습니다.
+
+자동 실행을 제거하려면:
+
+```bash
+npm run sync:tylife-launchd:uninstall
+```
+
+주의:
+
+- 로컬 PC는 운영 DB 쓰기 권한을 가진 `SUPABASE_SERVICE_ROLE_KEY`를 사용하므로 관리자 전용 장비에서만 실행합니다.
+- `.env.local`과 `.playwright/`는 절대 공유하거나 커밋하지 않습니다.
+- 테스트 실행은 `TYLIFE_LOCAL_SYNC_MAX_PAGE=1`로 제한할 수 있습니다.
+
 ### 동기화 단계
 
 1. `sync_runs` 레코드 생성 (상태: running)
