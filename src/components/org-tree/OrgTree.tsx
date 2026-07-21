@@ -526,6 +526,7 @@ export default function OrgTree({
     try {
       const res = await fetch('/api/organization', {
         method: 'PATCH',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ child_id: params.childId, parent_id: params.parentId }),
       });

@@ -11,9 +11,8 @@ import { calculateMonthlySettlement } from '@/lib/settlement/monthly-calculate';
 import type { OrgTreeRow } from '@/lib/types';
 import { isAdminAuthed } from '@/lib/admin-auth';
 
-// Route Handler 캐시 (URL 단위) — 조직도는 변경 빈도가 낮음
-export const revalidate = 60;
-export const dynamic = 'force-static';
+// PATCH 권한 검사에서 로그인 쿠키를 읽어야 하므로 정적 Route Handler로 만들면 안 된다.
+export const dynamic = 'force-dynamic';
 
 function getEffectiveStartYearMonthSeoul(): string {
   // 규칙: 오늘(Seoul) 날짜가 26일 이상이면 "다음달"을 적용 시작월로,
