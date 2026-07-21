@@ -204,7 +204,11 @@ export default async function OrganizationPage({
     };
     contractsByMember[key].push(contractItem);
 
-    const customerKey = remapCustomerMemberId(c.customer_id, c.customers?.name ?? '');
+    const customerKey = remapCustomerMemberId(
+      c.customer_id,
+      c.customers?.name ?? '',
+      c.customers?.phone ?? null,
+    );
     if (customerKey && customerKey !== key) {
       if (!contractsByMember[customerKey]) contractsByMember[customerKey] = [];
       contractsByMember[customerKey].push(contractItem);

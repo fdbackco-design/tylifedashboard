@@ -591,6 +591,7 @@ export async function buildMyOrganizationTreeViewModel(
       const customerKeyRaw = remapCustomerMemberId(
         (c as any).customer_id as string,
         (c as any).customers?.name ?? '',
+        (c as any).customers?.phone ?? null,
       );
       const customerKey = customerKeyRaw && subtreeIdSet.has(customerKeyRaw) ? customerKeyRaw : '';
       if (customerKey && customerKey !== key) {
