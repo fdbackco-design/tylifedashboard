@@ -64,17 +64,16 @@ export async function loginToTYLife(): Promise<TyLifeLoginResult> {
   // TY Life Network 탭 기준: POST https://n.ty-life.co.kr/auth (XHR, 200 JSON)
   const loginUrl = `${base}/auth`;
 
-  // Network 탭에서 content-length가 짧고(예: 44), Content-Type이 JSON으로도 보이지만
-  // 서버 구현에 따라 form-urlencoded일 수 있어, 우선 form 방식으로 맞춘다.
-  // Network 탭 payload 기준 필드명
-  const body = new URLSearchParams({ empId: id, empPswd: pw }).toString();
+  // TY Life 브라우저 요청과 동일하게 JSON payload를 전송한다.
+  // form-urlencoded로 보내면 응답 쿠키는 내려와도 인증되지 않은 세션이 생성될 수 있다.
+  const body = JSON.stringify({ empId: id, empPswd: pw });
 
   const res = await fetch(loginUrl, {
     method: 'POST',
     redirect: 'manual',
     headers: {
-      'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
-      accept: '*/*',
+      'content-type': 'application/json; charset=UTF-8',
+      accept: 'application/json, text/javascript, */*; q=0.01',
       origin: base,
       referer: `${base}/auth/`,
       // 브라우저와 유사한 UA가 필요한 경우를 대비해 환경변수로 오버라이드 가능

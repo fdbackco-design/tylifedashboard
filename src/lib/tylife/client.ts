@@ -105,7 +105,8 @@ export async function probeTyLifeSession(): Promise<TyLifeSessionProbe> {
   const baseUrl = getTyLifeBaseUrl() ?? null;
   const cookie = describeTyLifeCookie();
 
-  if (!baseUrl || !cookie.configured) {
+  const credentialsConfigured = hasTyLifeCredentials();
+  if (!baseUrl || (!cookie.configured && !credentialsConfigured)) {
     return {
       ok: false,
       baseUrl,
@@ -118,7 +119,7 @@ export async function probeTyLifeSession(): Promise<TyLifeSessionProbe> {
       bodyPreview: '',
       hint: !baseUrl
         ? 'TYLIFE_BASE_URL을 설정하세요 (예: https://n.ty-life.co.kr).'
-        : 'TYLIFE_COOKIE(또는 TYLIFE_SESSION_COOKIE)를 설정하세요.',
+        : 'TYLIFE_COOKIE 또는 TYLIFE_ID/TYLIFE_PW를 설정하세요.',
     };
   }
 
