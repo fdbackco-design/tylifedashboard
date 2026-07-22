@@ -193,7 +193,7 @@ export default function CodeRequestClient({
           gender,
           phone: phoneDigits,
           has_own_contract: hasOwn === 'yes',
-          memo: hasOwn === 'no' ? memo.trim() : null,
+          memo: memo.trim() || null,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -343,9 +343,11 @@ export default function CodeRequestClient({
               </label>
             </div>
           </div>
-          {hasOwn === 'no' && (
+          {hasOwn !== '' && (
             <div className="sm:col-span-2">
-              <label className="mb-1 block text-xs font-medium text-slate-700">사유 메모 *</label>
+              <label className="mb-1 block text-xs font-medium text-slate-700">
+                {hasOwn === 'no' ? '사유 메모 *' : '메모 (선택)'}
+              </label>
               <textarea
                 lang="ko"
                 inputMode="text"
@@ -353,7 +355,11 @@ export default function CodeRequestClient({
                 value={memo}
                 onChange={(e) => setMemo(e.target.value)}
                 rows={2}
-                placeholder="예) 다른 사람 이름으로 가입 / 특이사항 있음"
+                placeholder={
+                  hasOwn === 'no'
+                    ? '예) 다른 사람 이름으로 가입 / 특이사항 있음'
+                    : '전달할 특이사항이 있으면 입력해 주세요'
+                }
                 className="w-full rounded border border-slate-300 px-2.5 py-1.5 text-sm"
                 disabled={submitting}
               />
