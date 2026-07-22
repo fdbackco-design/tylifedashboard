@@ -60,7 +60,16 @@ type RequestItem = {
   status: string;
   created_at: string;
   completed_at: string | null;
+  rejection_reason: string | null;
+  rejected_at: string | null;
 };
+
+function historyStatusBadgeClass(status: string): string {
+  if (status === 'COMPLETED') return 'bg-emerald-100 text-emerald-700';
+  if (status === 'REJECTED') return 'bg-red-100 text-red-700';
+  if (status === 'RECEIVED') return 'bg-sky-100 text-sky-700';
+  return 'bg-amber-100 text-amber-700';
+}
 
 export default function ManagerChangeClient(props: {
   initialItems: RequestItem[];
@@ -427,13 +436,17 @@ export default function ManagerChangeClient(props: {
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="text-sm font-semibold text-slate-900 break-keep">{row.customer_name}</p>
                     <span
-                      className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                        row.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-                      }`}
+                      className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${historyStatusBadgeClass(row.status)}`}
                     >
                       {managerChangeStatusLabel(row.status)}
                     </span>
                   </div>
+                  {row.status === 'REJECTED' && (row.rejection_reason ?? '').trim() !== '' ? (
+                    <div className="mt-2 rounded-lg border border-red-200 bg-red-50 p-2.5 text-xs text-red-800">
+                      <p className="font-semibold">반려 사유</p>
+                      <p className="mt-0.5 whitespace-pre-wrap break-words">{row.rejection_reason}</p>
+                    </div>
+                  ) : null}
                   <div className="mt-2 space-y-1.5 text-xs">
                     <div>
                       <p className="text-slate-400">회원 코드</p>
@@ -490,12 +503,15 @@ export default function ManagerChangeClient(props: {
                       <td className="whitespace-nowrap px-3 py-2 tabular-nums">{row.after_manager_phone}</td>
                       <td className="px-3 py-2">
                         <span
-                          className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                            row.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-                          }`}
+                          className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${historyStatusBadgeClass(row.status)}`}
                         >
                           {managerChangeStatusLabel(row.status)}
                         </span>
+                        {row.status === 'REJECTED' && (row.rejection_reason ?? '').trim() !== '' ? (
+                          <p className="mt-1 max-w-[14rem] whitespace-pre-wrap break-words text-[11px] text-red-700">
+                            {row.rejection_reason}
+                          </p>
+                        ) : null}
                       </td>
                       <td className="whitespace-nowrap px-3 py-2 text-slate-600">{fmtDateTimeSeoul(row.created_at)}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-slate-600">{fmtDateTimeSeoul(row.completed_at)}</td>

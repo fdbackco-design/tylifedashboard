@@ -24,7 +24,7 @@ type MeContext = {
 
 const PHONE_RE = /^\d{10,11}$/;
 const REQUEST_SELECT =
-  'id, contract_id, customer_name, contract_codes, item_name, after_manager_name, after_manager_phone, status, created_at, completed_at';
+  'id, contract_id, customer_name, contract_codes, item_name, after_manager_name, after_manager_phone, status, created_at, completed_at, rejection_reason, rejected_at';
 
 async function getMe(): Promise<MeContext | { error: 'unauthorized' } | { error: string }> {
   const db = await createServerSupabaseClient();

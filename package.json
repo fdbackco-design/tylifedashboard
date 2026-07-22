@@ -15,6 +15,8 @@
     "cleanup:recruitment-nodes": "node scripts/cleanup-recruitment-nodes.mjs",
     "sync:tylife-local": "node --conditions=react-server --import tsx scripts/tylife-local-sync.ts",
     "sync:tylife-local-cookie": "node --conditions=react-server --import tsx scripts/tylife-local-cookie-sync.ts",
+    "tylife:login": "node --conditions=react-server --import tsx scripts/tylife-refresh-cookie.ts --login",
+    "tylife:refresh-cookie": "node --conditions=react-server --import tsx scripts/tylife-refresh-cookie.ts",
     "sync:tylife-launchd:install": "node scripts/tylife-launchd.mjs install",
     "sync:tylife-launchd:uninstall": "node scripts/tylife-launchd.mjs uninstall"
   },

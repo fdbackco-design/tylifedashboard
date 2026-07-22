@@ -55,7 +55,7 @@ export default async function ManagerChangePage() {
   const { data: initialItems } = await adminDb
     .from('manager_change_requests')
     .select(
-      'id, contract_id, customer_name, contract_codes, item_name, after_manager_name, after_manager_phone, status, created_at, completed_at',
+      'id, contract_id, customer_name, contract_codes, item_name, after_manager_name, after_manager_phone, status, created_at, completed_at, rejection_reason, rejected_at',
     )
     .eq('requester_user_id', user.id)
     .order('created_at', { ascending: false });

@@ -33,6 +33,9 @@ const SELECT_FIELDS = [
   'updated_at',
   'completed_at',
   'completed_by_admin_id',
+  'rejection_reason',
+  'rejected_at',
+  'rejected_by_admin_id',
 ].join(', ');
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -44,7 +47,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const db = createAdminSupabaseClient();
   let q = db.from('manager_change_requests').select(SELECT_FIELDS).order('created_at', { ascending: false }).limit(500);
 
-  if (status === 'PENDING' || status === 'RECEIVED' || status === 'COMPLETED') {
+  if (
+    status === 'PENDING' ||
+    status === 'RECEIVED' ||
+    status === 'COMPLETED' ||
+    status === 'REJECTED'
+  ) {
     q = q.eq('status', status);
   }
 

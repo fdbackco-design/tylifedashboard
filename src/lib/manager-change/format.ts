@@ -15,6 +15,7 @@ export function managerChangeStatusLabel(status: string): string {
   if (status === 'COMPLETED') return '완료';
   if (status === 'RECEIVED') return '접수완료';
   if (status === 'PENDING') return '신청중';
+  if (status === 'REJECTED') return '반려';
   return status;
 }
 
