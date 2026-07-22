@@ -48,6 +48,28 @@ async function main(): Promise<void> {
     requiredEnv('NEXT_PUBLIC_SUPABASE_URL');
     requiredEnv('SUPABASE_SERVICE_ROLE_KEY');
     requiredEnv('TYLIFE_BASE_URL');
+
+    // 동기화 전에 퍼시스턴트 브라우저 프로필에서 세션 쿠키를 자동 갱신한다.
+    // 세션이 살아있으면 Turnstile 없이 조용히 새 쿠키를 뽑아 .env.local과 process.env를 갱신하고,
+    // 만료됐거나 프로필이 사용 중이면 실패해도 기존 TYLIFE_COOKIE로 그대로 진행한다.
+    try {
+      const { refreshTyLifeCookie } = await import('./tylife-refresh-cookie');
+      const refreshed = await refreshTyLifeCookie({ interactive: false });
+      if (refreshed) {
+        console.log('[tylife-local-cookie] 세션 쿠키를 자동 갱신했습니다.');
+      } else {
+        console.warn(
+          '[tylife-local-cookie] 쿠키 자동 갱신 실패 — 기존 TYLIFE_COOKIE로 진행합니다. ' +
+            '(세션 만료 시 `npm run tylife:login` 실행)',
+        );
+      }
+    } catch (error) {
+      console.warn(
+        '[tylife-local-cookie] 쿠키 자동 갱신 중 오류 — 기존 쿠키로 진행합니다:',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+
     requiredEnv('TYLIFE_COOKIE');
     requiredEnv('TYLIFE_USER_AGENT');
 

@@ -104,4 +104,57 @@ export async function notifyRequesterOfManagerChangeCompleted(
   return { sent: result.sent, failed: result.failed };
 }
 
+/** 반려 처리 → 신청 영업자 알림 (중복 방지: rejected_notified_at) */
+export async function notifyRequesterOfManagerChangeRejected(
+  db: SupabaseClient,
+  requestId: string,
+): Promise<{ sent: number; failed: number } | { skipped: string }> {
+  if (!requestId) return { skipped: 'missing_id' };
+
+  const { data, error } = await db
+    .from('manager_change_requests')
+    .select('id, requester_user_id, customer_name, status, rejection_reason, rejected_notified_at')
+    .eq('id', requestId)
+    .maybeSingle();
+  if (error || !data) return { skipped: 'not_found' };
+
+  const row = data as {
+    id: string;
+    requester_user_id: string | null;
+    customer_name: string | null;
+    status: string | null;
+    rejection_reason: string | null;
+    rejected_notified_at: string | null;
+  };
+  if (row.rejected_notified_at) return { skipped: 'already_notified' };
+  if (row.status !== 'REJECTED') return { skipped: 'not_rejected' };
+  if (!row.requester_user_id) return { skipped: 'no_requester' };
+
+  const customerName = (row.customer_name ?? '').trim() || '고객';
+  const reason = (row.rejection_reason ?? '').trim();
+  const subs = await loadSubscriptionsForSend(db, row.requester_user_id);
+  if (!subs.length) return { skipped: 'no_subscriptions' };
+
+  const result = await sendWebPushToSubscriptions(db, {
+    subscriptions: subs,
+    title: '담당자 변경 신청이 반려되었습니다.',
+    body: trimBody(
+      reason
+        ? `고객명: ${customerName} · 반려 사유: ${reason}`
+        : `고객명: ${customerName} · 담당자 변경 신청이 반려되었습니다.`,
+    ),
+    url: MEMBER_URL,
+  });
+
+  if (result.sent > 0) {
+    await db
+      .from('manager_change_requests')
+      .update({ rejected_notified_at: new Date().toISOString() })
+      .eq('id', requestId)
+      .is('rejected_notified_at', null);
+  }
+
+  return { sent: result.sent, failed: result.failed };
+}
+
 export { BRANCH_NAME };

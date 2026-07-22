@@ -154,6 +154,19 @@ async function main(): Promise<void> {
     await verifyBrowserSession(page, remoteBaseUrl);
     console.log('[tylife-local] 브라우저 세션 확인 완료');
 
+    // 헤드풀 로그인으로 확보한 세션 쿠키를 .env.local에 저장해 두면,
+    // launchd 무인 동기화(sync:tylife-local-cookie)도 같은 쿠키로 이어서 동작한다.
+    try {
+      const { harvestAndSave } = await import('./tylife-refresh-cookie');
+      const saved = await harvestAndSave(context, page, remoteBaseUrl);
+      console.log(`[tylife-local] 세션 쿠키를 .env.local에 저장했습니다 (${saved.cookieHeader.length}자).`);
+    } catch (error) {
+      console.warn(
+        '[tylife-local] 쿠키 저장 실패 — 브리지 동기화는 계속 진행합니다:',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+
     bridge = await startLocalBridge(page, remoteBaseUrl);
     process.env.TYLIFE_BASE_URL = bridge.baseUrl;
     process.env.TYLIFE_COOKIE = 'PLAYWRIGHT_LOCAL_BRIDGE=1';

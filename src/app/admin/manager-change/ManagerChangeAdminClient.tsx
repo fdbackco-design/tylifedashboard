@@ -18,12 +18,22 @@ type AdminItem = {
   before_manager_phone: string | null;
   after_manager_name: string;
   after_manager_phone: string;
-  status: 'PENDING' | 'COMPLETED' | string;
+  status: 'PENDING' | 'RECEIVED' | 'COMPLETED' | 'REJECTED' | string;
   created_at: string;
   completed_at: string | null;
+  rejection_reason: string | null;
+  rejected_at: string | null;
+  rejected_by_admin_id: string | null;
 };
 
-type StatusFilter = 'ALL' | 'PENDING' | 'RECEIVED' | 'COMPLETED';
+type StatusFilter = 'ALL' | 'PENDING' | 'RECEIVED' | 'COMPLETED' | 'REJECTED';
+
+function statusBadgeClass(status: string): string {
+  if (status === 'COMPLETED') return 'bg-emerald-100 text-emerald-700';
+  if (status === 'REJECTED') return 'bg-red-100 text-red-700';
+  if (status === 'RECEIVED') return 'bg-sky-100 text-sky-700';
+  return 'bg-amber-100 text-amber-700';
+}
 
 function DetailCard({ item }: { item: AdminItem }) {
   const codesLine = formatManagerChangeCodesLine(item.contract_codes, item.item_name);
@@ -76,6 +86,15 @@ function DetailCard({ item }: { item: AdminItem }) {
           </dd>
         </div>
       </dl>
+      {item.status === 'REJECTED' && (item.rejection_reason ?? '').trim() !== '' ? (
+        <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+          <p className="font-semibold">반려 사유</p>
+          <p className="mt-1 whitespace-pre-wrap break-words">{item.rejection_reason}</p>
+          {item.rejected_at ? (
+            <p className="mt-1 text-red-500">{fmtDateTimeSeoul(item.rejected_at)}</p>
+          ) : null}
+        </div>
+      ) : null}
       <p className="mt-3 text-xs text-slate-500">
         신청자: {item.requester_name}
         {item.requester_phone ? ` (${item.requester_phone})` : ''}
@@ -96,6 +115,10 @@ export default function ManagerChangeAdminClient() {
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [completing, setCompleting] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<AdminItem | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejecting, setRejecting] = useState(false);
+  const [rejectError, setRejectError] = useState('');
 
   const load = useCallback(async () => {
     setError('');
@@ -189,10 +212,55 @@ export default function ManagerChangeAdminClient() {
     }
   }
 
+  function openReject(item: AdminItem) {
+    setRejectError('');
+    setRejectReason('');
+    setRejectTarget(item);
+  }
+
+  function closeReject() {
+    if (rejecting) return;
+    setRejectTarget(null);
+    setRejectReason('');
+    setRejectError('');
+  }
+
+  async function submitReject() {
+    if (!rejectTarget) return;
+    const reason = rejectReason.trim();
+    if (!reason) {
+      setRejectError('반려 사유를 입력하세요.');
+      return;
+    }
+    setRejecting(true);
+    setRejectError('');
+    try {
+      const res = await fetch('/api/admin/manager-change-requests/reject', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: rejectTarget.id, reason }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRejectError(json?.error ?? '반려 실패');
+        return;
+      }
+      setRejectTarget(null);
+      setRejectReason('');
+      setMessage('반려 처리했습니다.');
+      await load();
+    } catch (e) {
+      setRejectError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRejecting(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        {(['ALL', 'PENDING', 'RECEIVED', 'COMPLETED'] as const).map((s) => (
+        {(['ALL', 'PENDING', 'RECEIVED', 'COMPLETED', 'REJECTED'] as const).map((s) => (
           <button
             key={s}
             type="button"
@@ -280,11 +348,7 @@ export default function ManagerChangeAdminClient() {
                       <td className="px-3 py-2 font-medium break-words">{row.customer_name}</td>
                       <td className="px-3 py-2">
                         <span
-                          className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                            row.status === 'COMPLETED'
-                              ? 'bg-emerald-100 text-emerald-700'
-                              : 'bg-amber-100 text-amber-700'
-                          }`}
+                          className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusBadgeClass(row.status)}`}
                         >
                           {managerChangeStatusLabel(row.status)}
                         </span>
@@ -293,15 +357,27 @@ export default function ManagerChangeAdminClient() {
                         {fmtDateTimeSeoul(row.created_at)}
                       </td>
                       <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-                        {row.status === 'PENDING' ? (
-                          <button
-                            type="button"
-                            disabled={completing}
-                            onClick={() => void receiveOne(row.id)}
-                            className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800 disabled:opacity-50"
-                          >
-                            접수완료
-                          </button>
+                        {row.status === 'PENDING' || row.status === 'RECEIVED' ? (
+                          <div className="flex flex-wrap gap-1">
+                            {row.status === 'PENDING' ? (
+                              <button
+                                type="button"
+                                disabled={completing}
+                                onClick={() => void receiveOne(row.id)}
+                                className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800 disabled:opacity-50"
+                              >
+                                접수완료
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              disabled={completing || rejecting}
+                              onClick={() => openReject(row)}
+                              className="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 disabled:opacity-50"
+                            >
+                              반려
+                            </button>
+                          </div>
                         ) : null}
                       </td>
                     </tr>
@@ -323,6 +399,80 @@ export default function ManagerChangeAdminClient() {
           )}
         </div>
       </div>
+
+      {rejectTarget ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-4"
+          onClick={closeReject}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-bold text-slate-900">신청 반려</h3>
+            <p className="mt-0.5 text-xs text-slate-500">
+              아래 신청을 반려합니다. 입력한 사유는 신청자(영업자) 화면에 그대로 표시됩니다.
+            </p>
+            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+              <div className="grid grid-cols-1 gap-y-0.5 sm:grid-cols-2 sm:gap-x-3">
+                <div>
+                  <span className="text-slate-500">고객명</span>{' '}
+                  <span className="font-medium text-slate-900">{rejectTarget.customer_name}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500">신청자</span>{' '}
+                  <span className="font-medium text-slate-900">{rejectTarget.requester_name}</span>
+                </div>
+                <div className="sm:col-span-2">
+                  <span className="text-slate-500">변경 후 담당자</span>{' '}
+                  <span className="font-medium text-slate-900">
+                    {rejectTarget.after_manager_name} / {rejectTarget.after_manager_phone}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <label className="mt-3 block text-xs font-medium text-slate-700">반려 사유 *</label>
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              rows={4}
+              maxLength={1000}
+              placeholder="예) 정보 불일치 / 담당자 확인 필요 / 추가 자료 필요 등"
+              className="mt-1 w-full rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+              disabled={rejecting}
+              lang="ko"
+              inputMode="text"
+              autoComplete="off"
+              autoFocus
+            />
+            <div className="mt-1 flex items-center justify-between text-[11px] text-slate-400">
+              <span>최대 1000자</span>
+              <span className="tabular-nums">{rejectReason.length} / 1000</span>
+            </div>
+            {rejectError ? <p className="mt-2 text-xs text-red-600">{rejectError}</p> : null}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeReject}
+                disabled={rejecting}
+                className="rounded border px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={() => void submitReject()}
+                disabled={rejecting || !rejectReason.trim()}
+                className="rounded bg-red-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-60"
+              >
+                {rejecting ? '반려 중…' : '반려 처리'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
