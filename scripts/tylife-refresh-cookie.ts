@@ -23,6 +23,25 @@ function channel(): string {
 }
 
 /**
+ * 퍼시스턴트 컨텍스트 공통 실행 옵션.
+ *
+ * Cloudflare Turnstile("사람입니다" 위젯)은 Playwright 자동화 브라우저를 봇으로 감지하면
+ * 체크를 눌러도 "확인 실패"를 낸다. 자동화 티가 나는 신호를 제거해 사람 로그인이 통과되게 한다.
+ *   - `--enable-automation` 기본 플래그 제거 → navigator.webdriver 노출 억제
+ *   - `--disable-blink-features=AutomationControlled` → webdriver 플래그 완전 비활성화
+ */
+export function tyLifeLaunchOptions(headless: boolean) {
+  return {
+    channel: channel(),
+    headless,
+    chromiumSandbox: true,
+    viewport: { width: 1440, height: 960 },
+    ignoreDefaultArgs: ['--enable-automation'],
+    args: ['--disable-blink-features=AutomationControlled'],
+  };
+}
+
+/**
  * 브라우저 세션이 살아있는지 `/contract/list`로 확인한다.
  * (Turnstile은 /auth 로그인 폼에만 붙으므로, 유효 세션이면 챌린지 없이 JSON을 받는다.)
  */
@@ -93,12 +112,10 @@ export async function refreshTyLifeCookie(
   const base = requireBaseUrl();
   const interactive = options.interactive ?? false;
 
-  const context = await chromium.launchPersistentContext(profileDir(), {
-    channel: channel(),
-    headless: !interactive,
-    chromiumSandbox: true,
-    viewport: { width: 1440, height: 960 },
-  });
+  const context = await chromium.launchPersistentContext(
+    profileDir(),
+    tyLifeLaunchOptions(!interactive),
+  );
 
   try {
     const page = context.pages()[0] ?? (await context.newPage());
@@ -133,6 +150,11 @@ async function main(): Promise<void> {
   if (!result) {
     process.exitCode = 1;
     return;
+  }
+  // 대화형 로그인 성공 = 새 세션 발급 시점. 절대 만료 수명 측정의 기준점으로 기록한다.
+  if (interactive) {
+    const { appendSessionEvent } = await import('./tylife-session-log');
+    await appendSessionEvent('LOGIN', `${result.cookieHeader.length}chars`);
   }
   console.log(
     `[tylife-cookie] .env.local의 TYLIFE_COOKIE를 갱신했습니다 (${result.cookieHeader.length}자).`,
