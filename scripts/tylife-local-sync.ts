@@ -125,15 +125,13 @@ async function main(): Promise<void> {
   const profileDir =
     (process.env.TYLIFE_PLAYWRIGHT_PROFILE_DIR ?? '').trim() ||
     path.join(process.cwd(), '.playwright', 'tylife-profile');
-  const channel = (process.env.TYLIFE_PLAYWRIGHT_CHANNEL ?? '').trim() || 'chrome';
 
   console.log(`[tylife-local] 브라우저 프로필: ${profileDir}`);
+  const { tyLifeLaunchOptions } = await import('./tylife-refresh-cookie');
   const context = await chromium.launchPersistentContext(profileDir, {
-    channel,
-    headless: false,
-    // macOS의 실제 Chrome 샌드박스를 사용해 `--no-sandbox` 경고와 보안 저하를 방지한다.
-    chromiumSandbox: true,
-    viewport: { width: 1440, height: 960 },
+    // macOS의 실제 Chrome 샌드박스를 사용하고, Turnstile이 자동화를 감지하지 못하도록
+    // 자동화 은폐 플래그를 함께 적용한다(tyLifeLaunchOptions).
+    ...tyLifeLaunchOptions(false),
   });
   const page = context.pages()[0] ?? (await context.newPage());
   let bridge: Awaited<ReturnType<typeof startLocalBridge>> | null = null;

@@ -18,7 +18,11 @@
     "tylife:login": "node --conditions=react-server --import tsx scripts/tylife-refresh-cookie.ts --login",
     "tylife:refresh-cookie": "node --conditions=react-server --import tsx scripts/tylife-refresh-cookie.ts",
     "sync:tylife-launchd:install": "node scripts/tylife-launchd.mjs install",
-    "sync:tylife-launchd:uninstall": "node scripts/tylife-launchd.mjs uninstall"
+    "sync:tylife-launchd:uninstall": "node scripts/tylife-launchd.mjs uninstall",
+    "tylife:login-launchd:install": "node scripts/tylife-login-launchd.mjs install",
+    "tylife:login-launchd:uninstall": "node scripts/tylife-login-launchd.mjs uninstall",
+    "tylife:keepawake-launchd:install": "node scripts/tylife-keepawake-launchd.mjs install",
+    "tylife:keepawake-launchd:uninstall": "node scripts/tylife-keepawake-launchd.mjs uninstall"
   },
   "dependencies": {
     "@ducanh2912/next-pwa": "^10.2.9",
