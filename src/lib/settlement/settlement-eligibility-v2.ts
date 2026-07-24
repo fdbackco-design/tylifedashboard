@@ -102,6 +102,24 @@ function shiftToNextWorkday(ymd: string): string {
 }
 
 /**
+ * 특정 정산월의 해피콜 마감일을 공식(25일→다음 영업일) 대신 강제 지정하는 예외.
+ *
+ * 마감일은 "이 달 종료일 = 마감일" 이자 "다음 달 시작일 = 마감일 + 1" 의 기준이므로,
+ * 이 값을 통해 마감일만 바꾸면 다음 정산월 시작일도 자동으로 함께 이동해 윈도우가 겹치지 않는다.
+ */
+const HAPPYCALL_DEADLINE_OVERRIDES: Record<string, string> = {
+  // 2026-07: 7/25(토) → 공식상 7/27(월)이지만, 마감일을 7/28로 연장한다.
+  //          이에 따라 2026-07 윈도우 = 2026-06-26 ~ 2026-07-28,
+  //          2026-08 시작일은 7/29로 밀린다(겹침 없음).
+  '2026-07': '2026-07-28',
+};
+
+/** 정산월의 해피콜 마감일 YYYY-MM-DD (25일→다음 영업일, 단 예외 오버라이드가 있으면 우선). */
+function happycallDeadlineForYearMonth(yearMonth: string): string {
+  return HAPPYCALL_DEADLINE_OVERRIDES[yearMonth] ?? shiftToNextWorkday(`${yearMonth}-25`);
+}
+
+/**
  * 정산월의 해피콜 인정 윈도우.
  *
  * 계산 규칙:
@@ -130,8 +148,8 @@ export function getHappycallWindowForYearMonth(yearMonth: string): {
   const pm = m === 1 ? 12 : m - 1;
   const prevYm = `${String(py).padStart(4, '0')}-${String(pm).padStart(2, '0')}`;
 
-  const thisEnd = shiftToNextWorkday(`${yearMonth}-25`);
-  const prevEnd = shiftToNextWorkday(`${prevYm}-25`);
+  const thisEnd = happycallDeadlineForYearMonth(yearMonth);
+  const prevEnd = happycallDeadlineForYearMonth(prevYm);
   const start = addDaysYmd(prevEnd, 1);
   return {
     start_date: start,
