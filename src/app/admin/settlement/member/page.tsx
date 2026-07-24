@@ -769,7 +769,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                     {[
                       '계약코드',
                       '고객명',
-                      '해피콜 완료일',
+                      '해피콜 일시',
                       '가입일',
                       '상품명',
                       '계약 상태',
@@ -982,7 +982,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                       {[
                         '계약코드',
                         '고객명',
-                        '해피콜 완료일',
+                        '해피콜 일시',
                         '가입일',
                         '물품명',
                         '표시상태',

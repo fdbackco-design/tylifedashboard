@@ -194,7 +194,7 @@ export function OrgTreeContractDetailPanel({
                 <th className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">상태</th>
                 <th className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">구좌</th>
                 <th className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">가입일</th>
-                <th className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">해피콜 완료일</th>
+                <th className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">해피콜 일시</th>
                 {!hideProductAndContractCodeColumns ? (
                   <th className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">계약코드</th>
                 ) : null}
