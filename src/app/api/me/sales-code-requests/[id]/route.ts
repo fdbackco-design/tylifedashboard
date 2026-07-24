@@ -10,6 +10,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabaseClient, createServerSupabaseClient } from '@/lib/supabase/server';
+import { findSalesCodePhoneDuplicate } from '@/lib/sales-code/phone-duplicate';
 
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const BIRTH_RE = /^\d{8}$/;
@@ -101,6 +102,19 @@ export async function PATCH(
     : phoneRaw;
 
   const adminDb = createAdminSupabaseClient();
+
+  try {
+    const dup = await findSalesCodePhoneDuplicate(adminDb, phoneDigits, {
+      excludeRequestId: guard.row.id,
+    });
+    if (dup.duplicate) {
+      return NextResponse.json({ error: dup.message }, { status: 409 });
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+
   const { data, error } = await adminDb
     .from('sales_code_requests')
     .update({
