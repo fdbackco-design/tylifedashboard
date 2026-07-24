@@ -12,6 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabaseClient, createServerSupabaseClient } from '@/lib/supabase/server';
 import { notifyAdminsOfSalesCodeRequest } from '@/lib/push/admin-event-notify';
+import { findSalesCodePhoneDuplicate } from '@/lib/sales-code/phone-duplicate';
 
 type MeContext = {
   userId: string;
@@ -114,6 +115,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     applicantName = ((m as { name?: string } | null)?.name ?? '').trim();
   }
   if (!applicantName) applicantName = 'unknown';
+
+  try {
+    const dup = await findSalesCodePhoneDuplicate(adminDb, phoneDigits);
+    if (dup.duplicate) {
+      return NextResponse.json({ error: dup.message }, { status: 409 });
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 
   const phoneDisplay = phoneDigits.length === 11
     ? `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3, 7)}-${phoneDigits.slice(7)}`
