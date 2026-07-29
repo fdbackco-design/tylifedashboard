@@ -46,49 +46,6 @@ async function getHqMemberId(db: ReturnType<(typeof import('@/lib/supabase/serve
   return hq ? (hq as { id: string }).id : null;
 }
 
-async function findSingleEmployeeMemberIdByName(
-  db: ReturnType<(typeof import('@/lib/supabase/server'))['createAdminSupabaseClient']>,
-  name: string,
-): Promise<string | null> {
-  const n = name.trim();
-  if (!n) return null;
-  const { data, error } = await db
-    .from('organization_members')
-    .select('id, rank')
-    .eq('name', n)
-    .is('external_id', null)
-    .neq('rank', '본사')
-    .order('created_at', { ascending: true })
-    .limit(2);
-  if (error) throw new Error(`organization_members 조회 실패: ${error.message}`);
-  const rows = (data ?? []) as Array<{ id: string; rank: string }>;
-  if (rows.length !== 1) return null;
-  return rows[0].id;
-}
-
-async function attachCustomerIdentityToMember(
-  db: ReturnType<(typeof import('@/lib/supabase/server'))['createAdminSupabaseClient']>,
-  memberId: string,
-  customer: { id: string; phone: string | null },
-): Promise<void> {
-  const { data: cur, error } = await db
-    .from('organization_members')
-    .select('id, source_customer_id, phone, rank')
-    .eq('id', memberId)
-    .maybeSingle();
-  if (error) throw new Error(`organization_members 조회 실패: ${error.message}`);
-  if (!cur) return;
-  if ((cur as any).rank === '본사') return;
-
-  const next: Record<string, unknown> = {};
-  if ((cur as any).source_customer_id == null) next.source_customer_id = customer.id;
-  if (((cur as any).phone == null || String((cur as any).phone).trim() === '') && customer.phone) next.phone = customer.phone;
-  if (Object.keys(next).length === 0) return;
-
-  const { error: upErr } = await db.from('organization_members').update(next).eq('id', memberId);
-  if (upErr) throw new Error(`organization_members 업데이트 실패: ${upErr.message}`);
-}
-
 async function ensureOrgEdgeWithSource(
   db: ReturnType<(typeof import('@/lib/supabase/server'))['createAdminSupabaseClient']>,
   parentId: string,
@@ -174,7 +131,7 @@ async function ensureOrgEdgeForceParentWithSource(
 
 async function ensureCustomerMemberId(params: {
   db: ReturnType<(typeof import('@/lib/supabase/server'))['createAdminSupabaseClient']>;
-  customer: { id: string; name: string; phone: string | null };
+  customer: { id: string; name: string; phone: string | null; birth_date: string | null };
 }): Promise<{ member_id: string | null; created: boolean; reused_employee: boolean }> {
   const { db, customer } = params;
   const customerName = (customer.name ?? '').trim();
@@ -203,14 +160,7 @@ async function ensureCustomerMemberId(params: {
     .maybeSingle();
   if (byExt) return { member_id: (byExt as { id: string }).id, created: false, reused_employee: false };
 
-  // 3) 동일 이름의 직원 노드가 단 1개면 재사용 + identity 부여
-  const existingEmployeeId = await findSingleEmployeeMemberIdByName(db, customerName);
-  if (existingEmployeeId) {
-    await attachCustomerIdentityToMember(db, existingEmployeeId, { id: customer.id, phone: customer.phone });
-    return { member_id: existingEmployeeId, created: false, reused_employee: true };
-  }
-
-  // 4) 없으면 customer 노드 생성
+  // 동일 이름만으로 직원 노드를 재사용하지 않는다. exact customer id가 없으면 독립 노드 생성.
   const displayName = customerName.startsWith('[고객] ') ? customerName : `[고객] ${customerName}`;
   const { data: ins, error } = await db
     .from('organization_members')
@@ -265,16 +215,24 @@ async function runBackfill(params: {
   const customerIds = [...latestByCustomerId.keys()];
   const { data: customers, error: cuErr } = await db
     .from('customers')
-    .select('id, name, phone')
+    .select('id, name, phone, birth_date')
     .in('id', customerIds);
   if (cuErr) throw new Error(`customers 조회 실패: ${cuErr.message}`);
-  const customerById = new Map<string, { id: string; name: string; phone: string | null }>();
+  const customerById = new Map<
+    string,
+    { id: string; name: string; phone: string | null; birth_date: string | null }
+  >();
   for (const c of (customers ?? []) as any[]) {
-    customerById.set(c.id as string, { id: c.id as string, name: c.name as string, phone: (c.phone ?? null) as string | null });
+    customerById.set(c.id as string, {
+      id: c.id as string,
+      name: c.name as string,
+      phone: (c.phone ?? null) as string | null,
+      birth_date: (c.birth_date ?? null) as string | null,
+    });
   }
 
   const targets: Array<{
-    customer: { id: string; name: string; phone: string | null };
+    customer: { id: string; name: string; phone: string | null; birth_date: string | null };
     contract_id: string;
     sales_member_id: string;
   }> = [];

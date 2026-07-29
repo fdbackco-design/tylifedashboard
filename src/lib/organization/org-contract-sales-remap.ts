@@ -1,4 +1,9 @@
 import { isContractJoinCompleted } from '@/lib/utils/contract-display-status';
+import {
+  buildCustomerIdentityKey,
+  normalizeCustomerIdentityBirthDate,
+  normalizeCustomerIdentityName,
+} from '@/lib/organization/customer-identity';
 
 /** 조직도 계약 담당자 치환용 최소 멤버 필드 */
 export type OrgMemberForContractRemap = {
@@ -20,6 +25,7 @@ export type ContractSalesRemapInput = {
   customer_phone?: string | null;
   contract_code?: string | null;
   customer_name?: string | null;
+  customer_birth_date?: string | null;
 };
 
 /**
@@ -28,6 +34,7 @@ export type ContractSalesRemapInput = {
  */
 export function buildOrgContractSalesRemap(
   membersRaw: OrgMemberForContractRemap[],
+  customerBirthDateById: ReadonlyMap<string, string | null> = new Map(),
 ): {
   remapMemberId: (id: string) => string;
   resolveContractSalesMemberId: (c: ContractSalesRemapInput) => string;
@@ -37,38 +44,59 @@ export function buildOrgContractSalesRemap(
     customerId: string,
     expectedName?: string | null,
     customerPhone?: string | null,
+    customerBirthDate?: string | null,
   ) => string;
   hqIds: Set<string>;
   membersFiltered: OrgMemberForContractRemap[];
 } {
-  const toPhoneDigits = (v: string | null | undefined) => (v ?? '').replace(/\D/g, '');
-  const normName = (v: string | null | undefined) => (v ?? '').replace(/^\[고객\]\s*/, '').trim();
+  const normName = normalizeCustomerIdentityName;
+  const customerIdForMember = (m: OrgMemberForContractRemap): string | null => {
+    if (m.source_customer_id) return m.source_customer_id;
+    const ext = m.external_id ?? '';
+    if (ext.startsWith('customer:')) return ext.slice('customer:'.length);
+    if (ext.startsWith('cust:')) return ext.slice('cust:'.length);
+    return null;
+  };
+  const birthDateForMember = (m: OrgMemberForContractRemap): string => {
+    const customerId = customerIdForMember(m);
+    return customerId
+      ? normalizeCustomerIdentityBirthDate(customerBirthDateById.get(customerId))
+      : '';
+  };
+  const identityKey = (
+    name: string | null | undefined,
+    phone: string | null | undefined,
+    birthDate: string | null | undefined,
+  ): string | null => buildCustomerIdentityKey({ name, phone, birthDate });
 
-  // 노드 id → 정규화 이름 (자기구매 귀속 시 고객명/노드명 일치 검증용)
-  const normNameById = new Map<string, string>();
-  for (const m of membersRaw) normNameById.set(m.id, normName(m.name));
+  const memberById = new Map(membersRaw.map((m) => [m.id, m]));
 
-  // customer_id 가 서로 다른 사람에게 공유될 수 있으므로(예: 주민번호 마스킹=생년월일 충돌),
-  // "고객 노드 자기구매 귀속"은 계약 고객명이 대상 노드명과 일치할 때만 적용한다.
-  const customerNameMatches = (memberId: string, expectedName: string | null | undefined): boolean => {
-    const expected = normName(expectedName);
-    if (!expected) return true; // 고객명이 없으면(구버전 호출) 기존 동작 유지
-    const actual = normNameById.get(memberId) ?? '';
-    if (!actual) return true;
-    return expected === actual;
+  // 이름만 같거나 식별값 일부가 누락된 경우에는 다른 사람일 수 있으므로 자동 귀속하지 않는다.
+  const customerIdentityMatches = (
+    memberId: string,
+    expectedName: string | null | undefined,
+    expectedPhone: string | null | undefined,
+    expectedBirthDate: string | null | undefined,
+  ): boolean => {
+    const member = memberById.get(memberId);
+    if (!member) return false;
+    const expectedKey = identityKey(expectedName, expectedPhone, expectedBirthDate);
+    const actualKey = identityKey(member.name, member.phone, birthDateForMember(member));
+    return expectedKey != null && actualKey != null && expectedKey === actualKey;
   };
 
-  const employeesByKey = new Map<string, string>();
+  const employeesByKey = new Map<string, Set<string>>();
   const customerMergeTo = new Map<string, string>();
 
   for (const m of membersRaw) {
     const ext = m.external_id ?? null;
     const nName = normName(m.name);
-    const digits = toPhoneDigits(m.phone);
-    const key = `${nName}|${digits}`;
+    const key = identityKey(nName, m.phone, birthDateForMember(m));
     const isCustomerNode = ext?.startsWith('customer:') ?? false;
-    if (!isCustomerNode && toPhoneDigits(m.phone)) {
-      if (!employeesByKey.has(key)) employeesByKey.set(key, m.id);
+    if (!isCustomerNode && key) {
+      const employeeIds = employeesByKey.get(key) ?? new Set<string>();
+      employeeIds.add(m.id);
+      employeesByKey.set(key, employeeIds);
     }
   }
 
@@ -76,13 +104,12 @@ export function buildOrgContractSalesRemap(
     const ext = m.external_id ?? null;
     const isCustomerNode = ext?.startsWith('customer:') ?? false;
     if (!isCustomerNode) continue;
-    const digits = toPhoneDigits(m.phone);
-    const nName = normName(m.name);
-    if (digits) {
-      const key = `${nName}|${digits}`;
-      const employeeId = employeesByKey.get(key);
-      if (employeeId) {
-        customerMergeTo.set(m.id, employeeId);
+    const key = identityKey(m.name, m.phone, birthDateForMember(m));
+    if (key) {
+      const employeeIds = employeesByKey.get(key);
+      if (employeeIds?.size === 1) {
+        const employeeId = employeeIds.values().next().value;
+        if (employeeId) customerMergeTo.set(m.id, employeeId);
       }
     }
   }
@@ -108,7 +135,7 @@ export function buildOrgContractSalesRemap(
   const customerNodeByCustomerId = new Map<string, string>();
   const customerMemberIdByCustomerId = new Map<string, string>();
   const customerMemberIdsByNamePhone = new Map<string, Set<string>>();
-  const nodeIdByPhoneDigits = new Map<string, string>();
+  const nodeIdsByIdentity = new Map<string, Set<string>>();
 
   for (const m of membersFiltered) {
     const ext = m.external_id ?? null;
@@ -127,29 +154,34 @@ export function buildOrgContractSalesRemap(
     }
     const isCustomerIdentity =
       Boolean(sid) || Boolean(ext?.startsWith('customer:')) || Boolean(ext?.startsWith('cust:'));
-    const digits = toPhoneDigits(m.phone);
-    const namePhoneKey = `${normName(m.name)}|${digits}`;
-    if (isCustomerIdentity && m.rank !== '본사' && normName(m.name) && digits) {
-      const ids = customerMemberIdsByNamePhone.get(namePhoneKey) ?? new Set<string>();
+    const customerIdentityKey = identityKey(m.name, m.phone, birthDateForMember(m));
+    if (isCustomerIdentity && m.rank !== '본사' && customerIdentityKey) {
+      const ids = customerMemberIdsByNamePhone.get(customerIdentityKey) ?? new Set<string>();
       ids.add(m.id);
-      customerMemberIdsByNamePhone.set(namePhoneKey, ids);
+      customerMemberIdsByNamePhone.set(customerIdentityKey, ids);
+      const allIds = nodeIdsByIdentity.get(customerIdentityKey) ?? new Set<string>();
+      allIds.add(m.id);
+      nodeIdsByIdentity.set(customerIdentityKey, allIds);
     }
-    if (digits) nodeIdByPhoneDigits.set(digits, m.id);
   }
 
   const hqIds = new Set(
     membersFiltered.filter((m) => m.name === '안성준' || m.rank === '본사').map((m) => m.id),
   );
 
-  const findCustomerNodeId = (c: { customer_id: string; customer_phone: string | null }): string | null => {
+  const findCustomerNodeId = (c: ContractSalesRemapInput): string | null => {
     const byExt =
       customerIdToEffectiveMemberId.get(c.customer_id) ?? customerNodeByCustomerId.get(c.customer_id);
-    if (byExt) return byExt;
-    const digits = toPhoneDigits(c.customer_phone);
-    if (digits) {
-      const byPhone = nodeIdByPhoneDigits.get(digits);
-      if (byPhone) return byPhone;
+    if (
+      byExt &&
+      customerIdentityMatches(byExt, c.customer_name, c.customer_phone, c.customer_birth_date)
+    ) {
+      return byExt;
     }
+    const key = identityKey(c.customer_name, c.customer_phone, c.customer_birth_date);
+    if (!key) return null;
+    const candidates = nodeIdsByIdentity.get(key);
+    if (candidates?.size === 1) return candidates.values().next().value ?? null;
     return null;
   };
 
@@ -158,7 +190,16 @@ export function buildOrgContractSalesRemap(
     if (customerMemberId) {
       const merged = remapMemberId(customerMemberId);
       // 공유 customer_id 방어: 고객명이 대상 노드명과 일치할 때만 자기구매 귀속.
-      if (customerNameMatches(merged, c.customer_name)) return merged;
+      if (
+        customerIdentityMatches(
+          merged,
+          c.customer_name,
+          c.customer_phone,
+          c.customer_birth_date,
+        )
+      ) {
+        return merged;
+      }
       // 불일치면 아래 일반 담당자 귀속 로직으로 진행(예: 김미옥 계약 → 담당자 한진호).
     }
 
@@ -170,10 +211,7 @@ export function buildOrgContractSalesRemap(
     });
 
     if (hqIds.size > 0 && hqIds.has(c.sales_member_id) && joinEligible) {
-      const customerNodeId = findCustomerNodeId({
-        customer_id: c.customer_id,
-        customer_phone: c.customer_phone ?? null,
-      });
+      const customerNodeId = findCustomerNodeId(c);
       if (customerNodeId) return remapMemberId(customerNodeId);
     }
     return remapMemberId(c.sales_member_id);
@@ -193,10 +231,7 @@ export function buildOrgContractSalesRemap(
       memo: c.memo ?? null,
     });
     if (!joinEligible) return primary;
-    const customerNodeId = findCustomerNodeId({
-      customer_id: c.customer_id,
-      customer_phone: c.customer_phone ?? null,
-    });
+    const customerNodeId = findCustomerNodeId(c);
     if (!customerNodeId) return primary;
     const merged = remapMemberId(customerNodeId);
     return subtreeMemberIds.has(merged) ? merged : primary;
@@ -206,19 +241,21 @@ export function buildOrgContractSalesRemap(
     customerId: string,
     expectedName?: string | null,
     customerPhone?: string | null,
+    customerBirthDate?: string | null,
   ): string => {
     const merged = remapMemberId(customerMemberIdByCustomerId.get(customerId) ?? '');
-    // 공유 customer_id 방어: 고객명이 지정되면 노드명과 일치할 때만 매핑을 인정.
-    if (merged && (expectedName === undefined || customerNameMatches(merged, expectedName))) {
+    if (
+      merged &&
+      customerIdentityMatches(merged, expectedName, customerPhone, customerBirthDate)
+    ) {
       return merged;
     }
 
     // TY Life에서 같은 사람이 새 customers 행으로 재생성될 수 있다. 이 경우 고객 ID는 달라도
-    // 이름과 전화번호가 모두 같고 후보가 하나뿐일 때 기존 조직 노드로 안전하게 연결한다.
-    const expected = normName(expectedName);
-    const digits = toPhoneDigits(customerPhone);
-    if (!expected || !digits) return '';
-    const candidates = customerMemberIdsByNamePhone.get(`${expected}|${digits}`);
+    // 이름·전화번호·생년월일이 모두 같고 후보가 하나뿐일 때만 기존 조직 노드로 연결한다.
+    const key = identityKey(expectedName, customerPhone, customerBirthDate);
+    if (!key) return '';
+    const candidates = customerMemberIdsByNamePhone.get(key);
     if (!candidates || candidates.size !== 1) return '';
     return remapMemberId(candidates.values().next().value ?? '');
   };

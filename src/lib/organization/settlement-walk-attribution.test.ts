@@ -40,7 +40,11 @@ describe('settlement walk org attribution', () => {
     { parent_id: leaderId, child_id: customerMemberId },
   ];
 
-  const ctx = buildOrgStructuralTreeContext({ membersRaw, edgesRaw });
+  const ctx = buildOrgStructuralTreeContext({
+    membersRaw,
+    edgesRaw,
+    customerBirthDateById: new Map([[customerId, '1990-01-01']]),
+  });
 
   it('HQ 직계약 + 가입 인정 → 산하 고객(조직원) 노드 walk에 포함', () => {
     const rows: AttributedJoinContractRow[] = [
@@ -54,6 +58,8 @@ describe('settlement walk org attribution', () => {
           customer_id: customerId,
           status: '가입',
           customer_phone: '01055556666',
+          customer_name: '고객영업',
+          customer_birth_date: '1990-01-01',
         }),
         happy_call_at: '2026-06-01',
         created_at: '2026-06-01T00:00:00Z',
@@ -85,5 +91,53 @@ describe('settlement walk org attribution', () => {
       customer_phone: null,
     });
     assert.equal(attributed, salesId);
+  });
+
+  it('동명이인 고객 노드와 리더 노드를 분리해 상위 영업사원 승급 walk를 오염시키지 않는다', () => {
+    const kimId = 'kim-yunjung';
+    const customerParkId = 'customer-park';
+    const leaderParkId = 'leader-park';
+    const otherParentId = 'other-parent';
+    const customerParkCustomerId = 'customer-park-customer';
+    const leaderParkCustomerId = 'leader-park-customer';
+    const homonymCtx = buildOrgStructuralTreeContext({
+      membersRaw: [
+        { id: kimId, name: '김윤정', rank: '영업사원', phone: '01041175624', external_id: 'cust:kim', source_customer_id: 'kim' },
+        { id: otherParentId, name: '조명희', rank: '센터장', phone: '01000000001', external_id: 'cust:parent', source_customer_id: 'parent' },
+        { id: leaderParkId, name: '박미선', rank: '리더', phone: '01057656850', external_id: `cust:${leaderParkCustomerId}`, source_customer_id: leaderParkCustomerId },
+        { id: customerParkId, name: '[고객] 박미선', rank: '영업사원', phone: '01071707562', external_id: `customer:${customerParkCustomerId}`, source_customer_id: customerParkCustomerId },
+      ],
+      edgesRaw: [
+        { parent_id: otherParentId, child_id: kimId },
+        { parent_id: otherParentId, child_id: leaderParkId },
+        { parent_id: kimId, child_id: customerParkId },
+      ],
+      customerBirthDateById: new Map([
+        ['kim', '1990-01-01'],
+        ['parent', '1970-01-01'],
+        [leaderParkCustomerId, '1986-04-13'],
+        [customerParkCustomerId, '1980-08-11'],
+      ]),
+    });
+    const rows: AttributedJoinContractRow[] = [
+      {
+        id: 'customer-park-contract',
+        join_date: '2026-07-23',
+        unit_count: 2,
+        sales_member_id: customerParkId,
+      },
+      {
+        id: 'leader-park-contract',
+        join_date: '2026-07-15',
+        unit_count: 20,
+        sales_member_id: leaderParkId,
+      },
+    ];
+
+    const { audit } = buildPromotionCommissionWalkForMember(kimId, homonymCtx.treeRows, rows);
+
+    assert.deepEqual(audit.map((row) => row.contractId), ['customer-park-contract']);
+    assert.equal(homonymCtx.remapMemberId(customerParkId), customerParkId);
+    assert.equal(homonymCtx.treeRows.find((row) => row.id === leaderParkId)?.parent_id, otherParentId);
   });
 });

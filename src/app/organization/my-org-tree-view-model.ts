@@ -150,6 +150,24 @@ export async function buildMyOrganizationTreeViewModel(
     }>;
     const edgesRaw = (snapshot.edges ?? []) as Array<{ parent_id: string | null; child_id: string }>;
     const rules = (snapshot.rules ?? []) as SettlementRule[];
+    const sourceCustomerIds = [
+      ...new Set(
+        membersRaw
+          .map((m) => m.source_customer_id ?? null)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const customerBirthDateById = new Map<string, string | null>();
+    for (let offset = 0; offset < sourceCustomerIds.length; offset += 500) {
+      const customerIds = sourceCustomerIds.slice(offset, offset + 500);
+      const { data: sourceCustomers } = await adminDb
+        .from('customers')
+        .select('id, birth_date')
+        .in('id', customerIds);
+      for (const row of (sourceCustomers ?? []) as Array<{ id: string; birth_date: string | null }>) {
+        customerBirthDateById.set(row.id, row.birth_date);
+      }
+    }
 
     const {
       remapMemberId,
@@ -157,7 +175,7 @@ export async function buildMyOrganizationTreeViewModel(
       resolveContractOriginForSubtree,
       hqIds: hqIdsForContracts,
       membersFiltered,
-    } = buildOrgContractSalesRemap(membersRaw as any);
+    } = buildOrgContractSalesRemap(membersRaw as any, customerBirthDateById);
     const hqSalesMemberIds = [...hqIdsForContracts];
 
     /** 병합 필터 후에도 스냅샷 행과 동일 객체(leader_rank_effective_at 등 유지) */
@@ -298,7 +316,7 @@ export async function buildMyOrganizationTreeViewModel(
     }
 
     const contractSelect =
-      'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, customer_id, is_cancelled, sales_link_status, happy_call_at, happycall_result, source_snapshot_json, customers(name, phone), created_at';
+      'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, customer_id, is_cancelled, sales_link_status, happy_call_at, happycall_result, source_snapshot_json, customers(name, phone, birth_date), created_at';
 
     const contractChunks = chunk(subtreeMemberIds, 500);
     const contractResList = await Promise.all(
@@ -329,6 +347,7 @@ export async function buildMyOrganizationTreeViewModel(
         customer_phone: row.customers?.phone ?? null,
         contract_code: row.contract_code ?? null,
         customer_name: row.customers?.name ?? null,
+        customer_birth_date: row.customers?.birth_date ?? null,
       }) as const;
 
     if (hqSalesMemberIds.length > 0) {
@@ -400,6 +419,7 @@ export async function buildMyOrganizationTreeViewModel(
       customer_phone: (c.customers?.phone ?? null) as string | null,
       contract_code: (c.contract_code ?? null) as string | null,
       customer_name: (c.customers?.name ?? null) as string | null,
+      customer_birth_date: (c.customers?.birth_date ?? null) as string | null,
     });
 
     const originInSubtree = (c: any) => resolveContractOriginForSubtree(contractRemapInput(c), subtreeIdSet);
@@ -445,7 +465,7 @@ export async function buildMyOrganizationTreeViewModel(
 
     // 누적 가입 구좌: 월 제한 없이(서브트리 전체) 가입 완료(표시 상태) 합산
     const cumulativeContractsSelect =
-      'id, join_date, unit_count, status, rental_request_no, invoice_no, memo, is_cancelled, sales_member_id, customer_id, item_name, created_at, sales_link_status, happy_call_at, happycall_result, customers(name, phone)';
+      'id, join_date, unit_count, status, rental_request_no, invoice_no, memo, is_cancelled, sales_member_id, customer_id, item_name, created_at, sales_link_status, happy_call_at, happycall_result, customers(name, phone, birth_date)';
     const cumulativeResList = await Promise.all(
       contractChunks.map((ids) =>
         ids.length === 0
@@ -480,7 +500,8 @@ export async function buildMyOrganizationTreeViewModel(
             memo: row.memo ?? null,
             customer_phone: row.customers?.phone ?? null,
             contract_code: row.contract_code ?? null,
-            customer_name: null,
+            customer_name: row.customers?.name ?? null,
+            customer_birth_date: row.customers?.birth_date ?? null,
           },
           subtreeIdSet,
         );
@@ -511,7 +532,8 @@ export async function buildMyOrganizationTreeViewModel(
               memo: row.memo ?? null,
               customer_phone: row.customers?.phone ?? null,
               contract_code: row.contract_code ?? null,
-              customer_name: null,
+              customer_name: row.customers?.name ?? null,
+              customer_birth_date: row.customers?.birth_date ?? null,
             },
             subtreeIdSet,
           );
@@ -592,6 +614,7 @@ export async function buildMyOrganizationTreeViewModel(
         (c as any).customer_id as string,
         (c as any).customers?.name ?? '',
         (c as any).customers?.phone ?? null,
+        (c as any).customers?.birth_date ?? null,
       );
       const customerKey = customerKeyRaw && subtreeIdSet.has(customerKeyRaw) ? customerKeyRaw : '';
       if (customerKey && customerKey !== key) {

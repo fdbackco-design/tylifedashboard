@@ -22,6 +22,10 @@
  */
 
 import { isContractJoinCompleted } from '@/lib/utils/contract-display-status';
+import {
+  buildOrgContractSalesRemap,
+  type OrgMemberForContractRemap,
+} from '@/lib/organization/org-contract-sales-remap';
 
 export type AttributionMemberInput = {
   id: string;
@@ -43,6 +47,7 @@ export type AttributionContractInput = {
   memo: string | null;
   customer_phone: string | null;
   customer_name: string | null;
+  customer_birth_date: string | null;
 };
 
 export type AttributionDecision =
@@ -72,96 +77,23 @@ export type OrgAttributionContext = {
   effectiveMemberIds: ReadonlySet<string>;
 };
 
-const toPhoneDigits = (v: string | null | undefined): string =>
-  (v ?? '').replace(/\D/g, '');
 const normName = (v: string | null | undefined): string =>
   (v ?? '').replace(/^\[고객\]\s*/, '').trim();
 
 export function buildOrgAttributionContext(
   allMembers: AttributionMemberInput[],
+  customerBirthDateById: ReadonlyMap<string, string | null> = new Map(),
 ): OrgAttributionContext {
-  // 안성준은 TY Life 시스템상 영업사원이지만 실제로는 본사로 취급 (page.tsx 와 동일 정책)
   const membersRaw = allMembers.map((m) =>
     m.name === '안성준' ? ({ ...m, rank: '본사' } as AttributionMemberInput) : m,
   );
-
-  // ── customer 노드 ↔ 직원 노드 병합 ──
-  const employeesByKey = new Map<string, string>(); // name|phone → memberId
-  for (const m of membersRaw) {
-    const isCustomerNode = (m.external_id ?? '').startsWith('customer:');
-    if (isCustomerNode) continue;
-    const digits = toPhoneDigits(m.phone);
-    if (!digits) continue;
-    const key = `${normName(m.name)}|${digits}`;
-    if (!employeesByKey.has(key)) employeesByKey.set(key, m.id);
-  }
-
-  const customerMergeTo = new Map<string, string>();
-  for (const m of membersRaw) {
-    const isCustomerNode = (m.external_id ?? '').startsWith('customer:');
-    if (!isCustomerNode) continue;
-    const digits = toPhoneDigits(m.phone);
-    if (!digits) continue;
-    const key = `${normName(m.name)}|${digits}`;
-    const employeeId = employeesByKey.get(key);
-    if (employeeId) customerMergeTo.set(m.id, employeeId);
-  }
-
-  const remapMemberId = (id: string | null | undefined): string | null => {
-    if (!id) return null;
-    return customerMergeTo.get(id) ?? id;
-  };
-
-  // customer_id → effective member id (source_customer_id 우선, external_id=customer:* 보조)
-  const customerIdToEffectiveMemberId = new Map<string, string>();
-  for (const m of membersRaw) {
-    if (m.source_customer_id) {
-      customerIdToEffectiveMemberId.set(
-        m.source_customer_id,
-        (customerMergeTo.get(m.id) ?? m.id),
-      );
-      continue;
-    }
-    const ext = m.external_id ?? '';
-    if (ext.startsWith('customer:')) {
-      const cid = ext.slice('customer:'.length);
-      if (!customerIdToEffectiveMemberId.has(cid)) {
-        customerIdToEffectiveMemberId.set(cid, customerMergeTo.get(m.id) ?? m.id);
-      }
-    }
-  }
-
-  // members = 병합된 customer 노드 제외
-  const members = membersRaw.filter((m) => !customerMergeTo.has(m.id));
-
-  // ── HQ / customer 매핑 (page.tsx 와 동등) ──
-  const hqIds = new Set(
-    members.filter((m) => m.name === '안성준' || m.rank === '본사').map((m) => m.id),
+  const shared = buildOrgContractSalesRemap(
+    membersRaw as OrgMemberForContractRemap[],
+    customerBirthDateById,
   );
-
-  const customerNodeByCustomerId = new Map<string, string>();
-  const customerMemberIdByCustomerId = new Map<string, string>();
-  const nodeIdByPhoneDigits = new Map<string, string>();
-
-  for (const m of members) {
-    const ext = m.external_id ?? '';
-    if (ext.startsWith('customer:')) {
-      const cid = ext.slice('customer:'.length);
-      customerNodeByCustomerId.set(cid, m.id);
-    }
-    const sid = m.source_customer_id ?? null;
-    if (sid && m.rank !== '본사') {
-      customerMemberIdByCustomerId.set(sid, m.id);
-    } else if (ext.startsWith('customer:') && m.rank !== '본사') {
-      const cid = ext.slice('customer:'.length);
-      if (!customerMemberIdByCustomerId.has(cid)) {
-        customerMemberIdByCustomerId.set(cid, m.id);
-      }
-    }
-    const digits = toPhoneDigits(m.phone);
-    if (digits) nodeIdByPhoneDigits.set(digits, m.id);
-  }
-
+  const remapMemberId = (id: string | null | undefined): string | null =>
+    id ? shared.remapMemberId(id) : null;
+  const members = shared.membersFiltered as AttributionMemberInput[];
   const effectiveMemberIds = new Set(members.map((m) => m.id));
 
   const memberNameById = new Map<string, string>(
@@ -171,86 +103,41 @@ export function buildOrgAttributionContext(
     members.map((m) => [m.id, m.rank]),
   );
 
-  const findCustomerNodeIdWithCandidates = (c: AttributionContractInput): {
-    pick: string | null;
-    candidates: string[];
-  } => {
-    const candidates: string[] = [];
-    if (c.customer_id) {
-      const byExt =
-        customerIdToEffectiveMemberId.get(c.customer_id) ??
-        customerNodeByCustomerId.get(c.customer_id);
-      if (byExt) candidates.push(byExt);
-    }
-    const digits = toPhoneDigits(c.customer_phone);
-    if (digits) {
-      const byPhone = nodeIdByPhoneDigits.get(digits);
-      if (byPhone && !candidates.includes(byPhone)) candidates.push(byPhone);
-    }
-    return { pick: candidates[0] ?? null, candidates };
-  };
-
   const resolveOrgBasedSalesMember = (
     c: AttributionContractInput,
   ): AttributionResult => {
-    // (1) 본인이 고객인 계약 — customer 노드(or 병합된 직원 노드)에 귀속
-    if (c.customer_id) {
-      const customerMemberId = customerMemberIdByCustomerId.get(c.customer_id) ?? null;
-      if (customerMemberId) {
-        const mapped = customerMergeTo.get(customerMemberId) ?? customerMemberId;
-        // 추가 후보가 있는지(phone 등) 점검해 모호성 표기
-        const { candidates: extraCandidates } = findCustomerNodeIdWithCandidates(c);
-        const merged = new Set<string>([mapped, ...extraCandidates.map((x) => customerMergeTo.get(x) ?? x)]);
-        merged.delete('');
-        return {
-          org_based_sales_member_id: mapped,
-          decision: 'customer_node',
-          candidates: [...merged],
-        };
-      }
-    }
-
-    // (2) HQ 담당 + 가입 인정 → customer 노드로 치환
     const joinEligible = isContractJoinCompleted({
       status: c.status ?? '',
       rental_request_no: c.rental_request_no,
       invoice_no: c.invoice_no,
       memo: c.memo,
     });
-    if (
-      c.sales_member_id &&
-      hqIds.size > 0 &&
-      hqIds.has(c.sales_member_id) &&
-      joinEligible
-    ) {
-      const { pick, candidates } = findCustomerNodeIdWithCandidates(c);
-      if (pick) {
-        const mapped = customerMergeTo.get(pick) ?? pick;
-        const decision: AttributionDecision =
-          candidates.length > 1 ? 'ambiguous' : 'hq_customer_node';
-        return {
-          org_based_sales_member_id: mapped,
-          decision,
-          candidates: candidates.map((x) => customerMergeTo.get(x) ?? x),
-        };
-      }
-      // HQ 인데 customer 매핑이 없으면 HQ 그대로 두는 게 page.tsx 의 fallthrough 동작
-    }
-
-    // (3) fallback: sales_member_id 그대로(병합 매핑은 통과)
-    if (c.sales_member_id) {
-      const mapped = customerMergeTo.get(c.sales_member_id) ?? c.sales_member_id;
-      if (effectiveMemberIds.has(mapped)) {
-        return {
-          org_based_sales_member_id: mapped,
-          decision: 'sales_member_id',
-          candidates: [mapped],
-        };
-      }
-      // 매핑된 결과가 유효 멤버 풀에 없으면 → not_found
+    if (!c.sales_member_id || !c.customer_id) {
       return { org_based_sales_member_id: null, decision: 'not_found', candidates: [] };
     }
-    return { org_based_sales_member_id: null, decision: 'not_found', candidates: [] };
+    const mapped = shared.resolveContractSalesMemberId({
+      sales_member_id: c.sales_member_id,
+      customer_id: c.customer_id,
+      status: c.status ?? '',
+      rental_request_no: c.rental_request_no,
+      invoice_no: c.invoice_no,
+      memo: c.memo,
+      customer_phone: c.customer_phone,
+      customer_name: c.customer_name,
+      customer_birth_date: c.customer_birth_date,
+      contract_code: c.contract_code,
+    });
+    if (!effectiveMemberIds.has(mapped)) {
+      return { org_based_sales_member_id: null, decision: 'not_found', candidates: [] };
+    }
+    const originalMapped = shared.remapMemberId(c.sales_member_id);
+    const decision: AttributionDecision =
+      mapped === originalMapped
+        ? 'sales_member_id'
+        : shared.hqIds.has(c.sales_member_id) && joinEligible
+          ? 'hq_customer_node'
+          : 'customer_node';
+    return { org_based_sales_member_id: mapped, decision, candidates: [mapped] };
   };
 
   return {

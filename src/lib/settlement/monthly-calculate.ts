@@ -126,11 +126,12 @@ export async function calculateMonthlySettlement(params: {
   ];
   const customerPhoneById = new Map<string, string | null>();
   const customerNameByIdEarly = new Map<string, string>();
+  const customerBirthDateById = new Map<string, string | null>();
   if (walkCustomerIds.length > 0) {
     for (const idChunk of chunkIds(walkCustomerIds, DB_ID_CHUNK_SIZE)) {
       const { data: customerRows, error: cuWalkErr } = await db
         .from('customers')
-        .select('id, name, phone')
+        .select('id, name, phone, birth_date')
         .in('id', idChunk);
       if (cuWalkErr) throw new Error(`customers(walk) 조회 실패: ${cuWalkErr.message}`);
       for (const r of (customerRows ?? []) as any[]) {
@@ -138,6 +139,7 @@ export async function calculateMonthlySettlement(params: {
         const id = String(r.id);
         customerPhoneById.set(id, (r.phone ?? null) as string | null);
         customerNameByIdEarly.set(id, String(r.name ?? '').trim());
+        customerBirthDateById.set(id, (r.birth_date ?? null) as string | null);
       }
     }
   }
@@ -310,6 +312,26 @@ export async function calculateMonthlySettlement(params: {
   const membersRaw = ((membersRes.data ?? []) as unknown as OrganizationMember[]).map((m) =>
     m.name === '안성준' ? { ...m, rank: '본사' as const } : m,
   );
+  const missingSourceCustomerIds = [
+    ...new Set(
+      ((membersRes.data ?? []) as Array<{ source_customer_id?: string | null }>)
+        .map((m) => m.source_customer_id ?? null)
+        .filter(
+          (id): id is string =>
+            typeof id === 'string' && id.length > 0 && !customerBirthDateById.has(id),
+        ),
+    ),
+  ];
+  for (const idChunk of chunkIds(missingSourceCustomerIds, DB_ID_CHUNK_SIZE)) {
+    const { data: customerRows, error: birthErr } = await db
+      .from('customers')
+      .select('id, birth_date')
+      .in('id', idChunk);
+    if (birthErr) throw new Error(`customers(birth_date) 조회 실패: ${birthErr.message}`);
+    for (const row of (customerRows ?? []) as Array<{ id: string; birth_date: string | null }>) {
+      customerBirthDateById.set(row.id, row.birth_date);
+    }
+  }
 
   if (debug) {
     const leaderIds = (membersRaw as OrganizationMember[]).filter((m) => m.rank === '리더').map((m) => m.id);
@@ -362,6 +384,7 @@ export async function calculateMonthlySettlement(params: {
     })),
     edgesRaw,
     parentOverrideByChildId,
+    customerBirthDateById,
   });
   const { treeRows, resolveSettlementWalkSalesMemberId } = orgWalkCtx;
 
@@ -380,6 +403,7 @@ export async function calculateMonthlySettlement(params: {
       customer_phone: customerId ? (customerPhoneById.get(customerId) ?? null) : null,
       contract_code: (row.contract_code ?? null) as string | null,
       customer_name: customerId ? (customerNameByIdEarly.get(customerId) ?? '') : '',
+      customer_birth_date: customerId ? (customerBirthDateById.get(customerId) ?? null) : null,
     });
   };
 

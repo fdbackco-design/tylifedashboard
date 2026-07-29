@@ -12,6 +12,7 @@ export type OrgStructuralTreeContext = {
     customerId: string,
     expectedName?: string | null,
     customerPhone?: string | null,
+    customerBirthDate?: string | null,
   ) => string;
   resolveContractSalesMemberId: (c: ContractSalesRemapInput) => string;
   resolveSettlementWalkSalesMemberId: (
@@ -30,10 +31,11 @@ export function buildOrgStructuralTreeContext(params: {
   edgesRaw: Array<{ parent_id: string | null; child_id: string }>;
   /** member_id → override parent_id (코드 선발급 예외 연결 등) */
   parentOverrideByChildId?: ReadonlyMap<string, string | null>;
+  customerBirthDateById?: ReadonlyMap<string, string | null>;
 }): OrgStructuralTreeContext {
-  const { membersRaw, edgesRaw, parentOverrideByChildId } = params;
+  const { membersRaw, edgesRaw, parentOverrideByChildId, customerBirthDateById } = params;
 
-  const remapCtx = buildOrgContractSalesRemap(membersRaw);
+  const remapCtx = buildOrgContractSalesRemap(membersRaw, customerBirthDateById);
   const {
     remapMemberId,
     resolveContractSalesMemberId,
