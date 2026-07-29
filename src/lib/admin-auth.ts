@@ -1,7 +1,12 @@
 import { createServerClient } from '@supabase/ssr';
 import type { NextRequest } from 'next/server';
 
-type UserProfile = { role: string; is_active: boolean } | null;
+export type AuthedUserProfile = {
+  id: string;
+  role: string;
+  is_active: boolean;
+  display_name: string | null;
+};
 
 function createRequestSupabaseClient(req: NextRequest) {
   return createServerClient(
@@ -20,7 +25,9 @@ function createRequestSupabaseClient(req: NextRequest) {
   );
 }
 
-export async function getAuthedUserProfileFromRequest(req: NextRequest): Promise<UserProfile> {
+export async function getAuthedUserProfileFromRequest(
+  req: NextRequest,
+): Promise<AuthedUserProfile | null> {
   const supabase = createRequestSupabaseClient(req);
   const {
     data: { user },
@@ -29,12 +36,19 @@ export async function getAuthedUserProfileFromRequest(req: NextRequest): Promise
 
   const { data: profile } = await supabase
     .from('user_profiles')
-    .select('role,is_active')
+    .select('role,is_active,display_name')
     .eq('id', user.id)
     .maybeSingle();
 
   if (!profile) return null;
-  return { role: String((profile as any).role ?? ''), is_active: Boolean((profile as any).is_active ?? false) };
+  return {
+    id: user.id,
+    role: String((profile as any).role ?? ''),
+    is_active: Boolean((profile as any).is_active ?? false),
+    display_name: typeof (profile as any).display_name === 'string'
+      ? (profile as any).display_name
+      : null,
+  };
 }
 
 export async function isAdminAuthed(req: NextRequest): Promise<boolean> {
