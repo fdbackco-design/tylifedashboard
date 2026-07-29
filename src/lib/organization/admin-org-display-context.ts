@@ -35,7 +35,7 @@ export type AdminOrgRawContractRow = {
   source_snapshot_json?: Record<string, string | null> | null;
   created_at?: string | null;
   invoice_registered_at?: string | null;
-  customers: { name: string; phone: string | null } | null;
+  customers: { name: string; phone: string | null; birth_date: string | null } | null;
 };
 
 export type AdminOrgDisplayContext = {
@@ -50,6 +50,7 @@ export type AdminOrgDisplayContext = {
     customerId: string,
     expectedName?: string | null,
     customerPhone?: string | null,
+    customerBirthDate?: string | null,
   ) => string;
   salesMemberDisplayName: (salesMemberId: string | null | undefined) => string;
 };
@@ -59,13 +60,15 @@ export function buildAdminOrgDisplayContext(params: {
   edgesRaw: { parent_id: string | null; child_id: string }[];
   rawContractRows: AdminOrgRawContractRow[];
   parentOverrideByChildId?: ReadonlyMap<string, string | null>;
+  customerBirthDateById?: ReadonlyMap<string, string | null>;
 }): AdminOrgDisplayContext {
-  const { membersRaw, edgesRaw, rawContractRows, parentOverrideByChildId } = params;
+  const { membersRaw, edgesRaw, rawContractRows, parentOverrideByChildId, customerBirthDateById } = params;
 
   const orgStructural = buildOrgStructuralTreeContext({
     membersRaw: membersRaw as unknown as OrgMemberForContractRemap[],
     edgesRaw,
     parentOverrideByChildId,
+    customerBirthDateById,
   });
   const {
     treeRows: treeRowsBase,
@@ -126,6 +129,7 @@ export function buildAdminOrgDisplayContext(params: {
           customer_phone: c.customers?.phone ?? null,
           contract_code: c.contract_code,
           customer_name: c.customers?.name ?? '',
+          customer_birth_date: c.customers?.birth_date ?? null,
         }),
         created_at: c.created_at ?? null,
         happy_call_at: c.happy_call_at ?? null,

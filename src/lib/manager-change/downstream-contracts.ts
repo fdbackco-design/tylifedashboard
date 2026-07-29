@@ -142,9 +142,28 @@ export async function loadDownstreamContractsForMember(
     external_id: string | null;
     source_customer_id: string | null;
   }>).map((m) => (m.name === '안성준' ? { ...m, rank: '본사' as const } : m));
+  const customerBirthDateById = new Map<string, string | null>();
+  const sourceCustomerIds = [
+    ...new Set(
+      membersRaw
+        .map((m) => m.source_customer_id)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  if (sourceCustomerIds.length > 0) {
+    const { data: customerRows, error: customerErr } = await db
+      .from('customers')
+      .select('id, birth_date')
+      .in('id', sourceCustomerIds);
+    if (customerErr) throw new Error(customerErr.message);
+    for (const row of (customerRows ?? []) as Array<{ id: string; birth_date: string | null }>) {
+      customerBirthDateById.set(row.id, row.birth_date);
+    }
+  }
 
   const { remapMemberId, membersFiltered } = buildOrgContractSalesRemap(
     membersRaw as Parameters<typeof buildOrgContractSalesRemap>[0],
+    customerBirthDateById,
   );
   if (!membersFiltered.some((m) => m.id === rootId)) return [];
 

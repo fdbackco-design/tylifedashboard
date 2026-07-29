@@ -60,9 +60,27 @@ export async function loadStatementDownlineSharedData(db: SupabaseClient): Promi
     m.name === '안성준' ? { ...m, rank: '본사' as const } : m,
   );
   const edgesRaw = (edgesRes.data ?? []) as Array<{ parent_id: string | null; child_id: string }>;
+  const customerBirthDateById = new Map<string, string | null>();
+  const sourceCustomerIds = [
+    ...new Set(
+      membersRaw
+        .map((m) => m.source_customer_id)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  for (const ids of chunk(sourceCustomerIds, 500)) {
+    const { data: customerRows, error: customerErr } = await db
+      .from('customers')
+      .select('id, birth_date')
+      .in('id', ids);
+    if (customerErr) throw new Error(`customers(birth_date) 조회 실패: ${customerErr.message}`);
+    for (const row of (customerRows ?? []) as Array<{ id: string; birth_date: string | null }>) {
+      customerBirthDateById.set(row.id, row.birth_date);
+    }
+  }
 
   const { remapMemberId, resolveContractOriginForSubtree, hqIds, membersFiltered } =
-    buildOrgContractSalesRemap(membersRaw);
+    buildOrgContractSalesRemap(membersRaw, customerBirthDateById);
   const hqSalesMemberIds = [...hqIds];
 
   const edgesRemapped = edgesRaw.map((e) => ({
@@ -162,7 +180,7 @@ export async function loadStatementDownlineSharedData(db: SupabaseClient): Promi
 }
 
 const CONTRACT_SELECT_FOR_STATEMENT =
-  'id, contract_code, join_date, status, unit_count, sales_member_id, customer_id, is_cancelled, sales_link_status, rental_request_no, invoice_no, memo, happy_call_at, happycall_result, created_at, customers(name, phone)';
+  'id, contract_code, join_date, status, unit_count, sales_member_id, customer_id, is_cancelled, sales_link_status, rental_request_no, invoice_no, memo, happy_call_at, happycall_result, created_at, customers(name, phone, birth_date)';
 
 function hqWindowRemapInputFromRow(row: {
   sales_member_id?: string | null;
@@ -171,7 +189,7 @@ function hqWindowRemapInputFromRow(row: {
   rental_request_no?: string | null;
   invoice_no?: string | null;
   memo?: string | null;
-  customers?: { phone?: string | null; name?: string | null } | null;
+  customers?: { phone?: string | null; name?: string | null; birth_date?: string | null } | null;
   contract_code?: string | null;
 }) {
   return {
@@ -184,6 +202,7 @@ function hqWindowRemapInputFromRow(row: {
     customer_phone: row.customers?.phone ?? null,
     contract_code: row.contract_code ?? null,
     customer_name: row.customers?.name ?? null,
+    customer_birth_date: row.customers?.birth_date ?? null,
   } as const;
 }
 
@@ -490,6 +509,9 @@ export async function computeStatementDownlineUnitsWithSharedContext(
     customer_phone: ((c.customers as { phone?: string | null } | null)?.phone ?? null) as string | null,
     contract_code: (c.contract_code ?? null) as string | null,
     customer_name: ((c.customers as { name?: string | null } | null)?.name ?? null) as string | null,
+    customer_birth_date: (
+      (c.customers as { birth_date?: string | null } | null)?.birth_date ?? null
+    ) as string | null,
   });
 
   let scopeAttributedTotal = 0;

@@ -101,7 +101,7 @@ export default async function OrganizationPage({
     db
       .from('contracts')
       .select(
-        'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, customer_id, sales_member_id, is_cancelled, sales_link_status, happy_call_at, happycall_result, source_snapshot_json, created_at, invoice_registered_at, customers(name, phone)',
+        'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, customer_id, sales_member_id, is_cancelled, sales_link_status, happy_call_at, happycall_result, source_snapshot_json, created_at, invoice_registered_at, customers(name, phone, birth_date)',
       )
       .not('sales_member_id', 'is', null)
       .order('join_date', { ascending: false })
@@ -140,6 +140,23 @@ export default async function OrganizationPage({
   const membersRaw = ((membersRes.data ?? []) as unknown as OrganizationMember[]).map((m) =>
     m.name === '안성준' ? { ...m, rank: '본사' as const } : m,
   );
+  const sourceCustomerIds = [
+    ...new Set(
+      ((membersRes.data ?? []) as Array<{ source_customer_id?: string | null }>)
+        .map((m) => m.source_customer_id ?? null)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const customerBirthDateById = new Map<string, string | null>();
+  if (sourceCustomerIds.length > 0) {
+    const { data: sourceCustomers } = await db
+      .from('customers')
+      .select('id, birth_date')
+      .in('id', sourceCustomerIds);
+    for (const customer of (sourceCustomers ?? []) as Array<{ id: string; birth_date: string | null }>) {
+      customerBirthDateById.set(customer.id, customer.birth_date);
+    }
+  }
   const edgesRaw = edgesRes.data ?? [];
   const contractCount = contractCountRes.count ?? 0;
   const lastSync = lastSyncRes.data as {
@@ -167,6 +184,7 @@ export default async function OrganizationPage({
     edgesRaw,
     rawContractRows,
     parentOverrideByChildId,
+    customerBirthDateById,
   });
 
   const contractsByMember: Record<string, ContractItem[]> = {};
@@ -181,6 +199,7 @@ export default async function OrganizationPage({
       customer_phone: c.customers?.phone ?? null,
       contract_code: c.contract_code,
       customer_name: c.customers?.name ?? '',
+      customer_birth_date: c.customers?.birth_date ?? null,
     });
     if (!contractsByMember[key]) contractsByMember[key] = [];
     const contractItem: ContractItem = {
@@ -208,6 +227,7 @@ export default async function OrganizationPage({
       c.customer_id,
       c.customers?.name ?? '',
       c.customers?.phone ?? null,
+      c.customers?.birth_date ?? null,
     );
     if (customerKey && customerKey !== key) {
       if (!contractsByMember[customerKey]) contractsByMember[customerKey] = [];

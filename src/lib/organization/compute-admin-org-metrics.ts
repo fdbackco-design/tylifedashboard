@@ -30,7 +30,7 @@ export async function computeAdminOrgNodeMetrics(
     db
       .from('contracts')
       .select(
-        'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, customer_id, sales_member_id, is_cancelled, sales_link_status, happy_call_at, happycall_result, source_snapshot_json, created_at, invoice_registered_at, customers(name, phone)',
+        'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, customer_id, sales_member_id, is_cancelled, sales_link_status, happy_call_at, happycall_result, source_snapshot_json, created_at, invoice_registered_at, customers(name, phone, birth_date)',
       )
       .not('sales_member_id', 'is', null)
       .order('join_date', { ascending: false })
@@ -47,11 +47,30 @@ export async function computeAdminOrgNodeMetrics(
     m.name === '안성준' ? { ...m, rank: '본사' as const } : m,
   );
   const rawContractRows = (contractsRes.data ?? []) as unknown as AdminOrgRawContractRow[];
+  const customerBirthDateById = new Map<string, string | null>();
+  const sourceCustomerIds = [
+    ...new Set(
+      ((membersRes.data ?? []) as Array<{ source_customer_id?: string | null }>)
+        .map((m) => m.source_customer_id ?? null)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  if (sourceCustomerIds.length > 0) {
+    const { data: customerRows, error: customerErr } = await db
+      .from('customers')
+      .select('id, birth_date')
+      .in('id', sourceCustomerIds);
+    if (customerErr) throw new Error(customerErr.message);
+    for (const row of (customerRows ?? []) as Array<{ id: string; birth_date: string | null }>) {
+      customerBirthDateById.set(row.id, row.birth_date);
+    }
+  }
 
   const ctx = buildAdminOrgDisplayContext({
     membersRaw,
     edgesRaw: edgesRes.data ?? [],
     rawContractRows,
+    customerBirthDateById,
   });
 
   const kpiEligibleForMetrics = rawContractRows
@@ -73,6 +92,7 @@ export async function computeAdminOrgNodeMetrics(
         customer_phone: c.customers?.phone ?? null,
         contract_code: c.contract_code,
         customer_name: c.customers?.name ?? '',
+        customer_birth_date: c.customers?.birth_date ?? null,
       }),
       created_at: c.created_at ?? null,
       happy_call_at: c.happy_call_at ?? null,

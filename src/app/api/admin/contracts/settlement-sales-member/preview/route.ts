@@ -65,7 +65,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           'is_cancelled',
           'happycall_result',
           'sales_link_status',
-          'customers(name, phone)',
+          'customers(name, phone, birth_date)',
         ].join(', '),
       ),
   ]);
@@ -86,7 +86,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     source_customer_id: m.source_customer_id ?? null,
   }));
 
-  const ctx = buildOrgAttributionContext(members);
+  const sourceCustomerIds = [
+    ...new Set(
+      members
+        .map((m) => m.source_customer_id)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const customerBirthDateById = new Map<string, string | null>();
+  if (sourceCustomerIds.length > 0) {
+    const { data: sourceCustomers, error: sourceCustomersError } = await db
+      .from('customers')
+      .select('id, birth_date')
+      .in('id', sourceCustomerIds);
+    if (sourceCustomersError) {
+      return NextResponse.json({ error: sourceCustomersError.message }, { status: 500 });
+    }
+    for (const row of (sourceCustomers ?? []) as Array<{ id: string; birth_date: string | null }>) {
+      customerBirthDateById.set(row.id, row.birth_date);
+    }
+  }
+
+  const ctx = buildOrgAttributionContext(members, customerBirthDateById);
 
   // 추가로 비활성/존재하지 않는 member 도 한 번 더 거를 수 있도록 active set
   const activeMemberIds = new Set(
@@ -133,6 +154,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       memo: r.memo ?? null,
       customer_phone: r.customers?.phone ?? null,
       customer_name: r.customers?.name ?? null,
+      customer_birth_date: r.customers?.birth_date ?? null,
     };
 
     const result = ctx.resolveOrgBasedSalesMember(c);

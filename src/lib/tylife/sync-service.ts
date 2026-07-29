@@ -43,6 +43,10 @@ import { resolveSalesMemberByNameOnly } from './sales-resolution';
 import { resolveContractorByNameOnly } from './contractor-resolution';
 import { buildOrgStructuralTreeContext } from '../organization/org-structural-tree';
 import {
+  accountLoginCodesForIssuedRequest,
+  resolveAccountIssuedMemberForCustomer,
+} from '../organization/account-issued-customer-identity';
+import {
   collectLeaderPromotionApplyCandidates,
   computeCenterChiefPromotionMemberIds,
   computeCenterChiefDemotionMemberIds,
@@ -264,8 +268,8 @@ async function log(
 // ─────────────────────────────────────────────
 
 /**
- * 새 영업자 노드를 insert 하기 전에 같은 사람이 기존 노드(특히 `[고객] ` prefix 가 붙은
- * customer 노드) 로 이미 있는지 찾는다.
+ * 새 영업자 노드를 insert 하기 전에 같은 영업자 노드가 이미 있는지 찾는다.
+ * 고객 identity가 있는 노드는 생년월일이 없는 sales 데이터와 자동 병합하지 않는다.
  *
  * 우선순위:
  *   1) phone digits 동일 + 이름(prefix 제거) 동일 + rank != '본사'  → 1건이면 'phone' 매칭
@@ -292,15 +296,25 @@ async function findExistingMemberForSales(
     const last4 = phoneDigits.slice(-4);
     const { data, error } = await db
       .from('organization_members')
-      .select('id, name, phone, rank')
+      .select('id, name, phone, rank, external_id, source_customer_id')
       .not('phone', 'is', null)
       .neq('rank', '본사')
       .ilike('phone', `%${last4}%`)
       .limit(100);
     if (error) throw new Error(`organization_members lookup(sales phone) 실패: ${error.message}`);
-    const rows = (data ?? []) as Array<{ id: string; name: string | null; phone: string | null; rank: string | null }>;
+    const rows = (data ?? []) as Array<{
+      id: string;
+      name: string | null;
+      phone: string | null;
+      rank: string | null;
+      external_id: string | null;
+      source_customer_id: string | null;
+    }>;
     const matches = rows.filter(
       (r) =>
+        !r.source_customer_id &&
+        !String(r.external_id ?? '').startsWith('customer:') &&
+        !String(r.external_id ?? '').startsWith('cust:') &&
         normalizePhoneDigits(r.phone) === phoneDigits &&
         stripCustomerNamePrefix(r.name) === nameNorm,
     );
@@ -315,13 +329,25 @@ async function findExistingMemberForSales(
   // 2) 이름 정규화로 1개 매칭
   const { data, error } = await db
     .from('organization_members')
-    .select('id, name, rank')
+    .select('id, name, rank, external_id, source_customer_id')
     .neq('rank', '본사')
     .or(`name.eq.${nameNorm},name.eq.[고객] ${nameNorm}`)
     .limit(100);
   if (error) throw new Error(`organization_members lookup(sales name) 실패: ${error.message}`);
-  const rows = (data ?? []) as Array<{ id: string; name: string | null; rank: string | null }>;
-  const candidates = rows.filter((r) => stripCustomerNamePrefix(r.name) === nameNorm);
+  const rows = (data ?? []) as Array<{
+    id: string;
+    name: string | null;
+    rank: string | null;
+    external_id: string | null;
+    source_customer_id: string | null;
+  }>;
+  const candidates = rows.filter(
+    (r) =>
+      !r.source_customer_id &&
+      !String(r.external_id ?? '').startsWith('customer:') &&
+      !String(r.external_id ?? '').startsWith('cust:') &&
+      stripCustomerNamePrefix(r.name) === nameNorm,
+  );
   if (candidates.length === 1) {
     return { kind: 'matched', matchedBy: 'normalized_name', id: candidates[0].id, name: String(candidates[0].name ?? '') };
   }
@@ -408,6 +434,7 @@ async function reconcileExistingMemberForSales(
 async function upsertSalesMember(
   db: SupabaseClient,
   memberData: ReturnType<typeof normalizeSalesMember>,
+  options: { identityMode?: 'sales' | 'customer' } = {},
 ): Promise<string | null> {
   if (!memberData.name) return null;
 
@@ -446,8 +473,12 @@ async function upsertSalesMember(
     }
   }
 
-  // 2) phone / 이름 기반 lookup — customer:* 노드와의 양방향 중복 방지 핵심
-  const lookup = await findExistingMemberForSales(db, { salesName, salesPhone });
+  // 고객 가상 노드는 고객 전용 식별(name+phone+birth_date) 검증을 이미 마친 뒤 호출된다.
+  // 여기서 sales용 이름 fallback을 다시 적용하면 동명이인 직원 노드를 hijack할 수 있다.
+  const lookup =
+    options.identityMode === 'customer'
+      ? null
+      : await findExistingMemberForSales(db, { salesName, salesPhone });
   if (lookup && lookup.kind === 'ambiguous') {
     if (isDev) {
       // eslint-disable-next-line no-console
@@ -485,24 +516,34 @@ async function upsertSalesMember(
   if (!memberData.external_id) {
     const { data: existing } = await db
       .from('organization_members')
-      .select('id')
+      .select('id, external_id, source_customer_id')
       .eq('name', salesName)
       .order('created_at', { ascending: true })
-      .limit(1)
-      .maybeSingle();
-    if (existing) {
+      .limit(10);
+    const existingCandidates = ((existing ?? []) as Array<{
+      id: string;
+      external_id: string | null;
+      source_customer_id: string | null;
+    }>).filter(
+      (row) =>
+        !row.source_customer_id &&
+        !String(row.external_id ?? '').startsWith('customer:') &&
+        !String(row.external_id ?? '').startsWith('cust:'),
+    );
+    if (existingCandidates.length === 1) {
+      const existingId = existingCandidates[0].id;
       if (isDev) {
         // eslint-disable-next-line no-console
         console.log('[member-dedupe-sales]', {
           salesName,
           salesPhone,
-          matchedMemberId: (existing as { id: string }).id,
+          matchedMemberId: existingId,
           matchedName: salesName,
           matchedBy: 'normalized_name',
           action: 'reuse',
         });
       }
-      return (existing as { id: string }).id;
+      return existingId;
     }
   }
 
@@ -541,15 +582,28 @@ async function upsertSalesMember(
       .maybeSingle();
     if (retryExt) return (retryExt as { id: string }).id;
   }
+  if (options.identityMode === 'customer') {
+    throw new Error(`organization_members customer insert 실패: ${insErr?.message ?? 'unknown'}`);
+  }
+
   const { data: retry, error: retryErr } = await db
     .from('organization_members')
-    .select('id')
+    .select('id, external_id, source_customer_id')
     .eq('name', salesName)
     .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle();
+    .limit(10);
   if (retryErr) throw new Error(`organization_members 재조회 실패: ${retryErr.message}`);
-  if (retry) return (retry as { id: string }).id;
+  const retryCandidates = ((retry ?? []) as Array<{
+    id: string;
+    external_id: string | null;
+    source_customer_id: string | null;
+  }>).filter(
+    (row) =>
+      !row.source_customer_id &&
+      !String(row.external_id ?? '').startsWith('customer:') &&
+      !String(row.external_id ?? '').startsWith('cust:'),
+  );
+  if (retryCandidates.length === 1) return retryCandidates[0].id;
 
   throw new Error(`organization_members insert 실패: ${insErr?.message ?? 'unknown'}`);
 }
@@ -675,9 +729,14 @@ function stripCustomerNamePrefix(s: unknown): string {
  */
 async function findExistingMemberForCustomer(
   db: SupabaseClient,
-  args: { customerId: string; customerName: string; customerPhone: string | null },
+  args: {
+    customerId: string;
+    customerName: string;
+    customerPhone: string | null;
+    customerBirthDate: string | null;
+  },
 ): Promise<string | null> {
-  const { customerId, customerName, customerPhone } = args;
+  const { customerId, customerName, customerPhone, customerBirthDate } = args;
   const targetExt = `customer:${customerId}`;
 
   // 1. external_id = customer:{customer_id}
@@ -716,19 +775,65 @@ async function findExistingMemberForCustomer(
     const last4 = phoneDigits.slice(-4);
     const { data, error } = await db
       .from('organization_members')
-      .select('id, name, phone')
+      .select('id, name, phone, source_customer_id, external_id')
       .not('phone', 'is', null)
       .neq('rank', '본사')
       .ilike('phone', `%${last4}%`)
       .limit(100);
     if (error) throw new Error(`organization_members lookup(phone) 실패: ${error.message}`);
-    const rows = (data ?? []) as Array<{ id: string; name: string | null; phone: string | null }>;
-    const hit = rows.find(
+    const rows = (data ?? []) as Array<{
+      id: string;
+      name: string | null;
+      phone: string | null;
+      source_customer_id: string | null;
+      external_id: string | null;
+    }>;
+    const matchingIdentityRows = rows.filter(
       (r) =>
         normalizePhoneDigits(r.phone) === phoneDigits &&
         stripCustomerNamePrefix(r.name) === desiredNameForPhone,
     );
-    if (hit) return hit.id;
+    const candidateCustomerIds = [
+      ...new Set(
+        matchingIdentityRows
+          .map((r) => {
+            if (r.source_customer_id) return r.source_customer_id;
+            const ext = r.external_id ?? '';
+            if (ext.startsWith('customer:')) return ext.slice('customer:'.length);
+            if (ext.startsWith('cust:')) return ext.slice('cust:'.length);
+            return null;
+          })
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const birthByCustomerId = new Map<string, string>();
+    if (candidateCustomerIds.length > 0) {
+      const { data: customerRows, error: customerErr } = await db
+        .from('customers')
+        .select('id, birth_date')
+        .in('id', candidateCustomerIds);
+      if (customerErr) throw new Error(`customers lookup(birth_date) 실패: ${customerErr.message}`);
+      for (const row of (customerRows ?? []) as Array<{ id: string; birth_date: string | null }>) {
+        if (row.birth_date) birthByCustomerId.set(row.id, String(row.birth_date).slice(0, 10));
+      }
+    }
+    const targetBirthDate = String(customerBirthDate ?? '').slice(0, 10);
+    const exactIdentityRows = matchingIdentityRows.filter((r) => {
+      const ext = r.external_id ?? '';
+      const sourceCustomerId =
+        r.source_customer_id ??
+        (ext.startsWith('customer:')
+          ? ext.slice('customer:'.length)
+          : ext.startsWith('cust:')
+            ? ext.slice('cust:'.length)
+            : null);
+      return (
+        Boolean(targetBirthDate) &&
+        Boolean(sourceCustomerId) &&
+        birthByCustomerId.get(sourceCustomerId as string) === targetBirthDate
+      );
+    });
+    if (exactIdentityRows.length === 1) return exactIdentityRows[0].id;
   }
 
   // 4. 이름(prefix 제거) + 전화번호 동일
@@ -736,21 +841,141 @@ async function findExistingMemberForCustomer(
   if (desiredName && phoneDigits.length >= 4) {
     const { data, error } = await db
       .from('organization_members')
-      .select('id, name, phone')
+      .select('id, name, phone, source_customer_id, external_id')
       .neq('rank', '본사')
       .or(`name.eq.${desiredName},name.eq.[고객] ${desiredName}`)
       .limit(100);
     if (error) throw new Error(`organization_members lookup(name+phone) 실패: ${error.message}`);
-    const rows = (data ?? []) as Array<{ id: string; name: string | null; phone: string | null }>;
-    const hit = rows.find(
+    const rows = (data ?? []) as Array<{
+      id: string;
+      name: string | null;
+      phone: string | null;
+      source_customer_id: string | null;
+      external_id: string | null;
+    }>;
+    const identityCandidates = rows.filter(
       (r) =>
         stripCustomerNamePrefix(r.name) === desiredName &&
         normalizePhoneDigits(r.phone) === phoneDigits,
     );
-    if (hit) return hit.id;
+    const candidateCustomerIds = identityCandidates
+      .map((r) => {
+        if (r.source_customer_id) return r.source_customer_id;
+        const ext = r.external_id ?? '';
+        if (ext.startsWith('customer:')) return ext.slice('customer:'.length);
+        if (ext.startsWith('cust:')) return ext.slice('cust:'.length);
+        return null;
+      })
+      .filter((id): id is string => Boolean(id));
+    if (candidateCustomerIds.length > 0 && customerBirthDate) {
+      const { data: customerRows, error: customerErr } = await db
+        .from('customers')
+        .select('id, birth_date')
+        .in('id', [...new Set(candidateCustomerIds)]);
+      if (customerErr) throw new Error(`customers lookup(birth_date) 실패: ${customerErr.message}`);
+      const matchingCustomerIds = new Set(
+        ((customerRows ?? []) as Array<{ id: string; birth_date: string | null }>)
+          .filter((r) => String(r.birth_date ?? '').slice(0, 10) === String(customerBirthDate).slice(0, 10))
+          .map((r) => r.id),
+      );
+      const matches = identityCandidates.filter((r) => {
+        const ext = r.external_id ?? '';
+        const sourceCustomerId =
+          r.source_customer_id ??
+          (ext.startsWith('customer:')
+            ? ext.slice('customer:'.length)
+            : ext.startsWith('cust:')
+              ? ext.slice('cust:'.length)
+              : null);
+        return sourceCustomerId != null && matchingCustomerIds.has(sourceCustomerId);
+      });
+      if (matches.length === 1) return matches[0].id;
+    }
   }
 
   return null;
+}
+
+async function findAccountIssuedMemberForCustomer(
+  db: SupabaseClient,
+  args: {
+    customerName: string;
+    customerPhone: string | null;
+    customerBirthDate: string | null;
+  },
+): Promise<string | null> {
+  const phoneDigits = normalizePhoneDigits(args.customerPhone);
+  const birthDateDigits = String(args.customerBirthDate ?? '').replace(/\D/g, '');
+  if (!stripCustomerNamePrefix(args.customerName) || !phoneDigits || birthDateDigits.length !== 8) {
+    return null;
+  }
+
+  const { data: requestRows, error: requestErr } = await db
+    .from('sales_code_requests')
+    .select('employee_id, name, phone_digits, birth_date')
+    .eq('phone_digits', phoneDigits)
+    .or('issuance_status.eq.COMPLETED,status.eq.처리완료')
+    .limit(20);
+  if (requestErr) {
+    throw new Error(`계정 발급 identity 조회 실패(sales_code_requests): ${requestErr.message}`);
+  }
+
+  const accountLoginCodes = [
+    ...new Set(
+      (
+        (requestRows ?? []) as Array<{
+          employee_id: string | null;
+          phone_digits: string;
+        }>
+      ).flatMap(accountLoginCodesForIssuedRequest),
+    ),
+  ];
+  if (accountLoginCodes.length === 0) return null;
+
+  const { data: profileRows, error: profileErr } = await db
+    .from('user_profiles')
+    .select('member_id, login_code')
+    .eq('role', 'member')
+    .eq('mapping_status', 'MATCHED')
+    .in('login_code', accountLoginCodes)
+    .not('member_id', 'is', null);
+  if (profileErr) {
+    throw new Error(`계정 발급 identity 조회 실패(user_profiles): ${profileErr.message}`);
+  }
+
+  const memberIds = [
+    ...new Set(
+      ((profileRows ?? []) as Array<{ member_id: string | null }>)
+        .map((row) => row.member_id)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  if (memberIds.length === 0) return null;
+
+  const { data: memberRows, error: memberErr } = await db
+    .from('organization_members')
+    .select('id, name, rank')
+    .in('id', memberIds)
+    .eq('is_active', true);
+  if (memberErr) {
+    throw new Error(`계정 발급 identity 조회 실패(organization_members): ${memberErr.message}`);
+  }
+
+  return resolveAccountIssuedMemberForCustomer({
+    customer: {
+      name: args.customerName,
+      phone: args.customerPhone,
+      birthDate: args.customerBirthDate,
+    },
+    requests: (requestRows ?? []) as Array<{
+      employee_id: string | null;
+      name: string;
+      phone_digits: string;
+      birth_date: string;
+    }>,
+    profiles: (profileRows ?? []) as Array<{ member_id: string | null; login_code: string }>,
+    members: (memberRows ?? []) as Array<{ id: string; name: string; rank: string }>,
+  });
 }
 
 /**
@@ -819,26 +1044,6 @@ async function reconcileExistingMemberForCustomer(
     // eslint-disable-next-line no-console
     console.warn('[sync-service] customer 식별자 보강 update 실패', { memberId, error: upErr.message });
   }
-}
-
-async function findSingleEmployeeMemberIdByName(
-  db: SupabaseClient,
-  name: string,
-): Promise<string | null> {
-  const n = name.trim();
-  if (!n) return null;
-  const { data, error } = await db
-    .from('organization_members')
-    .select('id, rank')
-    .eq('name', n)
-    .is('external_id', null)
-    .neq('rank', '본사')
-    .order('created_at', { ascending: true })
-    .limit(2);
-  if (error) throw new Error(`organization_members 조회 실패: ${error.message}`);
-  const rows = (data ?? []) as Array<{ id: string; rank: string }>;
-  if (rows.length !== 1) return null;
-  return rows[0].id;
 }
 
 async function upsertCustomer(
@@ -990,6 +1195,7 @@ async function processItem(
         customerId,
         customerName: customerNameNormalized,
         customerPhone,
+        customerBirthDate: String((customerData as any).birth_date ?? '').slice(0, 10) || null,
       });
       if (reusableMemberId) {
         await reconcileExistingMemberForCustomer(db, reusableMemberId, {
@@ -1002,25 +1208,41 @@ async function processItem(
         return reusableMemberId;
       }
 
-      // 호환: 동일 이름의 "직원 노드(external_id NULL)" 가 정확히 1개인 경우 그 노드를 재사용한다.
-      // (phone 정보가 없는 customer 도 매칭 가능하도록 보존)
-      const existingEmployeeId = await findSingleEmployeeMemberIdByName(db, customerNameNormalized);
-      if (existingEmployeeId) {
-        await attachCustomerIdentityToMember(db, existingEmployeeId, { id: customerId, phone: customerPhone });
-        return existingEmployeeId;
+      // 담당자 노드가 이름만으로 먼저 생성된 경우, 발급 완료 신청서의 employee_id를 통해
+      // user_profiles.member_id와 연결한 뒤 신청서의 이름·전화번호·생년월일을 모두 검증한다.
+      const accountIssuedMemberId = await findAccountIssuedMemberForCustomer(db, {
+        customerName: customerNameNormalized,
+        customerPhone,
+        customerBirthDate: String((customerData as any).birth_date ?? '').slice(0, 10) || null,
+      });
+      if (accountIssuedMemberId) {
+        await reconcileExistingMemberForCustomer(db, accountIssuedMemberId, {
+          customerId,
+          customerName: customerNameNormalized,
+          customerPhone,
+        });
+        await attachCustomerIdentityToMember(db, accountIssuedMemberId, {
+          id: customerId,
+          phone: customerPhone,
+        });
+        return accountIssuedMemberId;
       }
 
       const displayName = customerNameNormalized.startsWith('[고객] ')
         ? customerNameNormalized
         : `[고객] ${customerNameNormalized}`;
-      return await upsertSalesMember(db, {
-        name: displayName,
-        rank: '영업사원',
-        external_id: `customer:${customerId}`,
-        phone: customerPhone,
-        is_active: true,
-        source_customer_id: customerId,
-      } as any);
+      return await upsertSalesMember(
+        db,
+        {
+          name: displayName,
+          rank: '영업사원',
+          external_id: `customer:${customerId}`,
+          phone: customerPhone,
+          is_active: true,
+          source_customer_id: customerId,
+        } as any,
+        { identityMode: 'customer' },
+      );
     };
 
     // ── 2. 담당자:
@@ -1655,17 +1877,23 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
         ];
         const customerPhoneById = new Map<string, string | null>();
         const customerNameById = new Map<string, string>();
-        if (walkCustomerIds.length > 0) {
+        const customerBirthDateById = new Map<string, string | null>();
+        const memberSourceCustomerIds = membersRaw
+          .map((m) => m.source_customer_id ?? null)
+          .filter((id): id is string => Boolean(id));
+        const identityCustomerIds = [...new Set([...walkCustomerIds, ...memberSourceCustomerIds])];
+        if (identityCustomerIds.length > 0) {
           const { data: customerRows, error: cuErr } = await db
             .from('customers')
-            .select('id, name, phone')
-            .in('id', walkCustomerIds);
+            .select('id, name, phone, birth_date')
+            .in('id', identityCustomerIds);
           if (cuErr) throw new Error(`customers(walk) 조회 실패: ${cuErr.message}`);
           for (const r of (customerRows ?? []) as any[]) {
             if (!r?.id) continue;
             const id = String(r.id);
             customerPhoneById.set(id, (r.phone ?? null) as string | null);
             customerNameById.set(id, String(r.name ?? '').trim());
+            customerBirthDateById.set(id, (r.birth_date ?? null) as string | null);
           }
         }
 
@@ -1679,6 +1907,7 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
             source_customer_id: m.source_customer_id ?? null,
           })),
           edgesRaw,
+          customerBirthDateById,
         });
         const { treeRows, resolveSettlementWalkSalesMemberId } = orgWalkCtx;
 
@@ -1699,6 +1928,7 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
             customer_phone: customerId ? (customerPhoneById.get(customerId) ?? null) : null,
             contract_code: (row.contract_code ?? null) as string | null,
             customer_name: customerId ? (customerNameById.get(customerId) ?? '') : '',
+            customer_birth_date: customerId ? (customerBirthDateById.get(customerId) ?? null) : null,
           });
           joinAttributed.push({
             id: row.id,
