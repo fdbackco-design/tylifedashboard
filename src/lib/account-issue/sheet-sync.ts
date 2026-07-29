@@ -9,7 +9,7 @@
  *      - 후보 1명: 그 대상에게 발급
  *      - 후보 2명 이상: E열(전화번호) 로 추가 매칭 → 정확히 1명일 때만 발급
  *      - 그 외: 자동 발급 안 함, O열에 실패 사유 기록
- *   5. G열 값을 login_code + 비밀번호로 사용 (8자리 숫자만 허용)
+ *   5. G열 값을 login_code로 사용. fed 계정 비밀번호는 E열 휴대폰 전체 숫자를 사용
  *   6. 성공: M열='ㅇ', O열=''
  *   7. 실패: M열='', O열=실패사유
  *
@@ -26,7 +26,7 @@ import {
 import {
   findUserProfileByLoginCode,
   issueMappedAccount,
-  isValid8Digits,
+  isValidAccountLoginCode,
   preIssueUnmappedAccount,
 } from '@/lib/account-issue/issue';
 import { normalizePhone } from '@/lib/account-issue/normalize';
@@ -41,6 +41,7 @@ export type SheetSyncRowResult = {
   loginId: string;
   result: 'SUCCESS' | 'FAILED' | 'SKIPPED';
   reason?: string;
+  userId?: string;
 };
 
 export type SheetSyncResult = {
@@ -114,7 +115,12 @@ function buildRange(sheetName: string, a1: string): string {
  */
 export async function syncAccountIssueFromGoogleSheet(
   adminDb: SupabaseClient,
-  opts?: { spreadsheetId?: string; sheetName?: string },
+  opts?: {
+    spreadsheetId?: string;
+    sheetName?: string;
+    /** 지정한 실제 시트 행만 처리. 생략하면 기존처럼 전체 미처리 행을 처리한다. */
+    rowNumbers?: readonly number[];
+  },
 ): Promise<SheetSyncResult> {
   const spreadsheetId =
     (opts?.spreadsheetId ?? process.env.ACCOUNT_ISSUE_SHEET_ID ?? '').trim();
@@ -126,6 +132,9 @@ export async function syncAccountIssueFromGoogleSheet(
   }
 
   const readRange = buildRange(sheetName, 'A5:O');
+  const targetRowNumbers = opts?.rowNumbers
+    ? new Set(opts.rowNumbers.filter((value) => Number.isInteger(value) && value >= 5))
+    : null;
 
   let rows: string[][];
   try {
@@ -154,6 +163,10 @@ export async function syncAccountIssueFromGoogleSheet(
     const accountValue = String(r[6] ?? '').trim();
     const status = String(r[12] ?? '').trim();
 
+    if (targetRowNumbers && !targetRowNumbers.has(rowNumber)) {
+      continue;
+    }
+
     // 빈 행은 통계에서 제외 (B/G 모두 비어있고 M도 비어있으면 무시)
     if (!name && !accountValue && !status) {
       continue;
@@ -161,7 +174,33 @@ export async function syncAccountIssueFromGoogleSheet(
 
     // 이미 처리된 행은 스킵
     if (status) {
-      out.skippedCount++;
+      if (targetRowNumbers) {
+        const { data: completedProfile } = await adminDb
+          .from('user_profiles')
+          .select('id, display_name, phone')
+          .eq('login_code', accountValue.toLowerCase())
+          .maybeSingle();
+        const accountConfirmed =
+          Boolean((completedProfile as any)?.id) &&
+          String((completedProfile as any)?.display_name ?? '').replace(/^\[고객\]\s*/, '').trim() ===
+            name.replace(/^\[고객\]\s*/, '').trim() &&
+          normalizePhone((completedProfile as any)?.phone) === normalizePhone(phoneRaw);
+        out.results.push({
+          rowNumber,
+          name,
+          phone: maskPhone(phoneRaw),
+          loginId: maskLoginId(accountValue),
+          result: accountConfirmed ? 'SKIPPED' : 'FAILED',
+          reason: accountConfirmed
+            ? `이미 처리된 행(M=${status}), 발급 계정 확인`
+            : `시트는 처리 표시(M=${status})이나 발급 계정을 확인할 수 없음`,
+          userId: accountConfirmed ? String((completedProfile as any).id) : undefined,
+        });
+        if (accountConfirmed) out.skippedCount++;
+        else out.failedCount++;
+      } else {
+        out.skippedCount++;
+      }
       continue;
     }
 
@@ -197,9 +236,9 @@ export async function syncAccountIssueFromGoogleSheet(
 
     out.targetRows++;
 
-    // 계정값 형식 검증 (loginId 와 password 가 동일한 8자리 숫자)
-    if (!isValid8Digits(accountValue)) {
-      const reason = '실패: 계정값 형식 오류(8자리 숫자만 허용)';
+    // 기존 8자리 계정과 신규 fed+8자리 계정을 함께 지원한다.
+    if (!isValidAccountLoginCode(accountValue)) {
+      const reason = '실패: 계정값 형식 오류(8자리 숫자 또는 fed+8자리만 허용)';
       await writeFailure(spreadsheetId, sheetName, rowNumber, reason);
       out.failedCount++;
       out.results.push({
@@ -213,10 +252,47 @@ export async function syncAccountIssueFromGoogleSheet(
       continue;
     }
 
-    // 로그인 ID 중복 검사 (해당 8자리가 이미 다른 행에 발급되었는지)
+    const initialPassword = accountValue.toLowerCase().startsWith('fed')
+      ? normalizePhone(phoneRaw)
+      : accountValue;
+
+    // 로그인 ID 중복 검사. 같은 이름+전화의 기존 계정은 재시도 성공으로 복구한다.
     try {
       const dup = await findUserProfileByLoginCode(adminDb, accountValue);
       if (dup?.id) {
+        const { data: existingProfile } = await adminDb
+          .from('user_profiles')
+          .select('id, display_name, phone')
+          .eq('id', dup.id)
+          .maybeSingle();
+        const samePerson =
+          String((existingProfile as any)?.display_name ?? '').replace(/^\[고객\]\s*/, '').trim() ===
+            name.replace(/^\[고객\]\s*/, '').trim() &&
+          normalizePhone((existingProfile as any)?.phone) === normalizePhone(phoneRaw);
+        if (samePerson) {
+          await sheetsSetCell(spreadsheetId, buildRange(sheetName, `M${rowNumber}`), 'ㅇ');
+          await sheetsSetCell(spreadsheetId, buildRange(sheetName, `O${rowNumber}`), '');
+          out.successCount++;
+          out.results.push({
+            rowNumber,
+            name,
+            phone: maskPhone(phoneRaw),
+            loginId: maskLoginId(accountValue),
+            result: 'SUCCESS',
+            reason: '기존 발급 계정 확인',
+            userId: dup.id,
+          });
+          try {
+            await notifySalesCodeCompletedForAccount(adminDb, {
+              name,
+              phone: phoneRaw,
+              matchedAccountId: dup.id,
+            });
+          } catch {
+            // 계정/시트 복구 성공 자체는 유지한다.
+          }
+          continue;
+        }
         const reason = '실패: 로그인 ID 중복';
         await writeFailure(spreadsheetId, sheetName, rowNumber, reason);
         out.failedCount++;
@@ -272,7 +348,7 @@ export async function syncAccountIssueFromGoogleSheet(
         name,
         phone: phoneRaw || null,
         loginCode: accountValue,
-        password: accountValue,
+        password: initialPassword,
         isActive: true,
         auditReason: 'SHEET_SYNC_PRE_ISSUED',
       });
@@ -312,8 +388,27 @@ export async function syncAccountIssueFromGoogleSheet(
         await sheetsSetCell(spreadsheetId, buildRange(sheetName, `M${rowNumber}`), 'ㅇ');
         await sheetsSetCell(spreadsheetId, buildRange(sheetName, `O${rowNumber}`), '');
       } catch (e) {
-        // eslint-disable-next-line no-console
-        console.warn(`[sheet-sync] 시트 갱신 실패(row ${rowNumber}):`, e);
+        const reason = `실패: 계정 발급 후 시트 상태 기록 오류 (${e instanceof Error ? e.message : String(e)})`;
+        out.failedCount++;
+        out.results.push({
+          rowNumber,
+          name,
+          phone: maskPhone(phoneRaw),
+          loginId: maskLoginId(accountValue),
+          result: 'FAILED',
+          reason,
+          userId: pre.user_id,
+        });
+        await logMapping(adminDb, {
+          action: 'SHEET_SYNC_STATUS_WRITE_FAILED',
+          rowNumber,
+          name,
+          phone: phoneRaw,
+          loginId: accountValue,
+          userId: pre.user_id,
+          reason,
+        });
+        continue;
       }
       out.successCount++;
       out.results.push({
@@ -323,6 +418,7 @@ export async function syncAccountIssueFromGoogleSheet(
         loginId: maskLoginId(accountValue),
         result: 'SUCCESS',
         reason: '사전 발급(매핑 대기)',
+        userId: pre.user_id,
       });
       await logMapping(adminDb, {
         action: 'SHEET_SYNC_PRE_ISSUED',
@@ -401,7 +497,7 @@ export async function syncAccountIssueFromGoogleSheet(
       memberId: chosen.id,
       customerId: chosen.source_customer_id,
       loginCode: accountValue,
-      password: accountValue,
+      password: initialPassword,
       isActive: true,
       matchedBy: 'AUTO_SYNC',
     });
@@ -441,9 +537,28 @@ export async function syncAccountIssueFromGoogleSheet(
       await sheetsSetCell(spreadsheetId, buildRange(sheetName, `M${rowNumber}`), 'ㅇ');
       await sheetsSetCell(spreadsheetId, buildRange(sheetName, `O${rowNumber}`), '');
     } catch (e) {
-      // 시트 갱신 실패는 결과 통계에 반영하되 발급 자체는 성공 처리 (멱등 재시도 어려우니 별도 로그)
-      // eslint-disable-next-line no-console
-      console.warn(`[sheet-sync] 시트 갱신 실패(row ${rowNumber}):`, e);
+      const reason = `실패: 계정 발급 후 시트 상태 기록 오류 (${e instanceof Error ? e.message : String(e)})`;
+      out.failedCount++;
+      out.results.push({
+        rowNumber,
+        name,
+        phone: maskPhone(phoneRaw),
+        loginId: maskLoginId(accountValue),
+        result: 'FAILED',
+        reason,
+        userId: issued.user_id,
+      });
+      await logMapping(adminDb, {
+        action: 'SHEET_SYNC_STATUS_WRITE_FAILED',
+        rowNumber,
+        name,
+        phone: phoneRaw,
+        loginId: accountValue,
+        personId: chosen.id,
+        userId: issued.user_id,
+        reason,
+      });
+      continue;
     }
     out.successCount++;
     out.results.push({
@@ -452,6 +567,7 @@ export async function syncAccountIssueFromGoogleSheet(
       phone: maskPhone(phoneRaw),
       loginId: maskLoginId(accountValue),
       result: 'SUCCESS',
+      userId: issued.user_id,
     });
     await logMapping(adminDb, {
       action: 'SHEET_SYNC_ISSUED',

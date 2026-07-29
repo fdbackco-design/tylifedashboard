@@ -1,5 +1,5 @@
 /**
- * 관리자: 영업자 로그인 비밀번호를 login_code(8자리)와 동일하게 초기화.
+ * 관리자: 기존 계정은 login_code, fed 계정은 등록된 휴대폰 전체 숫자로 비밀번호 초기화.
  * - @tylifedashboard.local 가짜 메일이라 email recover 불가 → Auth Admin API 사용
  * - 비밀번호 원문은 로그/감사에 저장하지 않음
  */
@@ -34,22 +34,31 @@ export function extractLoginCode8(raw: string): string | null {
   return null;
 }
 
+export function extractAccountLoginCode(raw: string): string | null {
+  const value = String(raw ?? '').trim();
+  if (!value) return null;
+  const local = value.includes('@') ? value.split('@')[0]! : value;
+  if (/^\d{8}$/.test(local)) return local;
+  if (/^fed\d{8}$/i.test(local)) return local.toLowerCase();
+  return null;
+}
+
 export async function resetMemberPasswordToLoginCode(
   adminDb: SupabaseClient,
   loginIdRaw: string,
 ): Promise<ResetPasswordResult> {
-  const loginCode = extractLoginCode8(loginIdRaw);
+  const loginCode = extractAccountLoginCode(loginIdRaw);
   if (!loginCode) {
     return {
       ok: false,
       code: 'INVALID_INPUT',
-      message: '로그인 ID는 8자리 숫자여야 합니다. (예: 26984730)',
+      message: '로그인 ID는 8자리 숫자 또는 fed+8자리여야 합니다.',
     };
   }
 
   const { data: profile, error: pErr } = await adminDb
     .from('user_profiles')
-    .select('id, login_code, display_name, is_active')
+    .select('id, login_code, display_name, phone, is_active')
     .eq('login_code', loginCode)
     .maybeSingle();
 
@@ -67,9 +76,18 @@ export async function resetMemberPasswordToLoginCode(
   const userId = String((profile as { id: string }).id);
   const displayName = ((profile as { display_name?: string | null }).display_name ?? null) as string | null;
   const email = `${loginCode}@${EMAIL_DOMAIN}`;
+  const phonePassword = String((profile as { phone?: string | null }).phone ?? '').replace(/\D/g, '');
+  const resetPassword = loginCode.startsWith('fed') ? phonePassword : loginCode;
+  if (loginCode.startsWith('fed') && !/^\d{10,11}$/.test(resetPassword)) {
+    return {
+      ok: false,
+      code: 'INVALID_INPUT',
+      message: 'fed 계정의 등록된 휴대폰번호가 없어 비밀번호를 초기화할 수 없습니다.',
+    };
+  }
 
   const { error: authErr } = await adminDb.auth.admin.updateUserById(userId, {
-    password: loginCode,
+    password: resetPassword,
   });
   if (authErr) {
     return {
@@ -105,8 +123,8 @@ export async function resetMemberPasswordToLoginCode(
       admin_id: null,
       metadata: {
         login_code: loginCode,
-        // 비밀번호 원문은 기록하지 않음 (login_code 와 동일하다는 사실만)
-        password_set_to_login_code: true,
+        // 비밀번호 원문은 기록하지 않음
+        password_policy: loginCode.startsWith('fed') ? 'FULL_PHONE_DIGITS' : 'LOGIN_CODE',
       },
     });
   } catch {

@@ -101,7 +101,7 @@ export default function LoginClient(props: { redirect: string }) {
               onChange={(e) => setLoginCode(e.target.value)}
               disabled={loading}
               className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm disabled:opacity-50"
-              placeholder="8자리 숫자"
+              placeholder="발급된 사원ID"
               autoComplete="username"
             />
           </label>

@@ -2,7 +2,7 @@
  * 영업자/고객 사람 데이터에 매핑된 user_profiles 계정을 발급/갱신하는 핵심 로직.
  *
  * - HTTP API(/api/admin/account-issue/issue) 와 Google Sheet 동기화(sync-sheet) 양쪽에서 재사용한다.
- * - 8자리 숫자 login_code 규칙은 호출자가 보장한다(여기서도 한 번 더 검증).
+ * - 기존 8자리 숫자와 신규 fed+8자리 login_code 를 함께 지원한다.
  * - DB CHECK 제약과 일관되게, 발급된 행은 mapping_status='MATCHED' + matched_by 를 기록한다.
  */
 
@@ -24,9 +24,22 @@ export function isValid8Digits(v: unknown): v is string {
   return typeof v === 'string' && /^\d{8}$/.test(v);
 }
 
-function extractLoginDigits(v: string): string | null {
-  const local = v.includes('@') ? v.split('@')[0] : v;
-  return /^\d{8}$/.test(local) ? local : null;
+export function isValidAccountLoginCode(v: unknown): v is string {
+  return typeof v === 'string' && (/^\d{8}$/.test(v) || /^fed\d{8}$/i.test(v));
+}
+
+function extractLoginCode(v: string): string | null {
+  const local = (v.includes('@') ? v.split('@')[0] : v).trim();
+  if (!isValidAccountLoginCode(local)) return null;
+  return /^fed/i.test(local) ? local.toLowerCase() : local;
+}
+
+function validateInitialPassword(loginCode: string, password: string): string | null {
+  const normalized = String(password ?? '').replace(/\D/g, '');
+  if (/^\d{8}$/.test(loginCode)) {
+    return normalized === loginCode ? normalized : null;
+  }
+  return /^\d{10,11}$/.test(normalized) ? normalized : null;
 }
 
 function stripCustomerNamePrefix(s: unknown): string {
@@ -76,13 +89,14 @@ async function convertCustomerStyleMemberToEmployeeIfIssued(
  */
 export async function findUserProfileByLoginCode(
   adminDb: SupabaseClient,
-  loginCode8: string,
+  loginCode: string,
 ): Promise<{ id: string; member_id: string | null } | null> {
-  if (!isValid8Digits(loginCode8)) return null;
+  const normalizedLoginCode = extractLoginCode(loginCode);
+  if (!normalizedLoginCode) return null;
   const { data } = await adminDb
     .from('user_profiles')
     .select('id, member_id')
-    .eq('login_code', loginCode8)
+    .eq('login_code', normalizedLoginCode)
     .limit(1)
     .maybeSingle();
   return (data ?? null) as any;
@@ -100,8 +114,8 @@ export async function issueMappedAccount(
   params: {
     memberId: string;
     customerId?: string | null;
-    loginCode: string; // 8자리 숫자
-    password: string;  // 8자리 숫자 (loginCode 와 동일)
+    loginCode: string; // 기존 8자리 숫자 또는 fed+8자리
+    password: string;  // 기존 계정은 loginCode, fed 계정은 휴대폰 전체 숫자
     isActive?: boolean;
     matchedBy?: 'ADMIN' | 'AUTO_SYNC';
   },
@@ -111,13 +125,19 @@ export async function issueMappedAccount(
     return { ok: false, code: 'INVALID_INPUT', message: 'member_id 필수' };
   }
 
-  const digits = extractLoginDigits(params.loginCode ?? '');
-  if (!digits) {
-    return { ok: false, code: 'INVALID_INPUT', message: 'login_code 는 8자리 숫자여야 합니다.' };
+  const loginCode = extractLoginCode(params.loginCode ?? '');
+  if (!loginCode) {
+    return { ok: false, code: 'INVALID_INPUT', message: 'login_code 는 8자리 숫자 또는 fed+8자리여야 합니다.' };
   }
-  const passwordDigits = extractLoginDigits(params.password ?? '');
-  if (!passwordDigits || passwordDigits !== digits) {
-    return { ok: false, code: 'INVALID_INPUT', message: '비밀번호는 login_code 와 동일한 8자리 숫자여야 합니다.' };
+  const initialPassword = validateInitialPassword(loginCode, params.password ?? '');
+  if (!initialPassword) {
+    return {
+      ok: false,
+      code: 'INVALID_INPUT',
+      message: loginCode.startsWith('fed')
+        ? 'fed 계정의 초기 비밀번호는 휴대폰 전체 숫자여야 합니다.'
+        : '기존 계정의 비밀번호는 login_code 와 동일한 8자리 숫자여야 합니다.',
+    };
   }
 
   const customerId =
@@ -131,7 +151,7 @@ export async function issueMappedAccount(
     // 0) 이미 같은 member_id 로 발급된 계정이 있으면 활성 상태만 갱신
     const { data: existingProfile, error: lookErr } = await adminDb
       .from('user_profiles')
-      .select('id, is_active')
+      .select('id, is_active, login_code')
       .eq('member_id', memberId)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -140,6 +160,14 @@ export async function issueMappedAccount(
       return { ok: false, code: 'LOOKUP_FAILED', message: lookErr.message };
     }
     if (existingProfile?.id) {
+      const existingLoginCode = String((existingProfile as { login_code?: string }).login_code ?? '');
+      if (existingLoginCode !== loginCode) {
+        return {
+          ok: false,
+          code: 'DUPLICATE_LOGIN_CODE',
+          message: '대상 영업자에게 다른 로그인 ID의 계정이 이미 발급되어 있습니다.',
+        };
+      }
       await adminDb.from('user_profiles').update({ is_active: isActive }).eq('id', existingProfile.id);
       // 매핑이 이미 있어도 옛 customer 노드가 함께 남아 있을 수 있으니 정합성 회복 시도.
       await repairMemberProfileIntegrity(adminDb, memberId);
@@ -147,7 +175,7 @@ export async function issueMappedAccount(
     }
 
     // 0-b) 같은 login_code 행 중복 검사 (다른 member_id 로 이미 발급된 경우)
-    const dup = await findUserProfileByLoginCode(adminDb, digits);
+    const dup = await findUserProfileByLoginCode(adminDb, loginCode);
     if (dup?.id) {
       return { ok: false, code: 'DUPLICATE_LOGIN_CODE', message: '동일 로그인 ID 가 이미 존재합니다.' };
     }
@@ -163,8 +191,8 @@ export async function issueMappedAccount(
       : Promise.resolve({ data: null as null });
 
     const created = await adminDb.auth.admin.createUser({
-      email: `${digits}@${EMAIL_DOMAIN}`,
-      password: digits,
+      email: `${loginCode}@${EMAIL_DOMAIN}`,
+      password: initialPassword,
       email_confirm: true,
       user_metadata: { member_id: memberId },
     });
@@ -184,7 +212,7 @@ export async function issueMappedAccount(
       id: userId,
       customer_id: customerId,
       member_id: memberId,
-      login_code: digits,
+      login_code: loginCode,
       display_name: member?.name ?? customer?.name ?? null,
       phone: member?.phone ?? customer?.phone ?? null,
       role: 'member',
@@ -252,16 +280,18 @@ export async function preIssueUnmappedAccount(
     return { ok: false, code: 'INVALID_INPUT', message: '이름은 필수입니다.' };
   }
 
-  const digits = extractLoginDigits(params.loginCode ?? '');
-  if (!digits) {
-    return { ok: false, code: 'INVALID_INPUT', message: '로그인 ID 는 8자리 숫자여야 합니다.' };
+  const loginCode = extractLoginCode(params.loginCode ?? '');
+  if (!loginCode) {
+    return { ok: false, code: 'INVALID_INPUT', message: '로그인 ID는 8자리 숫자 또는 fed+8자리여야 합니다.' };
   }
-  const passwordDigits = extractLoginDigits(params.password ?? '');
-  if (!passwordDigits || passwordDigits !== digits) {
+  const initialPassword = validateInitialPassword(loginCode, params.password ?? '');
+  if (!initialPassword) {
     return {
       ok: false,
       code: 'INVALID_INPUT',
-      message: '초기 비밀번호는 로그인 ID 와 동일한 8자리 숫자여야 합니다.',
+      message: loginCode.startsWith('fed')
+        ? 'fed 계정의 초기 비밀번호는 휴대폰 전체 숫자여야 합니다.'
+        : '기존 계정의 초기 비밀번호는 로그인 ID와 동일한 8자리 숫자여야 합니다.',
     };
   }
 
@@ -272,7 +302,7 @@ export async function preIssueUnmappedAccount(
 
   try {
     // 1) login_code 중복 검사
-    const dup = await findUserProfileByLoginCode(adminDb, digits);
+    const dup = await findUserProfileByLoginCode(adminDb, loginCode);
     if (dup?.id) {
       return {
         ok: false,
@@ -283,8 +313,8 @@ export async function preIssueUnmappedAccount(
 
     // 2) Supabase Auth 사용자 생성
     const created = await adminDb.auth.admin.createUser({
-      email: `${digits}@${EMAIL_DOMAIN}`,
-      password: digits,
+      email: `${loginCode}@${EMAIL_DOMAIN}`,
+      password: initialPassword,
       email_confirm: true,
       user_metadata: { pre_issued: true, pre_issued_name: name },
     });
@@ -306,7 +336,7 @@ export async function preIssueUnmappedAccount(
       id: userId,
       customer_id: null,
       member_id: null,
-      login_code: digits,
+      login_code: loginCode,
       display_name: name,
       phone: phoneDigits || null,
       role: 'member',
