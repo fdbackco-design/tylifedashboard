@@ -50,6 +50,19 @@ type PendingAccount = {
   candidates: PendingCandidate[];
 };
 
+type IssuedAccount = {
+  id: string;
+  customer_id: string | null;
+  member_id: string | null;
+  login_code: string;
+  display_name: string | null;
+  phone: string | null;
+  role: string;
+  is_active: boolean;
+  must_change_password: boolean;
+  created_at: string;
+};
+
 function normalizePhoneDigits(v: string): string {
   return v.replace(/\D/g, '');
 }
@@ -160,20 +173,12 @@ export default function AccountIssueClient() {
   const [sheetSyncError, setSheetSyncError] = useState<string | null>(null);
   const [sheetSyncOpen, setSheetSyncOpen] = useState(false);
 
-  const [issuedAccounts, setIssuedAccounts] = useState<
-    Array<{
-      id: string;
-      customer_id: string | null;
-      member_id: string | null;
-      login_code: string;
-      display_name: string | null;
-      phone: string | null;
-      role: string;
-      is_active: boolean;
-      must_change_password: boolean;
-      created_at: string;
-    }>
-  >([]);
+  const [issuedAccounts, setIssuedAccounts] = useState<IssuedAccount[]>([]);
+  const [issuedSearchInput, setIssuedSearchInput] = useState('');
+  const [issuedSearch, setIssuedSearch] = useState('');
+  const [issuedPage, setIssuedPage] = useState(1);
+  const [issuedTotal, setIssuedTotal] = useState(0);
+  const [issuedTotalPages, setIssuedTotalPages] = useState(1);
 
   const normalizedQuery = useMemo(() => query.trim(), [query]);
   const emailDomain = 'tylifedashboard.local';
@@ -630,35 +635,47 @@ export default function AccountIssueClient() {
     }
   }
 
-  async function loadIssuedAccounts() {
+  async function loadIssuedAccounts(options?: { page?: number; search?: string }) {
+    const nextPage = options?.page ?? issuedPage;
+    const nextSearch = options?.search ?? issuedSearch;
     setIsLoadingIssuedList(true);
     try {
-      const res = await fetch('/api/admin/account-issue/list', { credentials: 'include' });
+      const params = new URLSearchParams({
+        page: String(nextPage),
+        page_size: '20',
+      });
+      if (nextSearch) params.set('search', nextSearch);
+      const res = await fetch(`/api/admin/account-issue/list?${params.toString()}`, {
+        credentials: 'include',
+        cache: 'no-store',
+      });
       const json = (await res.json()) as ApiResult<
-        Array<{
-          id: string;
-          customer_id: string | null;
-          member_id: string | null;
-          login_code: string;
-          display_name: string | null;
-          phone: string | null;
-          role: string;
-          is_active: boolean;
-          must_change_password: boolean;
-          created_at: string;
-        }>
+        {
+          items: IssuedAccount[];
+          pagination: {
+            page: number;
+            page_size: number;
+            total: number;
+            total_pages: number;
+          };
+        }
       >;
       if (res.status === 401) {
         setIssuedListError('관리자 세션이 없습니다. /admin/login 에서 다시 로그인하거나, PWA 사용 시 사이트 데이터를 비운 뒤 새로고침해 보세요.');
         setIssuedAccounts([]);
+        setIssuedTotal(0);
         return;
       }
       if (!res.ok || !json.success) throw new Error(json.success ? 'error' : json.error);
-      setIssuedAccounts(json.data);
+      setIssuedAccounts(json.data.items);
+      setIssuedPage(json.data.pagination.page);
+      setIssuedTotal(json.data.pagination.total);
+      setIssuedTotalPages(json.data.pagination.total_pages);
       setIssuedListError(null);
     } catch (e) {
       setIssuedListError(e instanceof Error ? e.message : '목록을 불러오지 못했습니다.');
       setIssuedAccounts([]);
+      setIssuedTotal(0);
     } finally {
       setIsLoadingIssuedList(false);
     }
@@ -1330,20 +1347,65 @@ export default function AccountIssueClient() {
 
       {/* 생성된 계정 목록 */}
       <div className="bg-white border border-gray-200 rounded-xl p-4">
-        <div className="flex items-center justify-between mb-3 gap-3">
+        <div className="flex flex-wrap items-start justify-between mb-3 gap-3">
           <div>
             <div className="text-sm font-semibold text-gray-700">생성된 계정</div>
-            <div className="text-xs text-gray-500 mt-0.5">최근 순 · 최대 200개</div>
+            <div className="text-xs text-gray-500 mt-0.5">
+              최근 순 · 총 {issuedTotal.toLocaleString('ko-KR')}개
+            </div>
           </div>
-          <LoadingButton
-            type="button"
-            className="px-3 py-1.5 rounded-md border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-            isLoading={isLoadingIssuedList}
-            loadingText="불러오는 중…"
-            onClick={() => void loadIssuedAccounts()}
-          >
-            새로고침
-          </LoadingButton>
+          <div className="flex flex-wrap items-center gap-2">
+            <form
+              className="flex items-center gap-1.5"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const search = issuedSearchInput.trim();
+                setIssuedSearch(search);
+                setIssuedPage(1);
+                void loadIssuedAccounts({ page: 1, search });
+              }}
+            >
+              <input
+                type="search"
+                value={issuedSearchInput}
+                onChange={(event) => setIssuedSearchInput(event.target.value)}
+                placeholder="이름·연락처·계정 검색"
+                className="w-56 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm"
+                disabled={isLoadingIssuedList}
+              />
+              <button
+                type="submit"
+                className="rounded-md bg-slate-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-600 disabled:opacity-50"
+                disabled={isLoadingIssuedList}
+              >
+                검색
+              </button>
+              {issuedSearch && (
+                <button
+                  type="button"
+                  className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                  disabled={isLoadingIssuedList}
+                  onClick={() => {
+                    setIssuedSearchInput('');
+                    setIssuedSearch('');
+                    setIssuedPage(1);
+                    void loadIssuedAccounts({ page: 1, search: '' });
+                  }}
+                >
+                  초기화
+                </button>
+              )}
+            </form>
+            <LoadingButton
+              type="button"
+              className="px-3 py-1.5 rounded-md border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              isLoading={isLoadingIssuedList}
+              loadingText="불러오는 중…"
+              onClick={() => void loadIssuedAccounts()}
+            >
+              새로고침
+            </LoadingButton>
+          </div>
         </div>
         {issuedListError ? (
           <p className="text-sm text-red-600">{issuedListError}</p>
@@ -1362,7 +1424,7 @@ export default function AccountIssueClient() {
                 </tr>
               </thead>
               <tbody>
-                {issuedAccounts.slice(0, 200).map((a) => (
+                {issuedAccounts.map((a) => (
                   <tr key={a.id} className="hover:bg-gray-50">
                     <td className="px-3 py-2 border-b border-gray-200 whitespace-nowrap">
                       {(a.display_name ?? '-').replace(/^\[고객\]\s*/, '')}
@@ -1385,6 +1447,47 @@ export default function AccountIssueClient() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {!issuedListError && issuedTotal > 0 && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600">
+            <span>
+              {issuedPage.toLocaleString('ko-KR')} / {issuedTotalPages.toLocaleString('ko-KR')} 페이지
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                className="rounded border border-gray-300 px-2.5 py-1 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={isLoadingIssuedList || issuedPage <= 1}
+                onClick={() => void loadIssuedAccounts({ page: 1 })}
+              >
+                처음
+              </button>
+              <button
+                type="button"
+                className="rounded border border-gray-300 px-2.5 py-1 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={isLoadingIssuedList || issuedPage <= 1}
+                onClick={() => void loadIssuedAccounts({ page: issuedPage - 1 })}
+              >
+                이전
+              </button>
+              <button
+                type="button"
+                className="rounded border border-gray-300 px-2.5 py-1 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={isLoadingIssuedList || issuedPage >= issuedTotalPages}
+                onClick={() => void loadIssuedAccounts({ page: issuedPage + 1 })}
+              >
+                다음
+              </button>
+              <button
+                type="button"
+                className="rounded border border-gray-300 px-2.5 py-1 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={isLoadingIssuedList || issuedPage >= issuedTotalPages}
+                onClick={() => void loadIssuedAccounts({ page: issuedTotalPages })}
+              >
+                마지막
+              </button>
+            </div>
           </div>
         )}
       </div>

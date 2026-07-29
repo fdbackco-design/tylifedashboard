@@ -175,9 +175,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     { header: '이름', key: 'name', width: 18 },
     { header: '사원ID', key: 'employee_id', width: 18 },
     { header: '주민등록번호', key: 'resident_number', width: 20 },
-    { header: '휴대폰번호', key: 'phone', width: 18 },
+    { header: '휴대폰', key: 'phone', width: 18 },
   ];
-  worksheet.getRow(1).font = { bold: true };
+  worksheet.getRow(1).font = { bold: false };
   worksheet.views = [{ state: 'frozen', ySplit: 1 }];
   for (const item of prepared) {
     worksheet.addRow({
