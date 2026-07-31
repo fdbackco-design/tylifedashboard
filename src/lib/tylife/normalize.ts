@@ -25,6 +25,14 @@ import { normalizeInvoiceNo } from '../utils/invoice-no';
 
 export const DEFAULT_ITEM_NAME_PLACEHOLDER = '헬스365 고주파 발마사지기 [Health365]';
 
+export function normalizeItemNameForProduct(
+  productType: ProductType,
+  detailItemName?: string | null,
+): string {
+  if (productType === 'TY케어플랜') return '';
+  return detailItemName ?? DEFAULT_ITEM_NAME_PLACEHOLDER;
+}
+
 // ─────────────────────────────────────────────
 // 열거형 정규화 헬퍼
 // ─────────────────────────────────────────────
@@ -172,6 +180,7 @@ export function normalizeContractFromList(
   const happycallResultFinal = happycallResultFromSheet !== ''
     ? happycallResultFromSheet
     : (happycallSplit.tail || null);
+  const productType = normalizeProductType(item.product_type_raw ?? '');
 
   return {
     contract_code: item.contract_code,
@@ -182,10 +191,10 @@ export function normalizeContractFromList(
     customer_id: customerId,
     sales_member_id: salesMemberId,
     join_date: normalizeDate(item.joined_at_raw ?? ''),
-    product_type: normalizeProductType(item.product_type_raw ?? ''),
-    // 상세에서 업데이트 — DB 스키마 item_name NOT NULL 기본값과 동일한 placeholder
-    // (상세에서만 실제 물품명이 오므로, 정상 케이스에서는 상세 fetch 후 overwrite 되어야 함)
-    item_name: DEFAULT_ITEM_NAME_PLACEHOLDER,
+    product_type: productType,
+    // 상세에서 업데이트. TY케어플랜은 물품명이 없는 상품이므로 빈 문자열을 유지한다.
+    // 그 외 상품은 DB NOT NULL 대응 placeholder를 넣고 상세 fetch 후 실제 물품명으로 교체한다.
+    item_name: normalizeItemNameForProduct(productType),
     watch_fit: normalizeWatchFit(item.watch_fit_raw ?? ''),
     unit_count: 1,
     join_method: normalizeJoinMethod(item.join_method_raw ?? ''),
@@ -213,7 +222,7 @@ export function mergeDetailIntoContract(
     ...base,
     invoice_no: normalizeInvoiceNo(detail.invoice_no ?? base.invoice_no),
     rental_request_no: detail.rental_request_no ?? base.rental_request_no,
-    item_name: detail.item_name ?? base.item_name,
+    item_name: normalizeItemNameForProduct(base.product_type, detail.item_name ?? base.item_name),
     unit_count: (detail.unit_count != null && detail.unit_count > 0)
       ? detail.unit_count
       : base.unit_count,
