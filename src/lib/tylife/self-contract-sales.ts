@@ -5,21 +5,59 @@ import {
 } from '@/lib/organization/customer-identity';
 
 type MappedAccountIdentity = {
+  member_id?: string | null;
   display_name: string | null;
   pre_issued_name: string | null;
   phone: string | null;
   pre_issued_phone: string | null;
 };
 
-export function mappedAccountMatchesSelfContract(
+export type AccountBackedMemberIdentity = {
+  id: string;
+  name: string | null;
+  phone: string | null;
+};
+
+export function mappedAccountMatchesMemberIdentity(
   account: MappedAccountIdentity,
-  customer: { name: string | null; phone: string | null },
+  member: { name: string | null; phone: string | null },
 ): boolean {
   const accountName = normalizeCustomerIdentityName(account.pre_issued_name ?? account.display_name);
   const accountPhone = normalizeCustomerIdentityPhone(account.pre_issued_phone ?? account.phone);
-  const customerName = normalizeCustomerIdentityName(customer.name);
-  const customerPhone = normalizeCustomerIdentityPhone(customer.phone);
-  return !!accountName && !!accountPhone && accountName === customerName && accountPhone === customerPhone;
+  const memberName = normalizeCustomerIdentityName(member.name);
+  const memberPhone = normalizeCustomerIdentityPhone(member.phone);
+  return !!accountName && !!accountPhone && accountName === memberName && accountPhone === memberPhone;
+}
+
+export const mappedAccountMatchesSelfContract = mappedAccountMatchesMemberIdentity;
+
+export async function findAccountBackedCustomerMemberIds(
+  db: SupabaseClient,
+  members: AccountBackedMemberIdentity[],
+): Promise<Set<string>> {
+  if (members.length === 0) return new Set();
+  const memberById = new Map(members.map((member) => [member.id, member]));
+  const { data, error } = await db
+    .from('user_profiles')
+    .select('member_id, display_name, pre_issued_name, phone, pre_issued_phone')
+    .in('member_id', members.map((member) => member.id))
+    .eq('role', 'member')
+    .eq('is_active', true);
+  if (error) throw new Error(`담당자 계정 조회 실패: ${error.message}`);
+
+  const matchingCountByMemberId = new Map<string, number>();
+  for (const account of (data ?? []) as MappedAccountIdentity[]) {
+    const memberId = account.member_id ?? null;
+    const member = memberId ? memberById.get(memberId) : null;
+    if (!member || !mappedAccountMatchesMemberIdentity(account, member)) continue;
+    matchingCountByMemberId.set(member.id, (matchingCountByMemberId.get(member.id) ?? 0) + 1);
+  }
+
+  return new Set(
+    Array.from(matchingCountByMemberId.entries())
+      .filter(([, count]) => count === 1)
+      .map(([memberId]) => memberId),
+  );
 }
 
 /**
