@@ -40,6 +40,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ContractInsert, ContractStatus } from '../types/contract';
 import { buildPerformancePath } from '../organization/performance-path';
 import { resolveSalesMemberByNameOnly } from './sales-resolution';
+import { isMappedAccountSelfContractMember } from './self-contract-sales';
 import { resolveContractorByNameOnly } from './contractor-resolution';
 import { buildOrgStructuralTreeContext } from '../organization/org-structural-tree';
 import {
@@ -1261,37 +1262,54 @@ async function processItem(
         finalSalesMemberId = hqId;
         salesLinkStatus = hqId ? 'linked' : 'pending_mapping';
       } else {
-      const nameRes = await resolveSalesMemberByNameOnly(db, rawSalesName);
-      // "자기 가입" 케이스 hint: customer 와 sales 이름이 같으면 그 customer 의 phone 을
-      // 영업자 lookup hint 로 전달해 [고객]/영업자 중복 노드를 정확히 방지한다.
-      const salesPhoneHint =
-        stripCustomerNamePrefix(rawSalesName) === stripCustomerNamePrefix(customerNameNormalized)
-          ? customerPhone
-          : null;
-      if (nameRes.kind === 'single') {
-        finalSalesMemberId = nameRes.memberId;
-        salesLinkStatus = 'linked';
-      } else if (nameRes.kind === 'missing') {
-        // 조직도에 없는 이름이면 자동 생성 (동명이인 문제는 'ambiguous'에서만 처리)
-        // 요구사항: “가입 인정 기준을 만족해 가입인 사람들만 영업사원 노드로 자동 생성”
-        // → rank는 무조건 영업사원으로 생성한다.
-        const memberData = {
-          ...normalizeSalesMember({
-            sales_member_name: rawSalesName,
-            sales_member_external_id: null,
-            org_rank: item.affiliation_name,
-            phone: salesPhoneHint,
-          }),
-          rank: '영업사원' as const,
-        };
-        const createdId = await upsertSalesMember(db, memberData);
-        finalSalesMemberId = createdId;
-        autoCreatedSalesMemberId = createdId;
-        salesLinkStatus = createdId ? 'linked' : 'pending_mapping';
-      } else {
-        finalSalesMemberId = null;
-        salesLinkStatus = 'pending_mapping';
-      }
+        const isSelfContract =
+          stripCustomerNamePrefix(rawSalesName) === stripCustomerNamePrefix(customerNameNormalized);
+
+        // 자기계약은 고객 노드에 연결된 실제 활성 계정의 이름·전화번호까지 일치할 때만
+        // 동일 영업자 노드를 재사용한다. 이름만 같은 동명이인 고객은 이 경로를 통과하지 않는다.
+        if (isSelfContract) {
+          const customerMemberId = await ensureCustomerMemberId();
+          if (
+            customerMemberId &&
+            (await isMappedAccountSelfContractMember(db, {
+              memberId: customerMemberId,
+              customerName: customerNameNormalized,
+              customerPhone,
+            }))
+          ) {
+            finalSalesMemberId = customerMemberId;
+            salesLinkStatus = 'linked';
+          }
+        }
+
+        if (!finalSalesMemberId) {
+          const nameRes = await resolveSalesMemberByNameOnly(db, rawSalesName);
+          const salesPhoneHint = isSelfContract ? customerPhone : null;
+          if (nameRes.kind === 'single') {
+            finalSalesMemberId = nameRes.memberId;
+            salesLinkStatus = 'linked';
+          } else if (nameRes.kind === 'missing') {
+            // 조직도에 없는 이름이면 자동 생성 (동명이인 문제는 'ambiguous'에서만 처리)
+            // 요구사항: “가입 인정 기준을 만족해 가입인 사람들만 영업사원 노드로 자동 생성”
+            // → rank는 무조건 영업사원으로 생성한다.
+            const memberData = {
+              ...normalizeSalesMember({
+                sales_member_name: rawSalesName,
+                sales_member_external_id: null,
+                org_rank: item.affiliation_name,
+                phone: salesPhoneHint,
+              }),
+              rank: '영업사원' as const,
+            };
+            const createdId = await upsertSalesMember(db, memberData);
+            finalSalesMemberId = createdId;
+            autoCreatedSalesMemberId = createdId;
+            salesLinkStatus = createdId ? 'linked' : 'pending_mapping';
+          } else {
+            finalSalesMemberId = null;
+            salesLinkStatus = 'pending_mapping';
+          }
+        }
       }
     }
 

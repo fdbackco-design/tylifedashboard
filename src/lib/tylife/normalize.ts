@@ -54,6 +54,7 @@ export function normalizeProductType(raw: string): ProductType {
   if (text.includes('갤럭시케어 라이트')) return '갤럭시케어 라이트';
   if (text.includes('TY갤럭시케어_무') || text.endsWith('_무')) return '무';
   if (text.includes('TY갤럭시케어')) return 'TY갤럭시케어';
+  if (text.includes('TY케어플랜')) return 'TY케어플랜';
   if (text.includes('올라이프케어')) return '올라이프케어';
   // TY 원본 '스페셜라이프케어' / 레거시 '일반가전' → DB enum canonical
   if (text.includes('스페셜라이프케어') || text.includes('일반가전')) {
