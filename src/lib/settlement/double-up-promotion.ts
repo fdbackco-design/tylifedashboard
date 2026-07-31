@@ -2,18 +2,19 @@ import {
   happycallYmdSeoul,
   SETTLEMENT_VALID_HAPPYCALL_RESULTS,
 } from '@/lib/settlement/settlement-eligibility-v2';
+import { resolveHqProductKindFromContract } from '@/lib/settlement/hq-revenue';
 
 /** 더블업 승급 프로모션 — 승급 판정용 인정구좌만 ×2 (수당·보너스·정산에는 미적용) */
 export const DOUBLE_UP_PROMOTION_NAME = '더블업 승급 프로모션';
 
 export const DOUBLE_UP_PROMOTION_START_YMD = '2026-06-26';
-export const DOUBLE_UP_PROMOTION_END_YMD = '2026-07-25';
+export const DOUBLE_UP_PROMOTION_END_YMD = '2026-07-31';
 
 const DOUBLE_UP_PROMOTION_START_MS = Date.parse('2026-06-26T00:00:00+09:00');
-const DOUBLE_UP_PROMOTION_END_MS = Date.parse('2026-07-25T23:59:59+09:00');
+const DOUBLE_UP_PROMOTION_END_MS = Date.parse('2026-07-31T23:59:59+09:00');
 
 export const DOUBLE_UP_PROMOTION_APPLIED_REASON =
-  '더블업 승급 프로모션 기간 내 해피콜 성공 계약';
+  '더블업 승급 프로모션 기간 내 해피콜 성공 갤럭시케어 계약';
 
 export const DOUBLE_UP_COMMISSION_NOTE =
   '승급 인정구좌는 프로모션으로 2배 적용되었으나, 수당 및 보너스는 실제 계약 구좌 기준으로 계산되었습니다.';
@@ -23,6 +24,9 @@ export type DoubleUpPromotionContractRef = {
   happy_call_at?: unknown;
   happycall_result?: string | null;
   status?: string | null;
+  product_type?: string | null;
+  item_name?: string | null;
+  source_snapshot_json?: Record<string, string | null> | null;
 };
 
 export type PromotionMultiplier = 1 | 2;
@@ -42,7 +46,7 @@ export function isHappyCallSuccessForPromotion(row: {
 
 /**
  * 해피콜 성공 시각이 프로모션 기간(서울) 안인지.
- * 2026-06-26 00:00:00 이상, 2026-07-25 23:59:59 이하.
+ * 2026-06-26 00:00:00 이상, 2026-07-31 23:59:59 이하.
  */
 export function isDoubleUpPromotionWindow(happyCallAt: unknown): boolean {
   if (happyCallAt == null) return false;
@@ -62,9 +66,21 @@ export function isDoubleUpPromotionWindow(happyCallAt: unknown): boolean {
   return true;
 }
 
+/** TY갤럭시케어(무·ALL 포함). 라이트·올라이프 등은 제외 */
+export function isDoubleUpGalaxyCareProduct(row: DoubleUpPromotionContractRef): boolean {
+  return (
+    resolveHqProductKindFromContract({
+      product_type: row.product_type,
+      item_name: row.item_name,
+      source_snapshot_json: row.source_snapshot_json,
+    }) === 'TY갤럭시케어'
+  );
+}
+
 export function promotionMultiplierForContract(row: DoubleUpPromotionContractRef): PromotionMultiplier {
   if (!isHappyCallSuccessForPromotion(row)) return 1;
   if (!isDoubleUpPromotionWindow(row.happy_call_at)) return 1;
+  if (!isDoubleUpGalaxyCareProduct(row)) return 1;
   return 2;
 }
 

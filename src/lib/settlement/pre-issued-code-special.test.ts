@@ -66,6 +66,7 @@ describe('pre-issued code special split', () => {
       happy_call_at: '2026-07-10T12:00:00+09:00',
       happycall_result: '성공',
       status: '가입',
+      product_type: 'TY갤럭시케어',
     });
     assert.equal(eligible, 20);
 

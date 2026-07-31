@@ -32,6 +32,7 @@ function row(
   id: string,
   units: number,
   happyCallYmd: string,
+  productType: string = 'TY갤럭시케어',
 ): AttributedJoinContractRow {
   return {
     id,
@@ -43,25 +44,48 @@ function row(
     happy_call_at: `${happyCallYmd}T12:00:00+09:00`,
     happycall_result: '성공',
     invoice_no: 'INV-1',
+    product_type: productType,
   };
 }
 
 describe('double-up promotion window', () => {
-  it('경계일: 6/25 ×1, 6/26~7/25 ×2, 7/26 ×1', () => {
+  it('경계일: 6/25 ×1, 6/26~7/31 ×2, 8/1 ×1', () => {
     assert.equal(isDoubleUpPromotionWindow('2026-06-25T23:59:59+09:00'), false);
     assert.equal(isDoubleUpPromotionWindow('2026-06-26T00:00:00+09:00'), true);
     assert.equal(isDoubleUpPromotionWindow('2026-07-25T23:59:59+09:00'), true);
-    assert.equal(isDoubleUpPromotionWindow('2026-07-26T00:00:00+09:00'), false);
+    assert.equal(isDoubleUpPromotionWindow('2026-07-26T00:00:00+09:00'), true);
+    assert.equal(isDoubleUpPromotionWindow('2026-07-31T23:59:59+09:00'), true);
+    assert.equal(isDoubleUpPromotionWindow('2026-08-01T00:00:00+09:00'), false);
     assert.equal(DOUBLE_UP_PROMOTION_START_YMD, '2026-06-26');
-    assert.equal(DOUBLE_UP_PROMOTION_END_YMD, '2026-07-25');
+    assert.equal(DOUBLE_UP_PROMOTION_END_YMD, '2026-07-31');
   });
 
   it('해피콜 성공일 없으면 더블업 미적용', () => {
     assert.equal(
-      promotionMultiplierForContract({ unit_count: 2, happy_call_at: null, status: '가입' }),
+      promotionMultiplierForContract({
+        unit_count: 2,
+        happy_call_at: null,
+        status: '가입',
+        product_type: 'TY갤럭시케어',
+      }),
       1,
     );
-    assert.equal(eligibleUnits({ unit_count: 2, happy_call_at: null, status: '가입' }), 2);
+    assert.equal(
+      eligibleUnits({
+        unit_count: 2,
+        happy_call_at: null,
+        status: '가입',
+        product_type: 'TY갤럭시케어',
+      }),
+      2,
+    );
+  });
+
+  it('기간 내라도 갤럭시케어가 아니면 더블업 미적용', () => {
+    assert.equal(promotionMultiplierForContract(row('lite', 2, '2026-07-10', '갤럭시케어 라이트')), 1);
+    assert.equal(promotionMultiplierForContract(row('allife', 2, '2026-07-10', '올라이프케어')), 1);
+    assert.equal(promotionMultiplierForContract(row('mu', 2, '2026-07-10', '무')), 2);
+    assert.equal(promotionMultiplierForContract(row('ty', 2, '2026-07-10', 'TY갤럭시케어')), 2);
   });
 });
 
@@ -70,7 +94,8 @@ describe('double-up eligible vs commission units', () => {
     { ymd: '2026-06-25', expectedEligible: 2, expectedCommission: 2 },
     { ymd: '2026-06-26', expectedEligible: 4, expectedCommission: 2 },
     { ymd: '2026-07-25', expectedEligible: 4, expectedCommission: 2 },
-    { ymd: '2026-07-26', expectedEligible: 2, expectedCommission: 2 },
+    { ymd: '2026-07-31', expectedEligible: 4, expectedCommission: 2 },
+    { ymd: '2026-08-01', expectedEligible: 2, expectedCommission: 2 },
   ];
 
   for (const { ymd, expectedEligible, expectedCommission } of cases) {
