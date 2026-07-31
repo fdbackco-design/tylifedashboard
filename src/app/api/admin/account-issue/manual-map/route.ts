@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { isAdminAuthed } from '@/lib/admin-auth';
 import { backfillMemberPhoneFromUserProfile } from '@/lib/account-issue/member-profile-repair';
+import { validateManualCustomerMapIdentity } from '@/lib/account-issue/manual-map-identity';
+import { normalizePhone } from '@/lib/account-issue/normalize';
 import { promotePreIssuedPendingSettingIfPossible } from '@/lib/pre-issued/pending-promote';
 
 /**
@@ -87,6 +89,48 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
       // 3) customer_id 보강 (source_customer_id 가 있으면 함께 채워준다)
       const customerId = (member.source_customer_id ?? null) as string | null;
+      if (customerId) {
+        const profileName = String(profile.pre_issued_name ?? profile.display_name ?? '').trim();
+        const profilePhone = String(profile.pre_issued_phone ?? profile.phone ?? '').trim();
+        const [customerRes, requestRes] = await Promise.all([
+          db.from('customers').select('id, name, phone, birth_date').eq('id', customerId).maybeSingle(),
+          profileName
+            ? db.from('sales_code_requests').select('name, phone, birth_date').eq('name', profileName)
+            : Promise.resolve({ data: [], error: null }),
+        ]);
+        if (customerRes.error) throw new Error(customerRes.error.message);
+        if (requestRes.error) throw new Error(requestRes.error.message);
+        if (!customerRes.data) {
+          return NextResponse.json({ success: false, error: '대상 고객 정보를 찾을 수 없습니다.' }, { status: 409 });
+        }
+
+        const issuedRequest = ((requestRes.data ?? []) as Array<{
+          name: string | null;
+          phone: string | null;
+          birth_date: string | null;
+        }>).find((row) => normalizePhone(row.phone ?? '') === normalizePhone(profilePhone));
+        const identity = validateManualCustomerMapIdentity({
+          profileName,
+          profilePhone,
+          issuedBirthDate: issuedRequest?.birth_date ?? null,
+          customerName: customerRes.data.name,
+          customerPhone: customerRes.data.phone,
+          customerBirthDate: customerRes.data.birth_date,
+        });
+        if (!identity.ok) {
+          const reasonMessage: Record<typeof identity.reason, string> = {
+            NAME_MISMATCH: '계정 발급자와 고객의 이름이 일치하지 않습니다.',
+            PHONE_MISSING: '전화번호를 확인할 수 없어 고객 노드에 매핑할 수 없습니다.',
+            PHONE_MISMATCH: '계정 발급자와 고객의 전화번호가 일치하지 않습니다.',
+            BIRTH_DATE_MISSING: '생년월일을 확인할 수 없어 고객 노드에 매핑할 수 없습니다.',
+            BIRTH_DATE_MISMATCH: '계정 발급자와 고객의 생년월일이 일치하지 않습니다.',
+          };
+          return NextResponse.json(
+            { success: false, error: `${reasonMessage[identity.reason]} 동명이인일 수 있으므로 담당자 노드를 선택하세요.` },
+            { status: 409 },
+          );
+        }
+      }
 
       const updates: Record<string, unknown> = {
         member_id,
