@@ -21,6 +21,8 @@ import { loginToTYLife } from './auth';
 
 const RATE_LIMIT_MS = parseInt(process.env.TYLIFE_RATE_LIMIT_MS ?? '200', 10);
 const MAX_RETRIES = parseInt(process.env.TYLIFE_MAX_RETRIES ?? '3', 10);
+/** 단일 HTTP 요청 타임아웃 — TY 상세가 응답 없이 수 분 hang 되는 경우 동기화 전체가 멈춤 */
+const REQUEST_TIMEOUT_MS = parseInt(process.env.TYLIFE_REQUEST_TIMEOUT_MS ?? '15000', 10);
 
 const DEFAULT_BROWSER_USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36';
@@ -236,6 +238,15 @@ function buildDetailHeaders(): HeadersInit {
   };
 }
 
+function mergeAbortSignals(existing: AbortSignal | null | undefined): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  if (!existing) return timeoutSignal;
+  if (typeof AbortSignal.any === 'function') {
+    return AbortSignal.any([existing, timeoutSignal]);
+  }
+  return timeoutSignal;
+}
+
 /** fetch + 지수 백오프 재시도 */
 async function fetchWithRetry(
   url: string,
@@ -243,7 +254,10 @@ async function fetchWithRetry(
   attempt = 1,
 ): Promise<Response> {
   try {
-    const res = await fetch(url, options);
+    const res = await fetch(url, {
+      ...options,
+      signal: mergeAbortSignals(options.signal),
+    });
 
     if (res.status === 401 || res.status === 403) {
       throw new Error(sessionExpiredMessage(String(res.status)));
@@ -264,10 +278,21 @@ async function fetchWithRetry(
     return res;
   } catch (err) {
     const isSession = err instanceof Error && err.message.includes('세션');
+    const isAbort =
+      (err instanceof Error && err.name === 'AbortError') ||
+      (err instanceof Error && err.name === 'TimeoutError');
+    if (isAbort) {
+      console.warn(
+        `[tylife] 요청 타임아웃(${REQUEST_TIMEOUT_MS}ms) — ${attempt}/${MAX_RETRIES}회 재시도: ${url}`,
+      );
+    }
     if (!isSession && attempt <= MAX_RETRIES) {
       const wait = RATE_LIMIT_MS * Math.pow(2, attempt - 1);
       await sleep(wait);
       return fetchWithRetry(url, options, attempt + 1);
+    }
+    if (isAbort) {
+      throw new Error(`TY Life 요청 타임아웃(${REQUEST_TIMEOUT_MS}ms): ${url}`);
     }
     throw err;
   }
