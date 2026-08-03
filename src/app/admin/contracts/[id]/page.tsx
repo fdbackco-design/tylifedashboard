@@ -51,6 +51,10 @@ export default async function ContractDetailPage({ params }: PageProps) {
     rental_request_no: contract.rental_request_no as string | null,
     invoice_no: contract.invoice_no as string | null,
     memo: contract.memo as string | null,
+    product_type: (contract.product_type ?? null) as string | null,
+    item_name: (contract.item_name ?? null) as string | null,
+    happy_call_at: contract.happy_call_at ?? null,
+    happycall_result: (contract.happycall_result ?? null) as string | null,
   });
 
   return (

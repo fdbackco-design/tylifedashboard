@@ -16,7 +16,8 @@
  *        (2026-05-25 부처님오신날 대체공휴일이라 5월 마감일이 5/26 으로 밀림.
  *         따라서 5/26 해피콜 완료 건은 6월이 아닌 5월 정산에 포함된다.)
  *   3) 송장번호(invoice_no) 가 yearMonth 30일 23:59:59 (KST) 까지 존재
- *      ※ TY갤럭시케어_무 상품은 송장 없이 해피콜 완료만으로 가입·정산 인정
+ *      ※ TY갤럭시케어_무 · TY케어플랜 은 송장·렌탈 없이 해피콜 완료만으로 가입·정산 인정
+ *         (정산월·가입일 기준은 해피콜 성공일)
  *      - 송장 마감일은 공휴일/주말 보정을 적용하지 않는다. 매월 30일 23:59:59 KST 가 절대 마감선.
  *        (해피콜 윈도우에는 공휴일/주말 보정이 적용되는 것과 다르다.)
  *      - 30일이 없는 달(2월)은 해당 월의 말일까지(28/29일).
@@ -39,8 +40,8 @@
 
 import { isKoreanHoliday } from './korean-holidays';
 import {
-  isTyGalaxyCareMuContract,
-  meetsTyGalaxyCareMuJoinCondition,
+  isInvoiceExemptHappyCallJoinContract,
+  meetsInvoiceExemptHappyCallJoinCondition,
   resolveHappycallEligibilityFields,
 } from './galaxy-care-mu';
 import { hasValidInvoiceNo } from '@/lib/utils/invoice-no';
@@ -270,7 +271,7 @@ export function evaluateContractEligibility(
     return { result: 'EXCLUDED', reason: 'sales_link_status_not_linked' };
   }
 
-  const isMu = isTyGalaxyCareMuContract(c);
+  const isInvoiceExempt = isInvoiceExemptHappyCallJoinContract(c);
   const { ymd: hcYmdResolved, result: hcResult } = resolveHappycallEligibilityFields(
     c.happy_call_at,
     c.happycall_result,
@@ -291,9 +292,9 @@ export function evaluateContractEligibility(
   }
 
   // 해피콜 결과/일시 검증
-  if (isMu) {
-    if (!meetsTyGalaxyCareMuJoinCondition(c)) {
-      return { result: 'EXCLUDED', reason: 'mu_happycall_not_valid' };
+  if (isInvoiceExempt) {
+    if (!meetsInvoiceExemptHappyCallJoinCondition(c)) {
+      return { result: 'EXCLUDED', reason: 'invoice_exempt_happycall_not_valid' };
     }
   } else if (!SETTLEMENT_VALID_HAPPYCALL_RESULTS.has(hcResult)) {
     return { result: 'EXCLUDED', reason: 'happycall_result_not_valid' };
@@ -308,8 +309,8 @@ export function evaluateContractEligibility(
     }
   }
 
-  // TY갤럭시케어_무: 송장 없이 해피콜 완료만으로 정산 가입 인정
-  if (isMu) {
+  // TY갤럭시케어_무 · TY케어플랜: 송장·렌탈 없이 해피콜 완료만으로 정산 가입 인정
+  if (isInvoiceExempt) {
     return { result: 'ELIGIBLE', happycall_ymd: hcYmd };
   }
 
@@ -360,7 +361,7 @@ export function evaluateContractEligibility(
  *   1) is_cancelled / status('취소'·'해약'·'계약취소') 아님
  *   2) sales_member_id 존재 & sales_link_status == 'linked' (null 은 linked 로 간주)
  *   3) happycall_result ∈ SETTLEMENT_VALID_HAPPYCALL_RESULTS (and NOT in CANCELLED set)
- *   4) invoice_no 가 존재(공백 제외) — TY갤럭시케어_무 는 해피콜 일시+결과만으로 인정
+ *   4) invoice_no 가 존재(공백 제외) — TY갤럭시케어_무 · TY케어플랜 은 해피콜 일시+결과만으로 인정
  */
 export type ContractEligibilityStaticInput = {
   status?: string | null;
@@ -383,8 +384,8 @@ export function isV2EligibleStatic(c: ContractEligibilityStaticInput): boolean {
   if ((c.sales_link_status ?? 'linked') !== 'linked') return false;
   const { result: hc } = resolveHappycallEligibilityFields(c.happy_call_at, c.happycall_result);
   if (SETTLEMENT_CANCELLED_HAPPYCALL_RESULTS.has(hc)) return false;
-  if (isTyGalaxyCareMuContract(c)) {
-    return meetsTyGalaxyCareMuJoinCondition(c);
+  if (isInvoiceExemptHappyCallJoinContract(c)) {
+    return meetsInvoiceExemptHappyCallJoinCondition(c);
   }
   if (!SETTLEMENT_VALID_HAPPYCALL_RESULTS.has(hc)) return false;
   if (!hasValidInvoiceNo(c.invoice_no)) return false;

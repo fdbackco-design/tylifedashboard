@@ -74,6 +74,10 @@ function getDisplayStatus(c: ContractItem): string {
     rental_request_no: c.rental_request_no,
     invoice_no: c.invoice_no,
     memo: c.memo,
+    product_type: c.product_type,
+    item_name: c.item_name,
+    happy_call_at: c.happy_call_at,
+    happycall_result: (c as { happycall_result?: string | null }).happycall_result ?? null,
   });
 }
 

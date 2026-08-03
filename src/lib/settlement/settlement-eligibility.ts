@@ -10,8 +10,9 @@
  * 통과 조건 (v2 정적 기준):
  *   1) is_cancelled / status('취소'·'해약'·'계약취소') 아님
  *   2) sales_member_id 존재 & sales_link_status == 'linked'
- *   3) happycall_result ∈ { '성공', '완료', '심사완료', '계약변경' } (또는 TY갤럭시케어_무는 해피콜 일시+결과만)
- *   4) invoice_no 존재 (TY갤럭시케어_무 제외)
+ *   3) happycall_result ∈ { '성공', '완료', '심사완료', '계약변경' }
+ *      (또는 TY갤럭시케어_무 · TY케어플랜은 해피콜 일시+결과만)
+ *   4) invoice_no 존재 (TY갤럭시케어_무 · TY케어플랜 제외)
  *
  * NOTE:
  * - `rental_request_no` 필드는 호환을 위해 인터페이스에 남겨두지만 판단에는 사용하지 않는다.

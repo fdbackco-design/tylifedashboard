@@ -63,6 +63,10 @@ import {
   isEligibleForHqCustomerAttribution,
   type ExistingContractMergeSource,
 } from './contract-internal-status';
+import {
+  isTyCarePlanContract,
+  resolveHappycallEligibilityFields,
+} from '../settlement/galaxy-care-mu';
 
 function shouldExcludeRecruitmentName(name: string, relationship: string): boolean {
   const n = name.trim();
@@ -1467,6 +1471,17 @@ async function processItem(
       ty_source_status: tySourceStatus,
       status: internalStatus,
     };
+
+    // TY케어플랜: 가입 인정 시 가입일 = 해피콜 성공일 (송장·렌탈 불필요)
+    if (isTyCarePlanContract(contractFinal) && internalStatus === '가입') {
+      const { ymd: carePlanJoinYmd } = resolveHappycallEligibilityFields(
+        contractFinal.happy_call_at,
+        contractFinal.happycall_result,
+      );
+      if (carePlanJoinYmd) {
+        contractFinal = { ...contractFinal, join_date: carePlanJoinYmd };
+      }
+    }
 
     // ── 5. 실적 스탬핑: 최초 1회만 경로 박제 (이후 조직 개편·퇴사에도 당시 레그 유지)
     if (salesLinkStatus === 'linked' && finalSalesMemberId && !existingPathStamped) {

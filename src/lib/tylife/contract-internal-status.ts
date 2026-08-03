@@ -6,12 +6,13 @@
  *   - 유효 송장번호 존재
  *   - 취소/해약/반품 등 종료 상태 아님
  *   ※ 렌탈신청번호는 사용하지 않음
+ *   ※ TY갤럭시케어_무 · TY케어플랜 은 송장 없이 해피콜만으로 가입
  */
 import type { ContractInsert, ContractStatus } from '../types/contract';
 import { hasValidInvoiceNo } from '../utils/invoice-no';
 import {
-  isTyGalaxyCareMuContract,
-  meetsTyGalaxyCareMuJoinCondition,
+  isInvoiceExemptHappyCallJoinContract,
+  meetsInvoiceExemptHappyCallJoinCondition,
   resolveHappycallEligibilityFields,
 } from '../settlement/galaxy-care-mu';
 import { SETTLEMENT_VALID_HAPPYCALL_RESULTS } from '../settlement/settlement-eligibility-v2';
@@ -77,8 +78,8 @@ export function meetsInternalJoinCondition(params: {
   source_snapshot_json?: Record<string, string | null> | null;
 }): boolean {
   if (params.is_cancelled) return false;
-  if (isTyGalaxyCareMuContract(params)) {
-    return meetsTyGalaxyCareMuJoinCondition(params);
+  if (isInvoiceExemptHappyCallJoinContract(params)) {
+    return meetsInvoiceExemptHappyCallJoinCondition(params);
   }
   if (!hasValidInvoiceNo(params.invoice_no)) return false;
   const { result: hc } = resolveHappycallEligibilityFields(
