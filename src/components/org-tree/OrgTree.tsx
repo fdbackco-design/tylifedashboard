@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { OrgTreeNode as OrgTreeNodeType } from '@/lib/types';
 import OrgTreeNode, {
   type ContractItem,
+  collectSubtreeContracts,
   collectSubtreeIds,
 } from './OrgTreeNode';
 import { getContractDisplayProductName } from '@/lib/utils/contract-display-product';
@@ -37,9 +38,9 @@ export function collectOrgTreeSubtreeContracts(
   extraIds?: string[],
 ): ContractItem[] {
   const ids = [...new Set([...collectSubtreeIds(node), ...(extraIds ?? [])])];
-  return ids
-    .flatMap((id) => map[id] ?? [])
-    .sort((a, b) => (b.join_date ?? '').localeCompare(a.join_date ?? ''));
+  return collectSubtreeContracts(ids, map).sort((a, b) =>
+    (b.join_date ?? '').localeCompare(a.join_date ?? ''),
+  );
 }
 
 const STATUS_COLOR: Record<string, string> = {
