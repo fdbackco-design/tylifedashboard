@@ -4,15 +4,26 @@
  * - 렌탈기준 미충족(준비·대기)은 최우선
  * - 2026-06 개정: 해약이 아니고 송장번호가 있으면 가입으로 표시한다.
  *   (렌탈신청번호 유무는 더 이상 따지지 않는다.)
+ * - TY갤럭시케어_무 · TY케어플랜: 송장 없이 해피콜 성공이면 가입으로 표시
  * - 그 외에는 DB status 그대로
  */
 import { hasValidInvoiceNo } from '@/lib/utils/invoice-no';
+import {
+  isInvoiceExemptHappyCallJoinContract,
+  meetsInvoiceExemptHappyCallJoinCondition,
+} from '@/lib/settlement/galaxy-care-mu';
 
 export type ContractDisplayStatusInput = {
   status: string;
   rental_request_no?: string | null;
   invoice_no?: string | null;
   memo?: string | null;
+  product_type?: string | null;
+  item_name?: string | null;
+  source_snapshot_json?: Record<string, string | null> | null;
+  happy_call_at?: unknown;
+  happycall_result?: string | null;
+  is_cancelled?: boolean | null;
 };
 
 export function getContractDisplayStatus(c: ContractDisplayStatusInput): string {
@@ -29,6 +40,12 @@ export function getContractDisplayStatus(c: ContractDisplayStatusInput): string 
   }
   const hasInvoice = hasValidInvoiceNo(c.invoice_no);
   if (status === '가입' || hasInvoice) {
+    return '가입';
+  }
+  if (
+    isInvoiceExemptHappyCallJoinContract(c) &&
+    meetsInvoiceExemptHappyCallJoinCondition(c)
+  ) {
     return '가입';
   }
   return status;

@@ -24,4 +24,17 @@ describe('getContractDisplayStatus', () => {
       }),
     ).toBe('가입');
   });
+
+  it('TY케어플랜은 송장 없이 해피콜 성공이면 가입으로 표시한다', () => {
+    expect(
+      getContractDisplayStatus({
+        status: '준비',
+        invoice_no: null,
+        product_type: 'TY케어플랜',
+        item_name: 'TY케어플랜',
+        happy_call_at: '2026-07-20',
+        happycall_result: '성공',
+      }),
+    ).toBe('가입');
+  });
 });

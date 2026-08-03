@@ -41,14 +41,35 @@ export type GalaxyCareMuDetectInput = {
   source_snapshot_json?: Record<string, string | null> | null;
 };
 
+function collectProductDetectTexts(c: GalaxyCareMuDetectInput): string[] {
+  return [
+    c.product_type,
+    c.item_name,
+    c.source_snapshot_json?.['상품명'],
+  ]
+    .map((t) => String(t ?? '').trim())
+    .filter(Boolean);
+}
+
 /** TY갤럭시케어_무: 렌탈·송장 없이 해피콜 완료만으로 가입 인정 */
 export function isTyGalaxyCareMuContract(c: GalaxyCareMuDetectInput): boolean {
   const productType = (c.product_type ?? '').trim();
   if (productType === '무') return true;
 
-  const snapshotProduct = String(c.source_snapshot_json?.['상품명'] ?? '').trim();
-  const texts = [productType, c.item_name ?? '', snapshotProduct].map((t) => String(t).trim());
+  const texts = collectProductDetectTexts(c);
   return texts.some((t) => t.includes('TY갤럭시케어_무') || /_무$/i.test(t));
+}
+
+/** TY케어플랜: 렌탈·송장 없이 해피콜 성공만으로 가입 인정 (가입일=해피콜 성공일) */
+export function isTyCarePlanContract(c: GalaxyCareMuDetectInput): boolean {
+  const productType = (c.product_type ?? '').trim();
+  if (productType === 'TY케어플랜') return true;
+  return collectProductDetectTexts(c).some((t) => t.includes('TY케어플랜') || t === '케어플랜');
+}
+
+/** 송장·렌탈 없이 해피콜만으로 가입 인정하는 상품 (갤럭시무 · TY케어플랜) */
+export function isInvoiceExemptHappyCallJoinContract(c: GalaxyCareMuDetectInput): boolean {
+  return isTyGalaxyCareMuContract(c) || isTyCarePlanContract(c);
 }
 
 /**
@@ -92,3 +113,6 @@ export function meetsTyGalaxyCareMuJoinCondition(params: {
   if (!ymd) return false;
   return MU_VALID_HAPPYCALL_RESULTS.has(result);
 }
+
+/** 송장 면제 상품 공통 가입 조건 (해피콜 성공일·결과) */
+export const meetsInvoiceExemptHappyCallJoinCondition = meetsTyGalaxyCareMuJoinCondition;
