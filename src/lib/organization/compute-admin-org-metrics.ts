@@ -81,6 +81,7 @@ export async function computeAdminOrgNodeMetrics(
       unit_count: c.unit_count ?? 0,
       status: c.status,
       item_name: c.item_name ?? null,
+      product_type: c.product_type ?? null,
       customer_id: c.customer_id,
       sales_member_id: ctx.resolveContractSalesMemberId({
         sales_member_id: c.sales_member_id,

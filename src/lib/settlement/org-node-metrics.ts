@@ -5,6 +5,7 @@ import {
   DEFAULT_COMMISSION_BY_RANK,
   commissionPenaltyWonForItemName,
 } from '@/lib/settlement/constants';
+import { productCommissionPerUnitForRank } from '@/lib/settlement/product-commission-rates';
 import type { OrgTreeRow } from '@/lib/types';
 import {
   computeSalesMemberPromotionThreshold,
@@ -40,6 +41,7 @@ type EligibleContract = {
   status: string;
   sales_member_id: string | null;
   item_name?: string | null;
+  product_type?: string | null;
   created_at?: string | null;
   happy_call_at?: string | null;
   invoice_registered_at?: string | null;
@@ -78,9 +80,12 @@ function getCommissionPerUnit(
   rules: SettlementRule[],
   rank: RankType,
   refDate: string, // 'YYYY-MM-DD'
+  product?: { item_name?: string | null; product_type?: string | null } | null,
 ): number {
   // 본사는 수당 대상이 아님
   if (rank === '본사') return 0;
+  const override = productCommissionPerUnitForRank(rank, product ?? null);
+  if (override != null) return override;
   const rule = findActiveRule(rules, rank, refDate);
   // settlement_rules를 못 읽거나(초기 데이터 미적용/권한/환경),
   // 특정 월 규칙이 없을 때도 조직도 KPI가 0이 되지 않도록 폴백 제공
@@ -467,7 +472,11 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
     }
   })(roots as any[]);
 
-  const getRate = (memberId: string, contract: PromotionOrderContractRef): number => {
+  const getRate = (
+    memberId: string,
+    contract: PromotionOrderContractRef,
+    product?: { item_name?: string | null; product_type?: string | null } | null,
+  ): number => {
     const dbRank = rankById.get(memberId);
     if (!dbRank) return 0;
     const eff = effectiveRankForContract({
@@ -478,7 +487,7 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
       leaderRankEffectiveAtByMemberId,
       promotionUnitSplitByMemberId,
     });
-    return getCommissionPerUnit(rules, eff, refDate);
+    return getCommissionPerUnit(rules, eff, refDate, product);
   };
 
   const effectiveParent = (childId: string, contract: PromotionOrderContractRef): string | null => {
@@ -569,7 +578,8 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
     if (!inWindow(jd, settlementWindow.start_date, settlementWindow.end_date)) continue;
 
     const contractKey = promotionOrderRef(c);
-    const originRate = getRate(origin, contractKey);
+    const product = { item_name: c.item_name ?? null, product_type: c.product_type ?? null };
+    const originRate = getRate(origin, contractKey, product);
 
     // 기본수당 귀속: 승격 전(승격 계약 포함)은 이전 리더에게 귀속(단가=영업사원), 승격 후만 본인
     let baseRecipient = origin;
@@ -605,7 +615,7 @@ function calculateOrgNodeMetricsAlignedToSettlement(params: {
       const parentDbRank = rankById.get(parentId);
       if (!parentDbRank) break;
       if (parentDbRank === '본사') break;
-      const parentRate = getRate(parentId, contractKey);
+      const parentRate = getRate(parentId, contractKey, product);
       const diff = Math.max(0, parentRate - childRate);
       if (diff > 0) rollupById.set(parentId, (rollupById.get(parentId) ?? 0) + diff * unit);
       childId = parentId;
