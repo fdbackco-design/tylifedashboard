@@ -98,4 +98,30 @@ describe('TY케어플랜 가입 인정', () => {
       false,
     );
   });
+
+  it('잘못된 invoice_missing 이월은 무시하고 해피콜월(8월)에 ELIGIBLE', () => {
+    const decision = evaluateContractEligibility(
+      {
+        id: 'c-defer',
+        status: '대기',
+        is_cancelled: false,
+        sales_member_id: 'm1',
+        sales_link_status: 'linked',
+        happy_call_at: '2026-07-29',
+        happycall_result: '성공',
+        product_type: 'TY케어플랜',
+        item_name: '',
+        invoice_no: null,
+        invoice_registered_at: null,
+        settlement_deferred: true,
+        deferred_to_month: '2026-09',
+        deferred_reason: 'invoice_missing',
+      },
+      '2026-08',
+    );
+    assert.equal(decision.result, 'ELIGIBLE');
+    if (decision.result === 'ELIGIBLE') {
+      assert.equal(decision.happycall_ymd, '2026-07-29');
+    }
+  });
 });
