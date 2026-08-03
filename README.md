@@ -113,7 +113,7 @@ npm install
 npm run sync:tylife-local
 ```
 
-열린 Chrome에서 TY Life 로그인과 Turnstile 인증을 완료하면 최근 41일 범위가 자동 동기화됩니다.
+열린 Chrome에서 TY Life 로그인과 Turnstile 인증을 완료하면 최근 21일 범위가 자동 동기화됩니다.
 로그인 프로필은 `.playwright/`에 보관되어 다음 실행부터 재사용됩니다.
 
 Turnstile이 Playwright 제어 브라우저를 거부하는 경우에는 일반 Chrome에서 TY Life에 로그인한 뒤,

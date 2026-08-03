@@ -112,7 +112,7 @@ function getSeoulTodayYmd(): string {
 }
 
 /** 동기화 시 join_date 컷오프: 서울 오늘로부터 이 일 수보다 오래된 목록 항목은 스킵 */
-const SYNC_JOIN_DATE_LOOKBACK_DAYS = 31;
+const SYNC_JOIN_DATE_LOOKBACK_DAYS = 21;
 
 function minusDaysYmd(ymd: string, days: number): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
@@ -1732,10 +1732,8 @@ export async function syncContractPage(
   const listHtml = apiRes.data?.listHtml ?? '';
   const itemsAll = parseContractListHtml(listHtml);
 
-  // 성능 최적화(요구): 오늘(Seoul) 기준 최근 41일(약 6주)보다 오래된 가입일(join_date)의 계약은 더 이상 수집하지 않는다.
+  // 성능 최적화(요구): 오늘(Seoul) 기준 최근 21일보다 오래된 가입일(join_date)의 계약은 수집하지 않는다.
   // - 페이지 탐색 자체를 조기 종료해, UI 동기화 시간이 과도하게 늘어나는 것을 방지한다.
-  // - 정산 윈도우(전월26일~당월25일) + 송장번호 마감일(당월30일)을 모두 커버하기 위해 41일 사용.
-  //   예) 오늘이 매월 30일이면 41일 전은 전전월 19일까지 — 전월 정산이 늦게 재계산되어도 데이터 누락 없도록.
   const todayYmd = getSeoulTodayYmd();
   const cutoffYmd = todayYmd ? minusDaysYmd(todayYmd, SYNC_JOIN_DATE_LOOKBACK_DAYS) : '';
   const items =
