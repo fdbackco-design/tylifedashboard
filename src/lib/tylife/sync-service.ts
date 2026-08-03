@@ -57,6 +57,7 @@ import {
 import { computeCenterChiefPromotionThresholds } from '../settlement/center-chief-promotion';
 import type { RankType } from '../types/organization';
 import { hasValidInvoiceNo, normalizeInvoiceNo } from '../utils/invoice-no';
+import { parseRentalOrMemo } from '../utils/mask';
 import {
   mergeExistingContractFields,
   resolveInternalContractStatus,
@@ -1345,14 +1346,23 @@ async function processItem(
     } | null;
     const existingPathStamped = ec != null && ec.performance_path_json != null;
     const ecTySource = (ec?.ty_source_status ?? ec?.status ?? null) as string | null;
+    // 상세 재fetch 스킵 조건:
+    // - 준비/대기는 송장·렌탈이 나중에 생기므로, DB에 둘 다 없을 때는 상세를 다시 본다.
+    // - 다만 리스트 HTML에도 송장/렌탈 컬럼이 있어, 이번 목록에 이미 있으면 상세 없이도 반영 가능하다.
+    // - (느려진 직접 원인) 상세 URL hang + external_id=0 재시도 + 동시 동기화. 타임아웃/invalid id 스킵은 유지.
+    const existingItemName = String(ec?.item_name ?? '').trim();
+    const listInvoiceNo = normalizeInvoiceNo(item.invoice_no);
+    const listRentalNo = parseRentalOrMemo(item.rental_or_memo ?? null).rental_request_no;
+    const hasInvoiceAndRental =
+      (hasValidInvoiceNo(ec?.invoice_no) && String(ec?.rental_request_no ?? '').trim() !== '') ||
+      (hasValidInvoiceNo(listInvoiceNo) && String(listRentalNo ?? '').trim() !== '');
     const alreadyHasDetail =
       ec != null &&
       ecTySource === normalizeStatus(item.status_raw ?? '') &&
       ec.unit_count != null &&
-      ec.invoice_no != null &&
-      ec.rental_request_no != null &&
-      ec.item_name != null &&
-      ec.item_name !== DEFAULT_ITEM_NAME_PLACEHOLDER;
+      existingItemName !== '' &&
+      existingItemName !== DEFAULT_ITEM_NAME_PLACEHOLDER &&
+      hasInvoiceAndRental;
 
     // 담당 미확인(/admin/pending-sales)에서 수동 지정한 linked 계약 보호:
     // - TY 쪽 이름이 동명이인/미확정이면(pending_mapping) 기존 sales_member_id 를 유지한다.
@@ -1374,13 +1384,21 @@ async function processItem(
     const listStatus = normalizeStatus(item.status_raw ?? '');
     const skipDetailFetch = isTerminalContractStatus(listStatus) || isTerminalContractStatus(ec?.status ?? null);
 
-    if (!keepExistingManualSalesLink && item.external_id && !alreadyHasDetail && !skipDetailFetch) {
+    // external_id '0'/빈값은 TY 상세 URL이 없어 타임아웃만 유발하므로 스킵
+    const detailExternalId = String(item.external_id ?? '').trim();
+    const canFetchDetail =
+      !!detailExternalId &&
+      detailExternalId !== '0' &&
+      /^\d+$/.test(detailExternalId);
+
+    if (!keepExistingManualSalesLink && canFetchDetail && !alreadyHasDetail && !skipDetailFetch) {
       try {
-        let html = await fetchContractDetailHtml(item.external_id);
+        let html = await fetchContractDetailHtml(detailExternalId);
         // 상세 URL id vs HTML 내부 contractNo 불일치 케이스 보정 (backfill과 동일 정책)
         const m = html.match(/contractNo\s*[:=]\s*['"]?(\d+)/i);
-        if (m?.[1] && m[1] !== item.external_id) {
-          html = await fetchContractDetailHtml(m[1]);
+        const altId = String(m?.[1] ?? '').trim();
+        if (altId && altId !== '0' && altId !== detailExternalId) {
+          html = await fetchContractDetailHtml(altId);
         }
         detail = parseContractDetailHtml(html, item.contract_code);
 
@@ -1859,7 +1877,7 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
   const { data: runData, error: runError } = await db
     .from('sync_runs')
     .insert({ status: 'running', triggered_by: triggeredBy })
-    .select('id')
+    .select('id, started_at')
     .single();
 
   if (runError || !runData) {
@@ -1867,6 +1885,41 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
   }
 
   const runId = (runData as SyncRun).id;
+
+  // check-then-insert 레이스 보정: 동시에 running 이 여러 개면 가장 오래된 것만 남긴다.
+  const { data: runningPeers } = await db
+    .from('sync_runs')
+    .select('id, started_at, triggered_by')
+    .eq('status', 'running')
+    .order('started_at', { ascending: true })
+    .order('id', { ascending: true })
+    .limit(10);
+  const winner = (runningPeers ?? [])[0] as
+    | { id: string; started_at: string; triggered_by: string | null }
+    | undefined;
+  if (winner && String(winner.id) !== String(runId)) {
+    await db
+      .from('sync_runs')
+      .update({
+        status: 'failed',
+        finished_at: new Date().toISOString(),
+        total_errors: 1,
+      })
+      .eq('id', runId)
+      .eq('status', 'running');
+    console.warn(
+      `[sync] 동시 실행 레이스로 건너뜁니다: winner=${winner.id} (by=${winner.triggered_by}) self=${runId}`,
+    );
+    return {
+      run_id: String(winner.id),
+      status: 'completed',
+      total_fetched: 0,
+      total_created: 0,
+      total_updated: 0,
+      total_errors: 0,
+      duration_ms: Date.now() - startedAt,
+    };
+  }
   let totalFetched = 0;
   let totalCreated = 0;
   let totalUpdated = 0;
@@ -1879,10 +1932,12 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
     });
 
     let page = 1;
+    const pagesStartedAt = Date.now();
 
     while (true) {
       if (maxPage && page > maxPage) break;
 
+      const pageStartedAt = Date.now();
       console.log(`[sync] 페이지 ${page} 처리 중...`);
 
       const pageResult = await syncContractPage(
@@ -1896,6 +1951,12 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
       totalUpdated += pageResult.updated;
       totalErrors += pageResult.errors;
 
+      console.log(
+        `[sync] 페이지 ${page} 완료 fetched=${pageResult.fetched} ` +
+          `created=${pageResult.created} updated=${pageResult.updated} ` +
+          `errors=${pageResult.errors} duration_ms=${Date.now() - pageStartedAt}`,
+      );
+
       await log(db, runId, 'info', `페이지 ${page} 완료`, {
         fetched: pageResult.fetched,
         created: pageResult.created,
@@ -1907,10 +1968,16 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
       page++;
     }
 
+    console.log(
+      `[sync] 목록 처리 완료 pages=${page} fetched=${totalFetched} ` +
+        `duration_ms=${Date.now() - pagesStartedAt} concurrency=${CONCURRENCY}`,
+    );
+
     // 승격 반영: 산하 '가입' 누적 20구좌 달성한 영업사원 → 리더 (DB rank 업데이트)
     // - 승격 기준은 날짜가 아니라 "누적 20이 되는 승격 계약" 단위로 계산됨.
     // - 여기서는 UI/조직도에서도 일관되게 보이도록 DB rank를 올린다(요구사항).
     if (!dryRun) {
+      const promoStartedAt = Date.now();
       try {
         const [membersRes, edgesRes, joinContractsRes] = await Promise.all([
           db
@@ -2147,8 +2214,12 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
           });
         }
 
+        console.log(`[sync] 승격 반영 완료 duration_ms=${Date.now() - promoStartedAt}`);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        console.warn(
+          `[sync] 승격 반영 단계 실패 duration_ms=${Date.now() - promoStartedAt}: ${message}`,
+        );
         await log(db, runId, 'warn', `승격 반영 단계 실패(동기화는 완료 처리): ${message}`);
       }
     }
@@ -2157,8 +2228,13 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
     // - 동기화 단계가 모두 성공한 경우에만 시도한다.
     // - 실패해도 동기화 전체는 완료 처리.
     if (!dryRun) {
+      const mapStartedAt = Date.now();
       try {
         const r = await runPreIssuedAccountAutoMapping(db);
+        console.log(
+          `[sync] 사전 발급 매핑 완료 scanned=${r.scanned_count} matched=${r.matched_count} ` +
+            `duration_ms=${Date.now() - mapStartedAt}`,
+        );
         await log(db, runId, 'info', '사전 발급 계정 자동 매핑 완료', {
           scanned: r.scanned_count,
           matched: r.matched_count,
@@ -2167,6 +2243,9 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        console.warn(
+          `[sync] 사전 발급 매핑 실패 duration_ms=${Date.now() - mapStartedAt}: ${message}`,
+        );
         await log(db, runId, 'warn', `사전 발급 계정 자동 매핑 실패(동기화는 완료 처리): ${message}`);
       }
     }
@@ -2175,11 +2254,19 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
     // - 관리자가 "접수완료(RECEIVED)" 처리한 건 중, TY 동기화로 계약 담당자가 실제 변경되면 자동으로 COMPLETED 처리 + 영업자 알림
     // - 실패해도 동기화 전체는 완료 처리
     if (!dryRun) {
+      const mcStartedAt = Date.now();
       try {
         const r = await autoCompleteReceivedManagerChangeRequests(db);
+        console.log(
+          `[sync] 담당자 변경 자동완료 scanned=${r.scanned} completed=${r.completed} ` +
+            `duration_ms=${Date.now() - mcStartedAt}`,
+        );
         await log(db, runId, 'info', '담당자 변경 신청 자동 완료 확인', r);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        console.warn(
+          `[sync] 담당자 변경 자동완료 실패 duration_ms=${Date.now() - mcStartedAt}: ${message}`,
+        );
         await log(db, runId, 'warn', `담당자 변경 신청 자동 완료 확인 실패(동기화는 완료 처리): ${message}`);
       }
     }
