@@ -1,12 +1,23 @@
 import { loadEnvConfig } from '@next/env';
-import { access, mkdir, readlink, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { appendSessionEvent, nowKst } from './tylife-session-log';
 
 loadEnvConfig(process.cwd());
 
-const LOCK_PATH = path.join(process.cwd(), '.playwright', 'tylife-local-cookie-sync.lock');
+/** Documents(iCloud) 밖 — 심볼릭 락이 깨져 이중 실행되던 문제 방지 */
+const LOCK_DIR = path.join(
+  os.homedir(),
+  'Library',
+  'Logs',
+  'tylifedashboard',
+  'tylife-local-cookie-sync.lockdir',
+);
+const LOCK_PID_PATH = path.join(LOCK_DIR, 'pid');
 const EXPIRY_FLAG_PATH = path.join(process.cwd(), '.playwright', 'tylife-expiry-notified.flag');
+/** 레거시 Documents 락 (정리용) */
+const LEGACY_LOCK_PATH = path.join(process.cwd(), '.playwright', 'tylife-local-cookie-sync.lock');
 
 function requiredEnv(name: string): string {
   const value = (process.env[name] ?? '').trim();
@@ -23,24 +34,48 @@ async function processIsRunning(pid: number): Promise<boolean> {
   }
 }
 
+async function readLockPid(): Promise<number | null> {
+  try {
+    const raw = (await readFile(LOCK_PID_PATH, 'utf8')).trim();
+    const pid = Number.parseInt(raw, 10);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+async function releaseLock(): Promise<void> {
+  await rm(LOCK_DIR, { recursive: true, force: true }).catch(() => undefined);
+  await rm(LEGACY_LOCK_PATH, { force: true }).catch(() => undefined);
+}
+
+/**
+ * mkdir 원자적 배타 락 (POSIX).
+ * Documents 아래 symlink 락은 iCloud/동시 실행에 깨져 이중 sync가 났음.
+ */
 async function acquireLock(): Promise<boolean> {
-  await mkdir(path.dirname(LOCK_PATH), { recursive: true });
+  await mkdir(path.dirname(LOCK_DIR), { recursive: true });
+  await rm(LEGACY_LOCK_PATH, { force: true }).catch(() => undefined);
+
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      // PID를 symlink 대상에 담으면 잠금 생성과 소유자 기록이 원자적으로 처리된다.
-      await symlink(String(process.pid), LOCK_PATH);
+      await mkdir(LOCK_DIR);
+      await writeFile(LOCK_PID_PATH, `${process.pid}\n`, { encoding: 'utf8' });
       return true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      const existingPid = Number.parseInt(await readlink(LOCK_PATH).catch(() => ''), 10);
-      if (Number.isInteger(existingPid) && existingPid > 0 && (await processIsRunning(existingPid))) {
-        console.log(`[tylife-local-cookie] 이미 동기화가 실행 중입니다 (pid=${existingPid}).`);
+      const existingPid = await readLockPid();
+      if (existingPid != null && (await processIsRunning(existingPid))) {
+        console.log(`[tylife-local-cookie] 이미 동기화가 실행 중입니다 (pid=${existingPid}). 이번 주기를 건너뜁니다.`);
         return false;
       }
-      await rm(LOCK_PATH, { force: true });
+      console.warn(
+        `[tylife-local-cookie] 오래된 락을 제거합니다 (pid=${existingPid ?? 'unknown'}).`,
+      );
+      await releaseLock();
     }
   }
-  throw new Error('동기화 잠금 파일을 생성할 수 없습니다.');
+  throw new Error('동기화 잠금 디렉터리를 생성할 수 없습니다.');
 }
 
 /** 세션 복구 시 만료 알림 플래그를 지워 다음 만료 때 다시 알릴 수 있게 한다. */
@@ -79,6 +114,7 @@ async function notifyExpiryOnce(): Promise<void> {
     );
   } finally {
     // 발송 시도 후에는(구독 없음 포함) 플래그를 남겨 이번 만료 구간 반복 발송을 막는다.
+    await mkdir(path.dirname(EXPIRY_FLAG_PATH), { recursive: true }).catch(() => undefined);
     await writeFile(EXPIRY_FLAG_PATH, `${nowKst()}\n`, { encoding: 'utf8', mode: 0o600 }).catch(
       () => undefined,
     );
@@ -148,7 +184,7 @@ async function main(): Promise<void> {
     });
     console.log('[tylife-local-cookie] 동기화 완료', result);
   } finally {
-    await rm(LOCK_PATH, { force: true }).catch(() => undefined);
+    await releaseLock();
   }
 }
 
