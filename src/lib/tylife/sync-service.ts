@@ -1800,6 +1800,9 @@ export async function syncContractPage(
 // 전체 동기화 (syncContractPage 반복)
 // ─────────────────────────────────────────────
 
+/** running 상태로 이보다 오래 남으면 좀비로 보고 failed 처리 */
+const STALE_SYNC_RUNNING_MS = 90 * 60 * 1000;
+
 export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
   const {
     triggeredBy = 'manual',
@@ -1810,6 +1813,48 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
 
   const db = createAdminSupabaseClient();
   const startedAt = Date.now();
+
+  // 단일 실행 가드: 이미 진행 중인 sync_runs가 있으면 새 run을 만들지 않고 건너뛴다.
+  // (launchd StartInterval이 긴 sync 도중에 겹치거나, 파일 락이 깨진 경우 대비)
+  const staleCutoff = new Date(Date.now() - STALE_SYNC_RUNNING_MS).toISOString();
+  const { data: staleRows, error: staleError } = await db
+    .from('sync_runs')
+    .update({
+      status: 'failed',
+      finished_at: new Date().toISOString(),
+      total_errors: 1,
+    })
+    .eq('status', 'running')
+    .lt('started_at', staleCutoff)
+    .select('id');
+  if (staleError) {
+    console.warn(`[sync] 오래된 running sync_runs 정리 실패: ${staleError.message}`);
+  } else if ((staleRows?.length ?? 0) > 0) {
+    console.warn(`[sync] 오래된 running sync_runs ${staleRows!.length}건을 failed 처리했습니다.`);
+  }
+
+  const { data: activeRun } = await db
+    .from('sync_runs')
+    .select('id, triggered_by')
+    .eq('status', 'running')
+    .order('started_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (activeRun) {
+    console.warn(
+      `[sync] 이미 동기화가 실행 중이라 건너뜁니다: ${activeRun.id} (by=${activeRun.triggered_by})`,
+    );
+    return {
+      run_id: String(activeRun.id),
+      status: 'completed',
+      total_fetched: 0,
+      total_created: 0,
+      total_updated: 0,
+      total_errors: 0,
+      duration_ms: Date.now() - startedAt,
+    };
+  }
 
   const { data: runData, error: runError } = await db
     .from('sync_runs')
