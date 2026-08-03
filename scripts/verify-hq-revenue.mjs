@@ -11,6 +11,8 @@ const PRICES = {
   olife: 605_000,
   appliance: 550_000,
   lite: 500_000,
+  carePlan: 0,
+  sunCruise: 0,
 };
 
 function collectProductTexts(productType, itemName, snapshotProduct) {
@@ -32,12 +34,14 @@ function unitPrice(productType, happyCallAt, itemName, snapshotProduct) {
   const ymd = happyCallAt ? String(happyCallAt).slice(0, 10) : null;
 
   if (texts.some((t) => t.includes('갤럭시케어 라이트'))) return PRICES.lite;
+  if (texts.some((t) => t.includes('썬크루즈'))) return PRICES.sunCruise;
+  if (texts.some((t) => t.includes('케어플랜'))) return PRICES.carePlan;
   if (texts.some(isTyGalaxyCareProductText)) {
     return ymd && ymd >= TY_INCREASE ? PRICES.tyFrom : PRICES.tyBefore;
   }
   for (const text of texts) {
     if (text.includes('올라이프케어')) return PRICES.olife;
-    if (text.includes('스페셜라이프케어')) return PRICES.appliance;
+    if (text.includes('스페셜라이프케어') || text.includes('일반가전')) return PRICES.appliance;
   }
   return ymd && ymd >= TY_INCREASE ? PRICES.tyFrom : PRICES.tyBefore;
 }
@@ -56,6 +60,8 @@ assertEq('TY 2026-06-26', revenue('TY갤럭시케어', '2026-06-26', 1), 770_000
 assertEq('올라이프케어', revenue('올라이프케어', '2026-06-26', 3), 1_815_000);
 assertEq('스페셜라이프케어', unitPrice('스페셜라이프케어', '2026-01-01'), 550_000);
 assertEq('갤럭시케어 라이트', unitPrice('갤럭시케어 라이트', '2026-01-01'), 500_000);
+assertEq('TY케어플랜', unitPrice('TY케어플랜', '2026-07-01'), 0);
+assertEq('TY썬크루즈', unitPrice(null, '2026-07-01', 'TY썬크루즈'), 0);
 assertEq('TY갤럭시케어_무', revenue('무', '2026-06-26', 1, null, 'TY갤럭시케어_무'), 770_000);
 assertEq('TY갤럭시케어_ALL', revenue('TY갤럭시케어', '2026-06-26', 1, null, 'TY갤럭시케어_ALL'), 770_000);
 assertEq(

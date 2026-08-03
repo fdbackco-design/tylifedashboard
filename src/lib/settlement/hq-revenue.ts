@@ -21,6 +21,8 @@ export const HQ_REVENUE_UNIT_PRICES = {
   올라이프케어: 605_000,
   TY스페셜라이프케어: 550_000,
   '갤럭시케어 라이트': 500_000,
+  TY케어플랜: 0,
+  TY썬크루즈: 0,
 } as const;
 
 export type HqProductKind =
@@ -28,12 +30,19 @@ export type HqProductKind =
   | '올라이프케어'
   | 'TY스페셜라이프케어'
   | '갤럭시케어 라이트'
+  | 'TY케어플랜'
+  | 'TY썬크루즈'
   | 'unknown_review';
 
-/** 상품 판별: product_type 텍스트 포함 여부 (구체적 문구 우선) */
+/** 상품 판별: product_type/물품명 텍스트 포함 여부 (구체적 문구 우선) */
 const PRODUCT_MATCHERS: ReadonlyArray<{ kind: HqProductKind; includes: string }> = [
   { kind: '갤럭시케어 라이트', includes: '갤럭시케어 라이트' },
+  { kind: 'TY썬크루즈', includes: 'TY썬크루즈' },
+  { kind: 'TY썬크루즈', includes: '썬크루즈' },
+  { kind: 'TY케어플랜', includes: 'TY케어플랜' },
+  { kind: 'TY케어플랜', includes: '케어플랜' },
   { kind: 'TY갤럭시케어', includes: 'TY갤럭시케어' },
+  { kind: '올라이프케어', includes: 'TY올라이프케어' },
   { kind: '올라이프케어', includes: '올라이프케어' },
   // legacy: '일반가전'은 본사 매출 단가 분류상 TY스페셜라이프케어로 취급
   { kind: 'TY스페셜라이프케어', includes: '일반가전' },
@@ -72,12 +81,22 @@ export function resolveHqProductKindFromContract(input: HqProductResolveInput): 
   const texts = collectHqProductTexts(input);
   if (texts.length === 0) return 'unknown_review';
 
+  // 구체적 상품명 우선 (매출 0원 상품이 갤럭시 폴백에 섞이지 않도록)
   if (texts.some((t) => t.includes('갤럭시케어 라이트'))) return '갤럭시케어 라이트';
+  if (texts.some((t) => t.includes('썬크루즈'))) return 'TY썬크루즈';
+  if (texts.some((t) => t.includes('케어플랜'))) return 'TY케어플랜';
   if (texts.some(isTyGalaxyCareProductText)) return 'TY갤럭시케어';
 
   for (const text of texts) {
     for (const matcher of PRODUCT_MATCHERS) {
-      if (matcher.kind === 'TY갤럭시케어') continue;
+      if (
+        matcher.kind === 'TY갤럭시케어' ||
+        matcher.kind === '갤럭시케어 라이트' ||
+        matcher.kind === 'TY썬크루즈' ||
+        matcher.kind === 'TY케어플랜'
+      ) {
+        continue;
+      }
       if (text.includes(matcher.includes)) return matcher.kind;
     }
   }
@@ -125,6 +144,8 @@ export function getHqRevenueUnitPrice(
   if (kind === '올라이프케어') return HQ_REVENUE_UNIT_PRICES.올라이프케어;
   if (kind === 'TY스페셜라이프케어') return HQ_REVENUE_UNIT_PRICES.TY스페셜라이프케어;
   if (kind === '갤럭시케어 라이트') return HQ_REVENUE_UNIT_PRICES['갤럭시케어 라이트'];
+  if (kind === 'TY케어플랜') return HQ_REVENUE_UNIT_PRICES.TY케어플랜;
+  if (kind === 'TY썬크루즈') return HQ_REVENUE_UNIT_PRICES.TY썬크루즈;
 
   // 미식별·레거시: 과거 단일 상품(TY갤럭시케어) 처리와 동일하게 날짜 분기 단가 적용
   if (!settlementDate) return BASE_AMOUNT_PER_UNIT;
@@ -343,7 +364,10 @@ export function runHqRevenueSelfCheck(): { ok: boolean; failures: string[] } {
 
   assertEq('TY스페셜라이프케어', getHqRevenueUnitPrice('TY스페셜라이프케어', '2026-01-01'), 550_000);
   assertEq('일반가전 → TY스페셜라이프케어', getHqRevenueUnitPrice('일반가전', '2026-01-01'), 550_000);
+  assertEq('TY올라이프케어', getHqRevenueUnitPrice({ item_name: 'TY올라이프케어' }, '2026-07-01'), 605_000);
   assertEq('갤럭시케어 라이트', getHqRevenueUnitPrice('갤럭시케어 라이트', '2026-01-01'), 500_000);
+  assertEq('TY케어플랜', getHqRevenueUnitPrice('TY케어플랜', '2026-07-01'), 0);
+  assertEq('TY썬크루즈', getHqRevenueUnitPrice({ item_name: 'TY썬크루즈' }, '2026-07-01'), 0);
   assertKind('라이트 우선', resolveHqProductKind('갤럭시케어 라이트'), '갤럭시케어 라이트');
   assertKind('TY갤럭시케어_무', resolveHqProductKindFromContract({ product_type: '무' }), 'TY갤럭시케어');
   assertKind(
@@ -353,6 +377,8 @@ export function runHqRevenueSelfCheck(): { ok: boolean; failures: string[] } {
     }),
     'TY갤럭시케어',
   );
+  assertKind('TY케어플랜', resolveHqProductKind('TY케어플랜'), 'TY케어플랜');
+  assertKind('TY썬크루즈', resolveHqProductKindFromContract({ item_name: 'TY썬크루즈' }), 'TY썬크루즈');
   assertEq(
     'TY갤럭시케어_무 단가',
     calcContractHqRevenue({
@@ -363,6 +389,27 @@ export function runHqRevenueSelfCheck(): { ok: boolean; failures: string[] } {
       unit_count: 1,
     }),
     770_000,
+  );
+  assertEq(
+    'TY케어플랜 매출 0',
+    calcContractHqRevenue({
+      product_type: 'TY케어플랜',
+      join_date: '2026-07-01',
+      happy_call_at: '2026-07-01',
+      unit_count: 5,
+    }),
+    0,
+  );
+  assertEq(
+    'TY썬크루즈 매출 0',
+    calcContractHqRevenue({
+      product_type: 'TY갤럭시케어',
+      item_name: 'TY썬크루즈',
+      join_date: '2026-07-01',
+      happy_call_at: '2026-07-01',
+      unit_count: 2,
+    }),
+    0,
   );
 
   const sample = sumHqRevenueForContracts(
