@@ -245,6 +245,8 @@ export type ContractEligibilityInput = {
   invoice_registered_at: unknown;
   settlement_deferred: boolean | null;
   deferred_to_month: string | null;
+  /** invoice_missing 등. 송장 면제 상품의 잘못된 이월을 무시할 때 사용 */
+  deferred_reason?: string | null;
 };
 
 export type ContractEligibilityDecision =
@@ -280,15 +282,23 @@ export function evaluateContractEligibility(
     return { result: 'EXCLUDED', reason: `happycall_result:${hcResult}` };
   }
 
+  // 송장 면제 상품(TY케어플랜·갤럭시무)에 남은 invoice_missing 이월은 무시하고 재판정한다.
+  const staleInvoiceMissingDefer =
+    isInvoiceExempt &&
+    !!c.settlement_deferred &&
+    String(c.deferred_reason ?? '').trim() === 'invoice_missing';
+  const settlementDeferred = staleInvoiceMissingDefer ? false : !!c.settlement_deferred;
+  const deferredToMonth = staleInvoiceMissingDefer ? null : c.deferred_to_month;
+
   // 수동/자동 이월 우선 처리
   const manualDeferToThis =
-    !!c.settlement_deferred && (c.deferred_to_month ?? '') === yearMonth;
+    settlementDeferred && (deferredToMonth ?? '') === yearMonth;
   const manualDeferToOther =
-    !!c.settlement_deferred &&
-    (c.deferred_to_month ?? '').trim() !== '' &&
-    (c.deferred_to_month ?? '') !== yearMonth;
+    settlementDeferred &&
+    (deferredToMonth ?? '').trim() !== '' &&
+    (deferredToMonth ?? '') !== yearMonth;
   if (manualDeferToOther) {
-    return { result: 'EXCLUDED', reason: `deferred_to:${c.deferred_to_month}` };
+    return { result: 'EXCLUDED', reason: `deferred_to:${deferredToMonth}` };
   }
 
   // 해피콜 결과/일시 검증

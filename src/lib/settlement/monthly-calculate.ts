@@ -95,6 +95,7 @@ export async function calculateMonthlySettlement(params: {
         'settlement_deferred',
         'deferred_from_month',
         'deferred_to_month',
+        'deferred_reason',
         'settlement_status',
         'group_bonus_join_date',
       ].join(', '),
@@ -165,6 +166,7 @@ export async function calculateMonthlySettlement(params: {
         invoice_registered_at: r.invoice_registered_at ?? null,
         settlement_deferred: (r.settlement_deferred ?? false) as boolean | null,
         deferred_to_month: (r.deferred_to_month ?? null) as string | null,
+        deferred_reason: (r.deferred_reason ?? null) as string | null,
       },
       yearMonth,
     );
@@ -179,7 +181,7 @@ export async function calculateMonthlySettlement(params: {
 
   // 이월 / 확정 DB 기록.
   // - DEFERRED: 다음 정산월로 자동 이월 표시
-  // - ELIGIBLE: settlement_status='ELIGIBLE_CONFIRMED' 만 갱신 (deferred_* 컬럼은 보존)
+  // - ELIGIBLE: settlement_status 확정 + 이월 플래그 해제(송장 면제 상품의 잘못된 invoice_missing 포함)
   // - EXCLUDED: 자동 손대지 않음 (취소/해약 흐름은 status 기반으로 충분)
   // 실패해도 정산 자체는 진행되도록 try/catch.
   const nextYm = computeNextYearMonth(yearMonth);
@@ -214,7 +216,13 @@ export async function calculateMonthlySettlement(params: {
       for (const idChunk of chunkIds(eligibleIds, DB_ID_CHUNK_SIZE)) {
         const { error: eliErr } = await db
           .from('contracts')
-          .update({ settlement_status: 'ELIGIBLE_CONFIRMED' })
+          .update({
+            settlement_status: 'ELIGIBLE_CONFIRMED',
+            settlement_deferred: false,
+            deferred_from_month: null,
+            deferred_to_month: null,
+            deferred_reason: null,
+          })
           .in('id', idChunk);
         if (eliErr && debug) {
           // eslint-disable-next-line no-console
