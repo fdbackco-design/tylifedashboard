@@ -45,6 +45,10 @@ import {
   DEFAULT_INCENTIVE_CONFIG,
   commissionPenaltyWonForItemName,
 } from './constants';
+import {
+  productCommissionPerUnitForRank,
+  type ProductCommissionRef,
+} from './product-commission-rates';
 import { getSettlementWindowForYearMonth } from '@/lib/settlement/settlement-window';
 import { getHappycallWindowForYearMonth } from '@/lib/settlement/settlement-eligibility-v2';
 
@@ -109,6 +113,29 @@ function getActiveRuleOrFallback(
     effective_until: null,
     note: 'fallback',
     created_at: new Date().toISOString(),
+  };
+}
+
+/** 직급 수당 단가. 물품명(썬크루즈/스페셜/올라이프) 특별 단가가 있으면 우선. */
+function commissionPerUnitForRank(
+  rules: SettlementRule[],
+  rank: RankType,
+  date: string,
+  product?: ProductCommissionRef | null,
+): number {
+  if (rank === '본사') return 0;
+  const override = productCommissionPerUnitForRank(rank, product ?? null);
+  if (override != null) return override;
+  return getActiveRuleOrFallback(rules, rank, date).commission_per_unit;
+}
+
+function contractProductRef(c: {
+  item_name?: string | null;
+  product_type?: string | null;
+}): ProductCommissionRef {
+  return {
+    item_name: c.item_name ?? null,
+    product_type: c.product_type ?? null,
   };
 }
 
@@ -324,20 +351,25 @@ const LEADER_MAINTENANCE_BONUS_WON = 1_000_000;
 function commissionPerUnitForDirectContract(
   memberId: string,
   dbRank: RankType,
-  contract: PromotionOrderContractRef & { unit_count?: number },
+  contract: PromotionOrderContractRef & {
+    unit_count?: number;
+    item_name?: string | null;
+    product_type?: string | null;
+  },
   rules: SettlementRule[],
   refDate: string,
   promotionUnitSplitByMemberId?: Map<string, Map<string, PromotionUnitSplit>>,
   leaderRankEffectiveAtByMemberId?: Map<string, string | null>,
 ): number {
   if (dbRank === '본사') return 0;
+  const product = contractProductRef(contract);
 
   const effectiveAtRaw = leaderRankEffectiveAtByMemberId?.get(memberId) ?? null;
   const effectiveAt = (effectiveAtRaw ?? '').trim();
   if (dbRank === '리더' && effectiveAt) {
     const cAt = (contract.created_at ?? '').trim();
     if (cAt && cAt >= effectiveAt) {
-      return getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
+      return commissionPerUnitForRank(rules, '리더', refDate, product);
     }
   }
 
@@ -346,21 +378,23 @@ function commissionPerUnitForDirectContract(
     const units = Math.max(0, contract.unit_count ?? 1);
     const split = resolvePromotionUnitSplit({ ...contract, unit_count: units }, walk);
     if (split.postPromotionUnits > 0 && split.prePromotionUnits === 0) {
-      return getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
+      return commissionPerUnitForRank(rules, '리더', refDate, product);
     }
-    return getActiveRuleOrFallback(rules, '영업사원', refDate).commission_per_unit;
+    return commissionPerUnitForRank(rules, '영업사원', refDate, product);
   }
 
-  return getActiveRuleOrFallback(rules, dbRank, refDate).commission_per_unit;
+  return commissionPerUnitForRank(rules, dbRank, refDate, product);
 }
 
-function contractPromotionRef(c: Contract): PromotionOrderContractRef {
+function contractPromotionRef(c: Contract): PromotionOrderContractRef & ProductCommissionRef {
   return {
     id: c.id,
     join_date: c.join_date,
     happy_call_at: c.happy_call_at ?? null,
     invoice_registered_at: (c as { invoice_registered_at?: string | null }).invoice_registered_at ?? null,
     created_at: (c as { created_at?: string | null }).created_at ?? null,
+    item_name: (c as { item_name?: string | null }).item_name ?? null,
+    product_type: (c as { product_type?: string | null }).product_type ?? null,
   };
 }
 
@@ -374,10 +408,6 @@ function calcDirectContractsWithLeaderPromotion(
   leaderRankEffectiveAtByMemberId?: Map<string, string | null>,
   preIssuedCodeSettingsByMemberId?: Map<string, PreIssuedCodeMemberSetting>,
 ): { items: ContractSettlementItem[]; total: number } {
-  const salesRate = getActiveRuleOrFallback(rules, '영업사원', refDate).commission_per_unit;
-  const leaderRate = getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
-  const centerChiefRate = getActiveRuleOrFallback(rules, '센터장', refDate).commission_per_unit;
-
   const auditByContractId = new Map<string, PromotionCommissionSplit>();
   const memberAudit = promotionCommissionAuditByMemberId?.get(member.id) ?? [];
   for (const row of memberAudit) {
@@ -393,6 +423,10 @@ function calcDirectContractsWithLeaderPromotion(
     const rateMemberId = originMemberId ?? member.id;
     const dbRank = originRank ?? member.rank;
     const ref = contractPromotionRef(c);
+    const product = contractProductRef(c);
+    const salesRate = commissionPerUnitForRank(rules, '영업사원', refDate, product);
+    const leaderRate = commissionPerUnitForRank(rules, '리더', refDate, product);
+    const centerChiefRate = commissionPerUnitForRank(rules, '센터장', refDate, product);
     const walk =
       promotionUnitSplitByMemberId?.get(rateMemberId) ??
       promotionUnitSplitByMemberId?.get(member.id);
@@ -582,7 +616,8 @@ function calcRollupItemsWithLeaderPromotion(
       );
       if (eligibleUnits <= 0) continue;
 
-      const cref = contractPromotionRef(c);
+      const cref = { ...contractPromotionRef(c), unit_count: c.unit_count };
+      const product = contractProductRef(c);
       const lower = commissionPerUnitForDirectContract(
         child.id,
         child.rank,
@@ -592,10 +627,10 @@ function calcRollupItemsWithLeaderPromotion(
         promotionUnitSplitByMemberId,
         leaderRankEffectiveAtByMemberId,
       );
-      // DB 센터장은 promotion walk 맵에 없어 commissionPerUnit(..., '리더')가 30만으로 떨어진다.
-      // 승급 전/대기 구간은 리더 직급 단가(40만)를 상한으로 쓴다.
-      const leaderRuleRate = getActiveRuleOrFallback(rules, '리더', refDate).commission_per_unit;
-      const centerChiefRuleRate = getActiveRuleOrFallback(rules, '센터장', refDate).commission_per_unit;
+      // DB 센터장은 promotion walk 맵에 없어 commissionPerUnit(..., '리더')가 영업단가로 떨어진다.
+      // 승급 전/대기 구간은 리더 직급 단가를 상한으로 쓴다(물품명 특별 단가 반영).
+      const leaderRuleRate = commissionPerUnitForRank(rules, '리더', refDate, product);
+      const centerChiefRuleRate = commissionPerUnitForRank(rules, '센터장', refDate, product);
       const leaderUpper =
         node.rank === '센터장'
           ? leaderRuleRate

@@ -441,6 +441,7 @@ export async function buildMyOrganizationTreeViewModel(
           unit_count: (c as any).unit_count ?? 0,
           status: (c as any).status as string,
           item_name: (c as any).item_name ?? null,
+          product_type: ((c as any).product_type ?? null) as string | null,
           sales_member_id: resolved,
           created_at: ((c as any).created_at ?? null) as string | null,
         };
@@ -573,6 +574,7 @@ export async function buildMyOrganizationTreeViewModel(
           unit_count: c.unit_count ?? 0,
           status: c.status as string,
           item_name: c.item_name ?? null,
+          product_type: (c.product_type ?? null) as string | null,
           sales_member_id: resolved,
           created_at: (c.created_at ?? null) as string | null,
         };
