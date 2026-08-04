@@ -8,6 +8,8 @@ import {
   computeLeaderPromotionThresholds,
   computeCenterChiefPromotionMemberIds,
   computeCenterChiefDemotionMemberIds,
+  computeDivisionHeadPromotionMemberIds,
+  computeDivisionHeadDemotionMemberIds,
   isCustomerVirtualOrgMember,
   type AttributedJoinContractRow,
 } from '@/lib/settlement/leader-promotion';
@@ -182,6 +184,34 @@ export function buildAdminOrgDisplayContext(params: {
         const centerChiefSet = new Set(toCenterChiefIds);
         treeRows = treeRows.map((r) =>
           centerChiefSet.has(r.id) ? { ...r, rank: '센터장' as RankType } : r,
+        );
+        for (const id of toCenterChiefIds) rankByIdForCenterChief.set(id, '센터장');
+      }
+
+      const toDemoteDivisionHead = computeDivisionHeadDemotionMemberIds(
+        treeRows,
+        rankByIdForCenterChief,
+        externalIdByMemberId,
+      );
+      if (toDemoteDivisionHead.length > 0) {
+        const demoteDhSet = new Set(toDemoteDivisionHead);
+        treeRows = treeRows.map((r) =>
+          demoteDhSet.has(r.id) && r.rank === '사업본부장'
+            ? { ...r, rank: '센터장' as RankType }
+            : r,
+        );
+        for (const id of toDemoteDivisionHead) rankByIdForCenterChief.set(id, '센터장');
+      }
+
+      const toDivisionHeadIds = computeDivisionHeadPromotionMemberIds(
+        treeRows,
+        rankByIdForCenterChief,
+        externalIdByMemberId,
+      );
+      if (toDivisionHeadIds.length > 0) {
+        const divisionHeadSet = new Set(toDivisionHeadIds);
+        treeRows = treeRows.map((r) =>
+          divisionHeadSet.has(r.id) ? { ...r, rank: '사업본부장' as RankType } : r,
         );
       }
     }

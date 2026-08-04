@@ -1437,6 +1437,9 @@ export function isLeaderMaintenanceBonusEligible(params: {
 /** 센터장 승격: 산하 리더 최소 인원 */
 export const CENTER_CHIEF_PROMOTION_MIN_LEADERS = 5;
 
+/** 사업본부장 승격: 산하 센터장 최소 인원 */
+export const DIVISION_HEAD_PROMOTION_MIN_CENTER_CHIEFS = 3;
+
 /** 리더 정책 승격: 산하 가입 누적 구좌 최소 */
 export const LEADER_PROMOTION_MIN_UNITS = 20;
 
@@ -1877,6 +1880,77 @@ export function computeCenterChiefDemotionMemberIds(
       if (countsAsSubtreeLeader(sid)) leaderCount++;
     }
     if (leaderCount < CENTER_CHIEF_PROMOTION_MIN_LEADERS) {
+      out.push(memberId);
+    }
+  }
+
+  return out;
+}
+
+function countsAsSubtreeCenterChief(
+  memberId: string,
+  rankById: Map<string, RankType>,
+  externalIdByMemberId?: ReadonlyMap<string, string | null | undefined>,
+): boolean {
+  if (rankById.get(memberId) !== '센터장') return false;
+  if (externalIdByMemberId && isCustomerVirtualOrgMember(externalIdByMemberId.get(memberId))) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * 산하(본인 제외)에 rank가 '센터장'인 멤버가 DIVISION_HEAD_PROMOTION_MIN_CENTER_CHIEFS 이상이면
+ * 해당 멤버(현재 직급이 센터장인 경우)를 사업본부장으로 승격 대상으로 본다.
+ *
+ * `externalIdByMemberId`가 주어지면 `customer:*` 가상 노드는 산하 센터장 수에 포함하지 않는다.
+ */
+export function computeDivisionHeadPromotionMemberIds(
+  treeRows: OrgTreeRow[],
+  rankById: Map<string, RankType>,
+  externalIdByMemberId?: ReadonlyMap<string, string | null | undefined>,
+): string[] {
+  const childrenByParent = buildChildrenByParentFromRows(treeRows);
+  const out: string[] = [];
+
+  for (const [memberId, rank] of rankById) {
+    if (rank !== '센터장') continue;
+
+    const subtree = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
+    let centerChiefCount = 0;
+    for (const sid of subtree) {
+      if (sid === memberId) continue;
+      if (countsAsSubtreeCenterChief(sid, rankById, externalIdByMemberId)) centerChiefCount++;
+    }
+    if (centerChiefCount >= DIVISION_HEAD_PROMOTION_MIN_CENTER_CHIEFS) {
+      out.push(memberId);
+    }
+  }
+
+  return out;
+}
+
+/**
+ * 산하 유효 센터장이 DIVISION_HEAD_PROMOTION_MIN_CENTER_CHIEFS 미만인 사업본부장 → 센터장 강등 대상.
+ */
+export function computeDivisionHeadDemotionMemberIds(
+  treeRows: OrgTreeRow[],
+  rankById: Map<string, RankType>,
+  externalIdByMemberId?: ReadonlyMap<string, string | null | undefined>,
+): string[] {
+  const childrenByParent = buildChildrenByParentFromRows(treeRows);
+  const out: string[] = [];
+
+  for (const [memberId, rank] of rankById) {
+    if (rank !== '사업본부장') continue;
+
+    const subtree = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
+    let centerChiefCount = 0;
+    for (const sid of subtree) {
+      if (sid === memberId) continue;
+      if (countsAsSubtreeCenterChief(sid, rankById, externalIdByMemberId)) centerChiefCount++;
+    }
+    if (centerChiefCount < DIVISION_HEAD_PROMOTION_MIN_CENTER_CHIEFS) {
       out.push(memberId);
     }
   }

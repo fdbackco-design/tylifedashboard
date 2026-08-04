@@ -51,6 +51,8 @@ import {
   collectLeaderPromotionApplyCandidates,
   computeCenterChiefPromotionMemberIds,
   computeCenterChiefDemotionMemberIds,
+  computeDivisionHeadPromotionMemberIds,
+  computeDivisionHeadDemotionMemberIds,
   isPromotionAccumulationJoinContractRow,
   type AttributedJoinContractRow,
 } from '../settlement/leader-promotion';
@@ -2208,9 +2210,49 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
             .in('id', toCenterChief)
             .eq('rank', '리더');
           if (ccErr) throw new Error(`센터장 승격 반영 실패: ${ccErr.message}`);
+          for (const id of toCenterChief) rankById.set(id, '센터장');
           await log(db, runId, 'info', '센터장 승격 반영', {
             count: toCenterChief.length,
             member_ids: toCenterChief,
+          });
+        }
+
+        // 사업본부장 승격: 산하 센터장 3명 이상인 센터장 → 사업본부장
+        const toDemoteFromDivisionHead = computeDivisionHeadDemotionMemberIds(
+          treeRows,
+          rankById,
+          externalIdByMemberId,
+        );
+        if (toDemoteFromDivisionHead.length > 0) {
+          const { error: demoteDhErr } = await db
+            .from('organization_members')
+            .update({ rank: '센터장' })
+            .in('id', toDemoteFromDivisionHead)
+            .eq('rank', '사업본부장');
+          if (demoteDhErr) throw new Error(`사업본부장 강등 반영 실패: ${demoteDhErr.message}`);
+          for (const id of toDemoteFromDivisionHead) rankById.set(id, '센터장');
+          await log(db, runId, 'info', '사업본부장 강등 반영(산하 센터장 부족)', {
+            count: toDemoteFromDivisionHead.length,
+            member_ids: toDemoteFromDivisionHead,
+          });
+        }
+
+        const toDivisionHead = computeDivisionHeadPromotionMemberIds(
+          treeRows,
+          rankById,
+          externalIdByMemberId,
+        );
+        if (toDivisionHead.length > 0) {
+          const { error: dhErr } = await db
+            .from('organization_members')
+            .update({ rank: '사업본부장' })
+            .in('id', toDivisionHead)
+            .eq('rank', '센터장');
+          if (dhErr) throw new Error(`사업본부장 승격 반영 실패: ${dhErr.message}`);
+          for (const id of toDivisionHead) rankById.set(id, '사업본부장');
+          await log(db, runId, 'info', '사업본부장 승격 반영', {
+            count: toDivisionHead.length,
+            member_ids: toDivisionHead,
           });
         }
 

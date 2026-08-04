@@ -15,6 +15,8 @@ import {
   enrichThresholdPrePromotionUnits,
   buildPromotionUnitSplitByMemberIds,
   buildPromotionCommissionWalkForMember,
+  computeDivisionHeadPromotionMemberIds,
+  computeDivisionHeadDemotionMemberIds,
   LEADER_PROMOTION_MIN_UNITS,
   type AttributedJoinContractRow,
   type LeaderPromotionEventRecord,
@@ -758,6 +760,45 @@ export async function calculateMonthlySettlement(params: {
         rankByIdForCenterChief.set(id, '센터장');
         const m = (membersRaw as OrganizationMember[]).find((x) => x.id === id);
         if (m) m.rank = '센터장';
+      }
+    }
+  }
+
+  // 사업본부장: 산하 센터장 3명 이상이면 센터장 → 사업본부장 (미만이면 강등)
+  {
+    const toDemoteFromDivisionHead = computeDivisionHeadDemotionMemberIds(
+      treeRows,
+      rankByIdForCenterChief,
+      externalIdByMemberId,
+    );
+    if (toDemoteFromDivisionHead.length > 0) {
+      await db
+        .from('organization_members')
+        .update({ rank: '센터장' })
+        .in('id', toDemoteFromDivisionHead)
+        .eq('rank', '사업본부장');
+      for (const id of toDemoteFromDivisionHead) {
+        rankByIdForCenterChief.set(id, '센터장');
+        const m = (membersRaw as OrganizationMember[]).find((x) => x.id === id);
+        if (m) m.rank = '센터장';
+      }
+    }
+
+    const toDivisionHead = computeDivisionHeadPromotionMemberIds(
+      treeRows,
+      rankByIdForCenterChief,
+      externalIdByMemberId,
+    );
+    if (toDivisionHead.length > 0) {
+      await db
+        .from('organization_members')
+        .update({ rank: '사업본부장' })
+        .in('id', toDivisionHead)
+        .eq('rank', '센터장');
+      for (const id of toDivisionHead) {
+        rankByIdForCenterChief.set(id, '사업본부장');
+        const m = (membersRaw as OrganizationMember[]).find((x) => x.id === id);
+        if (m) m.rank = '사업본부장';
       }
     }
   }
