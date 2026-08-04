@@ -195,8 +195,8 @@ describe('double-up bonus uses actual units only', () => {
   });
 });
 
-describe('double-up does not inflate commission walk', () => {
-  it('더블업 계약이 있어도 수당 walk 누적은 실제 구좌만', () => {
+describe('double-up commission uses eligible threshold + actual units', () => {
+  it('인정 누적으로 승급 경계를 잡고, 수당 수량은 실제 구좌', () => {
     const contracts: AttributedJoinContractRow[] = [];
     for (let i = 0; i < 9; i++) {
       contracts.push(row(`a-${i}`, 2, '2026-06-01'));
@@ -206,10 +206,48 @@ describe('double-up does not inflate commission walk', () => {
     const { audit } = buildPromotionCommissionWalkForMember(MEMBER, treeRows, contracts);
     const last = audit[audit.length - 1];
     assert.equal(last?.contractId, 'promo');
-    assert.equal(last?.cumulativeUnitsAfter, 20);
+    // 실제 18+2=20이지만, audit 누적은 인정구좌(18+4=22)
+    assert.equal(last?.cumulativeUnitsBefore, 18);
+    assert.equal(last?.cumulativeUnitsAfter, 22);
     assert.equal(last?.isPromotionContract, true);
+    assert.equal(last?.promotionReason, 'PROMOTION_CONTRACT');
     assert.equal(last?.promotionEligibleUnitCount, 4);
     assert.equal(last?.unitCount, 2);
+    assert.equal(last?.prePromotionUnits, 2);
+    assert.equal(last?.postPromotionUnits, 0);
+    assert.equal(last?.commissionPerUnit, 300_000);
+  });
+
+  it('더블업으로 리더 승급 후 다음 계약부터 실제 구좌 × 리더 단가', () => {
+    // 목현화형: 실제 19구좌 + 더블업 2구좌(인정 4)로 승급 → 이후 계약은 40만
+    const contracts: AttributedJoinContractRow[] = [
+      ...Array.from({ length: 9 }, (_, i) => row(`pre-${i}`, 2, '2026-06-01')),
+      row('pre-odd', 1, '2026-06-15'),
+      row('TY062', 2, '2026-06-26'),
+      row('TY288', 1, '2026-07-10'),
+    ];
+
+    const { audit, splitByContractId } = buildPromotionCommissionWalkForMember(
+      MEMBER,
+      treeRows,
+      contracts,
+    );
+
+    const promo = audit.find((a) => a.contractId === 'TY062');
+    assert.equal(promo?.cumulativeUnitsBefore, 19);
+    assert.equal(promo?.cumulativeUnitsAfter, 23);
+    assert.equal(promo?.promotionReason, 'PROMOTION_CONTRACT');
+    assert.equal(promo?.unitCount, 2);
+    assert.equal(promo?.commissionPerUnit, 300_000);
+    assert.equal(splitByContractId.get('TY062')?.prePromotionUnits, 2);
+    assert.equal(splitByContractId.get('TY062')?.postPromotionUnits, 0);
+
+    const after = audit.find((a) => a.contractId === 'TY288');
+    assert.equal(after?.promotionReason, 'AFTER_PROMOTION');
+    assert.equal(after?.unitCount, 1);
+    assert.equal(after?.commissionPerUnit, 400_000);
+    assert.equal(splitByContractId.get('TY288')?.prePromotionUnits, 0);
+    assert.equal(splitByContractId.get('TY288')?.postPromotionUnits, 1);
   });
 
   it('센터장 보너스 집계는 실제 정산 구좌만 (더블업 미반영)', () => {
