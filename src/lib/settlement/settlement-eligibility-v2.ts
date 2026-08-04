@@ -15,6 +15,9 @@
  *      - 예) 2026-05 = 2026-04-28 ~ 2026-05-26, 2026-06 = 2026-05-27 ~ 2026-06-25
  *        (2026-05-25 부처님오신날 대체공휴일이라 5월 마감일이 5/26 으로 밀림.
  *         따라서 5/26 해피콜 완료 건은 6월이 아닌 5월 정산에 포함된다.)
+ *   2-b) 2026-07 특례: 상품 TY갤럭시케어 + status=가입 + 해피콜일 >= 2026-06-26 이면
+ *        해피콜 마감(7/28) 이후여도 7월 정산에 포함(송장 등록일 마감도 스킵).
+ *        해당 계약은 다른 정산월에서는 제외해 중복 집계를 막는다.
  *   3) 송장번호(invoice_no) 가 yearMonth 30일 23:59:59 (KST) 까지 존재
  *      ※ TY갤럭시케어_무 · TY케어플랜 은 송장·렌탈 없이 해피콜 완료만으로 가입·정산 인정
  *         (정산월·가입일 기준은 해피콜 성공일)
@@ -63,6 +66,60 @@ export const SETTLEMENT_CANCELLED_HAPPYCALL_RESULTS: ReadonlySet<string> = new S
 
 /** 2026-05 정산 특례: 5/30 시점 송장 등록일 데이터가 없어 "현재 시점 송장번호 존재" 로 판단 */
 export const MAY_2026_INVOICE_EXCEPTION_YM = '2026-05';
+
+/**
+ * 2026-07 특례: TY갤럭시케어 + 가입 + 해피콜 >= 2026-06-26 → 7월 정산 윈도우에 강제 포함.
+ * (일반 7월 해피콜 마감 7/28 이후 건도 포함; 다른 정산월에서는 중복 집계 방지를 위해 제외)
+ */
+export const TY_GALAXY_CARE_JULY_2026_EXCEPTION_YM = '2026-07';
+export const TY_GALAXY_CARE_JULY_2026_HAPPYCALL_FROM_YMD = '2026-06-26';
+
+function collectSettlementProductTexts(c: {
+  product_type?: string | null;
+  item_name?: string | null;
+  source_snapshot_json?: Record<string, string | null> | null;
+}): string[] {
+  return [
+    c.product_type,
+    c.item_name,
+    c.source_snapshot_json?.['상품명'],
+  ]
+    .map((t) => String(t ?? '').trim())
+    .filter(Boolean);
+}
+
+/** 정산 특례용 TY갤럭시케어 계열 (라이트 제외). product_type=무 포함. */
+export function isTyGalaxyCareNamedProduct(c: {
+  product_type?: string | null;
+  item_name?: string | null;
+  source_snapshot_json?: Record<string, string | null> | null;
+}): boolean {
+  const texts = collectSettlementProductTexts(c);
+  if (texts.some((t) => t.includes('갤럭시케어 라이트'))) return false;
+  if (texts.some((t) => t.includes('TY갤럭시케어'))) return true;
+  return (c.product_type ?? '').trim() === '무';
+}
+
+/**
+ * 7월 정산 윈도우 강제 포함 대상인지.
+ * - status === '가입'
+ * - TY갤럭시케어 계열
+ * - 해피콜 서울 YMD >= 2026-06-26
+ */
+export function qualifiesTyGalaxyCareJuly2026WindowException(
+  c: {
+    status?: string | null;
+    product_type?: string | null;
+    item_name?: string | null;
+    source_snapshot_json?: Record<string, string | null> | null;
+  },
+  happycallYmd: string,
+): boolean {
+  if (String(c.status ?? '').trim() !== '가입') return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(happycallYmd)) return false;
+  if (happycallYmd < TY_GALAXY_CARE_JULY_2026_HAPPYCALL_FROM_YMD) return false;
+  return isTyGalaxyCareNamedProduct(c);
+}
 
 function addDaysYmd(ymd: string, delta: number): string {
   const [ys, ms, ds] = ymd.split('-');
@@ -311,10 +368,21 @@ export function evaluateContractEligibility(
   }
 
   const hcYmd = hcYmdResolved || happycallYmdSeoul(c.happy_call_at);
+  const julyGalaxyCareException = qualifiesTyGalaxyCareJuly2026WindowException(c, hcYmd);
   if (!manualDeferToThis) {
     if (!hcYmd) return { result: 'EXCLUDED', reason: 'happycall_at_missing' };
+    // 7월 강제 포함 대상은 다른 정산월에서 제외 (중복 집계 방지)
+    if (julyGalaxyCareException && yearMonth !== TY_GALAXY_CARE_JULY_2026_EXCEPTION_YM) {
+      return {
+        result: 'EXCLUDED',
+        reason: `ty_galaxy_care_forced_to:${TY_GALAXY_CARE_JULY_2026_EXCEPTION_YM}`,
+      };
+    }
     const w = getHappycallWindowForYearMonth(yearMonth);
-    if (hcYmd < w.start_date || hcYmd > w.end_date) {
+    const inNormalWindow = hcYmd >= w.start_date && hcYmd <= w.end_date;
+    const inJulyExceptionWindow =
+      julyGalaxyCareException && yearMonth === TY_GALAXY_CARE_JULY_2026_EXCEPTION_YM;
+    if (!inNormalWindow && !inJulyExceptionWindow) {
       return { result: 'EXCLUDED', reason: `happycall_at_out_of_window:${hcYmd}` };
     }
   }
@@ -339,7 +407,9 @@ export function evaluateContractEligibility(
     };
   }
 
-  if (yearMonth !== MAY_2026_INVOICE_EXCEPTION_YM) {
+  const skipInvoiceDeadlineForJulyGalaxyCare =
+    julyGalaxyCareException && yearMonth === TY_GALAXY_CARE_JULY_2026_EXCEPTION_YM;
+  if (yearMonth !== MAY_2026_INVOICE_EXCEPTION_YM && !skipInvoiceDeadlineForJulyGalaxyCare) {
     const regYmd = happycallYmdSeoul(c.invoice_registered_at);
     if (regYmd) {
       const deadline = getInvoiceDeadlineYmd(yearMonth);
