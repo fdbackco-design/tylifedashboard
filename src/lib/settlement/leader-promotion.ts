@@ -270,7 +270,12 @@ function compareAttributedJoinRows(a: AttributedJoinContractRow, b: AttributedJo
   return comparePromotionAccumulationRows(a, b);
 }
 
-/** 가입(status=가입) 계약 누적 walk — 수당 판정 SSOT (누적 20구좌 경계) */
+/** 가입(status=가입) 계약 누적 walk — 수당 판정 SSOT
+ *
+ * - 승급 경계(20구좌): 더블업 인정구좌 누적
+ * - 수당 수량(pre/post): 실제 unit_count
+ * - 승급 계약(경계를 넘긴 계약) 자체는 영업사원 단가, 그 다음 계약부터 리더 단가
+ */
 function promotionWalkFromCumulative(
   sorted: AttributedJoinContractRow[],
   subtree: Set<string>,
@@ -278,40 +283,61 @@ function promotionWalkFromCumulative(
 ): { splitByContractId: Map<string, PromotionUnitSplit>; audit: PromotionCommissionSplit[] } {
   const splitByContractId = new Map<string, PromotionUnitSplit>();
   const audit: PromotionCommissionSplit[] = [];
-  let cum = 0;
+  let eligibleCum = 0;
 
   for (const c of sorted) {
     if (!subtree.has(c.sales_member_id)) continue;
-    const units = Math.max(0, c.unit_count ?? 0);
-    if (units === 0) continue;
+    const actualUnits = Math.max(0, c.unit_count ?? 0);
+    if (actualUnits === 0) continue;
 
-    const cumBefore = cum;
-    const classified = classifyPromotionUnits(cumBefore, units, minUnits);
-    cum = cumBefore + units;
+    const doubleUp = buildDoubleUpPromotionAudit(c);
+    const eligibleUnits = Math.max(0, doubleUp.promotion_eligible_unit_count);
+    const eligibleBefore = eligibleCum;
+    const eligibleAfter = eligibleBefore + eligibleUnits;
+
+    let prePromotionUnits: number;
+    let postPromotionUnits: number;
+    let promotionReason: PromotionCommissionReason;
+
+    if (eligibleBefore >= minUnits) {
+      // 이미 승급 이후 — 실제 구좌 전부 리더 단가
+      prePromotionUnits = 0;
+      postPromotionUnits = actualUnits;
+      promotionReason = 'AFTER_PROMOTION';
+    } else if (eligibleAfter < minUnits) {
+      prePromotionUnits = actualUnits;
+      postPromotionUnits = 0;
+      promotionReason = 'BEFORE_PROMOTION';
+    } else {
+      // 이 계약의 인정구좌로 20 도달/초과 = 승급 계약 → 실제 구좌는 전부 영업사원 단가
+      prePromotionUnits = actualUnits;
+      postPromotionUnits = 0;
+      promotionReason = 'PROMOTION_CONTRACT';
+    }
+
+    eligibleCum = eligibleAfter;
 
     splitByContractId.set(c.id, {
-      prePromotionUnits: classified.prePromotionUnits,
-      postPromotionUnits: classified.postPromotionUnits,
+      prePromotionUnits,
+      postPromotionUnits,
     });
 
     const commissionPerUnit: 300_000 | 400_000 =
-      classified.postPromotionUnits > 0 && classified.prePromotionUnits === 0
+      postPromotionUnits > 0 && prePromotionUnits === 0
         ? PROMOTION_LEADER_COMMISSION_PER_UNIT
         : PROMOTION_SALES_COMMISSION_PER_UNIT;
-
-    const doubleUp = buildDoubleUpPromotionAudit(c);
 
     audit.push({
       contractId: c.id,
       contractCode: String(c.contract_code ?? c.id),
-      unitCount: units,
-      cumulativeUnitsBefore: cumBefore,
-      cumulativeUnitsAfter: cum,
-      isPromotionContract: classified.promotionReason === 'PROMOTION_CONTRACT',
+      unitCount: actualUnits,
+      cumulativeUnitsBefore: eligibleBefore,
+      cumulativeUnitsAfter: eligibleAfter,
+      isPromotionContract: promotionReason === 'PROMOTION_CONTRACT',
       commissionPerUnit,
-      promotionReason: classified.promotionReason,
-      prePromotionUnits: classified.prePromotionUnits,
-      postPromotionUnits: classified.postPromotionUnits,
+      promotionReason,
+      prePromotionUnits,
+      postPromotionUnits,
       actualUnitCount: doubleUp.actual_unit_count,
       promotionMultiplier: doubleUp.promotion_multiplier,
       promotionEligibleUnitCount: doubleUp.promotion_eligible_unit_count,
@@ -1083,7 +1109,7 @@ export type PromotionCommissionSplit = {
   promotionReason: PromotionCommissionReason;
   prePromotionUnits: number;
   postPromotionUnits: number;
-  /** 더블업 감사 — 수당 계산은 unitCount(실제 구좌)만 사용 */
+  /** 더블업 감사 — 수당 수량은 unitCount(실제 구좌), 승급 경계·단가는 인정구좌 누적 */
   actualUnitCount?: number;
   promotionMultiplier?: 1 | 2;
   promotionEligibleUnitCount?: number;

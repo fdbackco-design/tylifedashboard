@@ -171,13 +171,19 @@ describe('leader promotion commission (walk SSOT)', () => {
     assert.equal(splitByContractId.get('after-2')?.postPromotionUnits, 0);
   });
 
-  it('6) 누적 18구좌 + 3구좌 계약 → 2×30만 + 1×40만 분할', () => {
+  it('6) 누적 18구좌 + 3구좌 승급 계약 → 전량 30만, 이후 계약부터 40만', () => {
     const rows: AttributedJoinContractRow[] = [
       ...Array.from({ length: 18 }, (_, i) => row(`c-${i}`, 1, { happy_call_at: `2026-05-${String(i + 1).padStart(2, '0')}` })),
       row('span', 3, { happy_call_at: '2026-06-20' }),
+      row('after', 1, { happy_call_at: '2026-06-21' }),
     ];
-    const { splitByContractId } = walk(rows);
-    assert.equal(splitByContractId.get('span')?.prePromotionUnits, 2);
-    assert.equal(splitByContractId.get('span')?.postPromotionUnits, 1);
+    const { splitByContractId, audit } = walk(rows);
+    assert.equal(splitByContractId.get('span')?.prePromotionUnits, 3);
+    assert.equal(splitByContractId.get('span')?.postPromotionUnits, 0);
+    assert.equal(audit.find((a) => a.contractId === 'span')?.promotionReason, 'PROMOTION_CONTRACT');
+    assert.equal(audit.find((a) => a.contractId === 'span')?.commissionPerUnit, 300_000);
+    assert.equal(splitByContractId.get('after')?.prePromotionUnits, 0);
+    assert.equal(splitByContractId.get('after')?.postPromotionUnits, 1);
+    assert.equal(audit.find((a) => a.contractId === 'after')?.commissionPerUnit, 400_000);
   });
 });

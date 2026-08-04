@@ -4,7 +4,7 @@ import {
 } from '@/lib/settlement/settlement-eligibility-v2';
 import { resolveHqProductKindFromContract } from '@/lib/settlement/hq-revenue';
 
-/** 더블업 승급 프로모션 — 승급 판정용 인정구좌만 ×2 (수당·보너스·정산에는 미적용) */
+/** 더블업 승급 프로모션 — 승급 판정용 인정구좌 ×2. 수당 수량은 실제 구좌, 승급 이후 단가는 리더 단가 */
 export const DOUBLE_UP_PROMOTION_NAME = '더블업 승급 프로모션';
 
 export const DOUBLE_UP_PROMOTION_START_YMD = '2026-06-26';
@@ -17,7 +17,7 @@ export const DOUBLE_UP_PROMOTION_APPLIED_REASON =
   '더블업 승급 프로모션 기간 내 해피콜 성공 갤럭시케어 계약';
 
 export const DOUBLE_UP_COMMISSION_NOTE =
-  '승급 인정구좌는 프로모션으로 2배 적용되었으나, 수당 및 보너스는 실제 계약 구좌 기준으로 계산되었습니다.';
+  '승급은 더블업 인정구좌로 판정하고, 승급 계약 이후 수당 단가는 리더 단가·수량은 실제 구좌 기준입니다.';
 
 export type DoubleUpPromotionContractRef = {
   unit_count?: number | null;

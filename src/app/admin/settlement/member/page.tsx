@@ -660,7 +660,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
             <h3 className="text-sm font-semibold text-indigo-900">승급·더블업 감사</h3>
             <p className="text-xs text-indigo-700 mt-1">
               {calcDetail.leader_promotion.double_up_commission_note ??
-                '승급 인정구좌와 수당·보너스 계산 구좌를 분리해 표시합니다.'}
+                '승급은 인정구좌로 판정하고, 승급 이후 수당 단가는 리더·수량은 실제 구좌 기준입니다.'}
             </p>
           </div>
           <div className="px-4 py-3 grid gap-2 sm:grid-cols-2 text-xs text-gray-700">
