@@ -142,6 +142,9 @@ export default function NewCodeClient() {
   const [rejecting, setRejecting] = useState<boolean>(false);
   const [rejectError, setRejectError] = useState<string>('');
 
+  // 반려 취소
+  const [unrejectingId, setUnrejectingId] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     setError('');
     setSyncMessage('');
@@ -373,6 +376,41 @@ export default function NewCodeClient() {
       setRejecting(false);
     }
   }, [rejectTarget, rejectReason, load]);
+
+  const submitUnreject = useCallback(
+    async (it: AdminItem) => {
+      if (unrejectingId) return;
+      const ok = window.confirm(
+        `${it.name} (${it.phone}) 신청의 반려를 취소하고 다시 처리 가능한 상태로 되돌릴까요?`,
+      );
+      if (!ok) return;
+      setUnrejectingId(it.id);
+      setError('');
+      setSyncMessage('');
+      try {
+        const res = await fetch(`/api/admin/sales-code-requests/${it.id}/unreject`, {
+          method: 'POST',
+          credentials: 'include',
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setError(json?.error ?? '반려 취소 실패');
+          return;
+        }
+        const updated = json?.item as AdminItem | undefined;
+        if (updated) {
+          setItems((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+          setSyncMessage(`반려 취소 완료 → ${updated.status}`);
+        }
+        await load();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setUnrejectingId(null);
+      }
+    },
+    [unrejectingId, load],
+  );
 
   return (
     <>
@@ -621,7 +659,16 @@ export default function NewCodeClient() {
                         {it.retry_count > 0 && <div className="text-slate-500">재시도 {it.retry_count}회</div>}
                       </td>
                       <td className="whitespace-nowrap px-2 py-2 align-top text-right">
-                        {it.issuance_status === 'SYNC_FAILED' || isStaleProcessing(it) ? (
+                        {isRejected ? (
+                          <button
+                            type="button"
+                            onClick={() => void submitUnreject(it)}
+                            disabled={unrejectingId === it.id || syncing || exporting}
+                            className="rounded border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            {unrejectingId === it.id ? '취소 중…' : '반려 취소'}
+                          </button>
+                        ) : it.issuance_status === 'SYNC_FAILED' || isStaleProcessing(it) ? (
                           <button
                             type="button"
                             onClick={() => void retryOne(it.id)}
