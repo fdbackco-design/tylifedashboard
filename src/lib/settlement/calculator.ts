@@ -23,11 +23,19 @@ import {
 } from './leader-promotion';
 import type { CenterChiefPromotionThreshold } from './center-chief-promotion';
 import { isContractAtOrAfterCenterChiefPostRollup } from './center-chief-promotion';
+import type { DivisionHeadPromotionThreshold } from './division-head-promotion';
+import { isContractAtOrAfterDivisionHeadPostRate } from './division-head-promotion';
 import {
   splitCenterChiefRollupUnits,
   buildCenterChiefRollupAuditFields,
+  splitDivisionHeadRollupUnits,
+  buildDivisionHeadRollupAuditFields,
 } from './center-chief-rollup';
 import { calculateCenterChiefSubtreeBonus, subtreeSettlementUnitsForCenterChiefBonus } from './center-chief-bonus';
+import {
+  calculateDivisionHeadSubtreeBonus,
+  subtreeSettlementUnitsForDivisionHeadBonus,
+} from './division-head-bonus';
 import type { PreIssuedCodeMemberSetting } from './pre-issued-code-special';
 import {
   computeNormalUnitPriceForRank,
@@ -355,6 +363,8 @@ export interface LeaderSettlementOpts {
   promotionEventValidationByMemberId?: Map<string, PromotionEventValidation>;
   /** 센터장 달성(산하 리더 5명) 이후 롤업 단가 분기용 */
   centerChiefThresholdByMemberId?: Map<string, CenterChiefPromotionThreshold | null>;
+  /** 사업본부장 달성(산하 센터장 3명) 이후 직접/롤업 단가 분기용 */
+  divisionHeadThresholdByMemberId?: Map<string, DivisionHeadPromotionThreshold | null>;
   /** 코드 선발급자 설정: member_id → setting (개인 직접판매 특례 단가/한도) */
   preIssuedCodeSettingsByMemberId?: Map<string, PreIssuedCodeMemberSetting>;
 }
@@ -376,9 +386,19 @@ function commissionPerUnitForDirectContract(
   leaderRankEffectiveAtByMemberId?: Map<string, string | null>,
   centerChiefThresholdByMemberId?: Map<string, CenterChiefPromotionThreshold | null>,
   promotionThresholdByMemberId?: Map<string, SalesMemberPromotionThreshold | null>,
+  divisionHeadThresholdByMemberId?: Map<string, DivisionHeadPromotionThreshold | null>,
 ): number {
   if (dbRank === '본사') return 0;
   const product = contractProductRef(contract);
+
+  // DB 사업본부장: 3번째 센터장 승급 계약 다음부터 본부장 단가, 그 전까지는 센터장 단가
+  if (dbRank === '사업본부장') {
+    const dhTh = divisionHeadThresholdByMemberId?.get(memberId) ?? null;
+    if (dhTh && isContractAtOrAfterDivisionHeadPostRate(contract, dhTh)) {
+      return commissionPerUnitForRank(rules, '사업본부장', refDate, product);
+    }
+    return commissionPerUnitForRank(rules, '센터장', refDate, product);
+  }
 
   // DB 센터장: 승급 계약 다음 계약부터 센터장 단가, 그 전까지는 리더 단가
   if (dbRank === '센터장') {
@@ -438,6 +458,7 @@ function calcDirectContractsWithLeaderPromotion(
   preIssuedCodeSettingsByMemberId?: Map<string, PreIssuedCodeMemberSetting>,
   centerChiefThresholdByMemberId?: Map<string, CenterChiefPromotionThreshold | null>,
   promotionThresholdByMemberId?: Map<string, SalesMemberPromotionThreshold | null>,
+  divisionHeadThresholdByMemberId?: Map<string, DivisionHeadPromotionThreshold | null>,
 ): { items: ContractSettlementItem[]; total: number } {
   const auditByContractId = new Map<string, PromotionCommissionSplit>();
   const memberAudit = promotionCommissionAuditByMemberId?.get(member.id) ?? [];
@@ -528,6 +549,7 @@ function calcDirectContractsWithLeaderPromotion(
         leaderRankEffectiveAtByMemberId,
         centerChiefThresholdByMemberId,
         promotionThresholdByMemberId,
+        divisionHeadThresholdByMemberId,
       );
       base = c.unit_count * commissionPerUnit;
     } else if (dbRank === '영업사원' || dbRank === '리더') {
@@ -559,6 +581,7 @@ function calcDirectContractsWithLeaderPromotion(
         leaderRankEffectiveAtByMemberId,
         centerChiefThresholdByMemberId,
         promotionThresholdByMemberId,
+        divisionHeadThresholdByMemberId,
       );
       base = c.unit_count * commissionPerUnit;
     }
@@ -665,12 +688,14 @@ function calcRollupItemsWithLeaderPromotion(
   orgNodeByMemberId?: Map<string, OrgTreeNode>,
   promotionUnitSplitByMemberId?: Map<string, Map<string, PromotionUnitSplit>>,
   centerChiefThresholdByMemberId?: Map<string, CenterChiefPromotionThreshold | null>,
+  divisionHeadThresholdByMemberId?: Map<string, DivisionHeadPromotionThreshold | null>,
 ): { items: RollupItem[]; total: number; contractItems: RollupContractItem[] } {
   const refDate = monthEndDate(yearMonth);
   const items: RollupItem[] = [];
   const contractItems: RollupContractItem[] = [];
   const nodeThreshold = promotionThresholdByMemberId.get(node.id) ?? null;
   const nodeCenterChiefThreshold = centerChiefThresholdByMemberId?.get(node.id) ?? null;
+  const nodeDivisionHeadThreshold = divisionHeadThresholdByMemberId?.get(node.id) ?? null;
 
   const directChildIdSet = new Set((node.children ?? []).map((c) => c.id));
 
@@ -681,11 +706,9 @@ function calcRollupItemsWithLeaderPromotion(
     // 월 중 정책 승격:
     // - childThreshold: 자식이 승격한 이후 계약은 부모(node) 롤업에서 제외(기존 상위가 못 받음).
     // - nodeThreshold: node 본인이 승격하기 전 산하 계약은 node 롤업에서 제외(이전 상위 리더 귀속).
-    // - 센터장: 산하 리더 승급 후에도 센터장 차액 롤업을 유지해야 하므로 childWalk 제외를 적용하지 않는다.
-    //   (승급 전 구간은 리더 상한−리더 하한=0이라 직속 리더 라인에는 금액이 안 붙고,
-    //    승급 계약 다음 계약부터 센터장 상한−하위 차액만 잡힌다.)
+    // - 센터장/사업본부장: 산하 리더·센터장 승급 후에도 상위 차액 롤업을 유지해야 하므로 childWalk 제외를 적용하지 않는다.
     const childContractsAllWithOwner = collectSubtreeContractsWithOwner(child, contractsByMember);
-    const applyChildPromotionExclusion = node.rank !== '센터장';
+    const applyChildPromotionExclusion = node.rank !== '센터장' && node.rank !== '사업본부장';
 
     let childUnits = 0;
     let subtotal = 0;
@@ -714,13 +737,15 @@ function calcRollupItemsWithLeaderPromotion(
         leaderRankEffectiveAtByMemberId,
         centerChiefThresholdByMemberId,
         promotionThresholdByMemberId,
+        divisionHeadThresholdByMemberId,
       );
       // DB 센터장은 promotion walk 맵에 없어 commissionPerUnit(..., '리더')가 영업단가로 떨어진다.
       // 승급 전/대기 구간은 리더 직급 단가를 상한으로 쓴다(물품명 특별 단가 반영).
       const leaderRuleRate = commissionPerUnitForRank(rules, '리더', refDate, product);
       const centerChiefRuleRate = commissionPerUnitForRank(rules, '센터장', refDate, product);
+      const divisionHeadRuleRate = commissionPerUnitForRank(rules, '사업본부장', refDate, product);
       const leaderUpper =
-        node.rank === '센터장'
+        node.rank === '센터장' || node.rank === '사업본부장'
           ? leaderRuleRate
           : commissionPerUnitForDirectContract(
               node.id,
@@ -732,24 +757,28 @@ function calcRollupItemsWithLeaderPromotion(
               leaderRankEffectiveAtByMemberId,
               centerChiefThresholdByMemberId,
               promotionThresholdByMemberId,
+              divisionHeadThresholdByMemberId,
             );
       const centerChiefUpper =
         node.rank === '센터장'
           ? centerChiefRuleRate
-          : commissionPerUnitForDirectContract(
-              node.id,
-              '센터장',
-              cref,
-              rules,
-              refDate,
-              promotionUnitSplitByMemberId,
-              leaderRankEffectiveAtByMemberId,
-              centerChiefThresholdByMemberId,
-              promotionThresholdByMemberId,
-            );
-      const defaultUpper =
-        node.rank === '센터장'
-          ? centerChiefUpper
+          : node.rank === '사업본부장'
+            ? centerChiefRuleRate
+            : commissionPerUnitForDirectContract(
+                node.id,
+                '센터장',
+                cref,
+                rules,
+                refDate,
+                promotionUnitSplitByMemberId,
+                leaderRankEffectiveAtByMemberId,
+                centerChiefThresholdByMemberId,
+                promotionThresholdByMemberId,
+                divisionHeadThresholdByMemberId,
+              );
+      const divisionHeadUpper =
+        node.rank === '사업본부장'
+          ? divisionHeadRuleRate
           : commissionPerUnitForDirectContract(
               node.id,
               node.rank,
@@ -760,9 +789,18 @@ function calcRollupItemsWithLeaderPromotion(
               leaderRankEffectiveAtByMemberId,
               centerChiefThresholdByMemberId,
               promotionThresholdByMemberId,
+              divisionHeadThresholdByMemberId,
             );
+      const defaultUpper =
+        node.rank === '센터장'
+          ? centerChiefUpper
+          : node.rank === '사업본부장'
+            ? divisionHeadUpper
+            : divisionHeadUpper;
       const postDiff = Math.max(0, centerChiefUpper - lower);
       const preDiff = Math.max(0, leaderUpper - lower);
+      const divisionPreDiff = Math.max(0, centerChiefUpper - lower);
+      const divisionPostDiff = Math.max(0, divisionHeadUpper - lower);
       const defaultDiff = Math.max(0, defaultUpper - lower);
 
       let preUnits = 0;
@@ -776,6 +814,14 @@ function calcRollupItemsWithLeaderPromotion(
         );
         preUnits = ccSplit.preCenterChiefUnits;
         postUnits = ccSplit.postCenterChiefUnits;
+      } else if (node.rank === '사업본부장') {
+        const dhSplit = splitDivisionHeadRollupUnits(
+          { ...ref, unit_count: eligibleUnits },
+          node.rank,
+          nodeDivisionHeadThreshold,
+        );
+        preUnits = dhSplit.preDivisionHeadUnits;
+        postUnits = dhSplit.postDivisionHeadUnits;
       } else {
         preUnits = eligibleUnits;
       }
@@ -791,13 +837,21 @@ function calcRollupItemsWithLeaderPromotion(
         childUnits += units;
         subtotal += sub;
         const upperRankApplied: RankType =
-          node.rank === '센터장' && phase === 'pre' ? '리더' : node.rank;
+          node.rank === '센터장' && phase === 'pre'
+            ? '리더'
+            : node.rank === '사업본부장' && phase === 'pre'
+              ? '센터장'
+              : node.rank;
         const upperDirect =
           node.rank === '센터장' && phase === 'pre'
             ? leaderUpper
             : node.rank === '센터장' && phase === 'post'
               ? centerChiefUpper
-              : defaultUpper;
+              : node.rank === '사업본부장' && phase === 'pre'
+                ? centerChiefUpper
+                : node.rank === '사업본부장' && phase === 'post'
+                  ? divisionHeadUpper
+                  : defaultUpper;
         localContractItems.push({
           contract_id: c.id,
           contract_code: c.contract_code,
@@ -824,13 +878,29 @@ function calcRollupItemsWithLeaderPromotion(
                 upperDirectCommissionPerUnit: upperDirect,
                 lowerDirectCommissionPerUnit: lower,
               })
-            : {}),
+            : node.rank === '사업본부장'
+              ? buildDivisionHeadRollupAuditFields({
+                  contract: { ...cref, join_date: c.join_date },
+                  nodeName: node.name,
+                  nodeRank: node.rank,
+                  childName: child.name,
+                  ownerName,
+                  threshold: nodeDivisionHeadThreshold,
+                  phase: phase === 'post' ? 'post' : 'pre',
+                  upperRankApplied,
+                  upperDirectCommissionPerUnit: upperDirect,
+                  lowerDirectCommissionPerUnit: lower,
+                })
+              : {}),
         });
       };
 
       if (node.rank === '센터장') {
         pushRollupLine(preUnits, preDiff, 'pre', 'center_chief_pre_threshold');
         pushRollupLine(postUnits, postDiff, 'post', 'center_chief_post_threshold');
+      } else if (node.rank === '사업본부장') {
+        pushRollupLine(preUnits, divisionPreDiff, 'pre', 'division_head_pre_threshold');
+        pushRollupLine(postUnits, divisionPostDiff, 'post', 'division_head_post_threshold');
       } else {
         pushRollupLine(preUnits, defaultDiff, 'default', childThreshold ? 'direct_child_pre_promotion' : 'direct_child');
       }
@@ -898,6 +968,7 @@ function calcRollupItemsWithLeaderPromotion(
           leaderRankEffectiveAtByMemberId,
           centerChiefThresholdByMemberId,
           promotionThresholdByMemberId,
+          divisionHeadThresholdByMemberId,
         );
         const lower = commissionPerUnitForDirectContract(
           promotedId,
@@ -910,6 +981,7 @@ function calcRollupItemsWithLeaderPromotion(
           leaderRankEffectiveAtByMemberId,
           centerChiefThresholdByMemberId,
           promotionThresholdByMemberId,
+          divisionHeadThresholdByMemberId,
         );
         const diff = Math.max(0, upper - lower);
         const sub = diff * eligibleUnits;
@@ -1003,6 +1075,7 @@ export function calculateMemberSettlement(
       member.rank === '영업사원' ||
       member.rank === '리더' ||
       member.rank === '센터장' ||
+      member.rank === '사업본부장' ||
       thForMember !== null);
 
   if (useLeaderRates) {
@@ -1017,6 +1090,7 @@ export function calculateMemberSettlement(
       leaderOpts?.preIssuedCodeSettingsByMemberId,
       leaderOpts?.centerChiefThresholdByMemberId,
       thresholdMap,
+      leaderOpts?.divisionHeadThresholdByMemberId,
     ));
     ({
       items: rollupItems,
@@ -1033,6 +1107,7 @@ export function calculateMemberSettlement(
       leaderOpts?.orgNodeByMemberId,
       promotionUnitSplitByMemberId,
       leaderOpts?.centerChiefThresholdByMemberId,
+      leaderOpts?.divisionHeadThresholdByMemberId,
     ));
   } else {
     ({ items: directItems, total: baseCommission } = calcDirectContracts(eligible, rule));
@@ -1050,6 +1125,16 @@ export function calculateMemberSettlement(
   const centerChiefSubtreeUnits =
     member.rank === '센터장' && leaderOpts
       ? subtreeSettlementUnitsForCenterChiefBonus({
+          memberId: member.id,
+          treeRows: leaderOpts.treeRows,
+          contractsByMember,
+        })
+      : 0;
+
+  /** 사업본부장 보너스 판정용: 하위 사업본부장 조직 제외 후 정산월 대상 구좌 합 */
+  const divisionHeadSubtreeUnits =
+    member.rank === '사업본부장' && leaderOpts
+      ? subtreeSettlementUnitsForDivisionHeadBonus({
           memberId: member.id,
           treeRows: leaderOpts.treeRows,
           contractsByMember,
@@ -1102,17 +1187,38 @@ export function calculateMemberSettlement(
         })
       : 0;
 
+  const divisionHeadSubtreeBonus =
+    member.rank === '사업본부장'
+      ? calculateDivisionHeadSubtreeBonus({
+          rank: member.rank,
+          subtreeSettlementUnits: divisionHeadSubtreeUnits,
+        })
+      : 0;
+
   let bonusAmountCombined =
-    ruleIncentiveAmount + leaderMaintenanceBonus + groupBonus + centerChiefSubtreeBonus;
+    ruleIncentiveAmount +
+    leaderMaintenanceBonus +
+    groupBonus +
+    centerChiefSubtreeBonus +
+    divisionHeadSubtreeBonus;
   let totalAmount =
-    baseCommission + rollupCommission + leaderMaintenanceBonus + groupBonus + centerChiefSubtreeBonus;
+    baseCommission +
+    rollupCommission +
+    leaderMaintenanceBonus +
+    groupBonus +
+    centerChiefSubtreeBonus +
+    divisionHeadSubtreeBonus;
 
   const incentiveOverride = leaderOpts?.incentiveAmountOverrideByMemberId?.get(member.id);
   if (incentiveOverride != null && Number.isFinite(incentiveOverride)) {
     bonusAmountCombined = Math.round(incentiveOverride);
     groupBonus = Math.max(
       0,
-      bonusAmountCombined - ruleIncentiveAmount - leaderMaintenanceBonus - centerChiefSubtreeBonus,
+      bonusAmountCombined -
+        ruleIncentiveAmount -
+        leaderMaintenanceBonus -
+        centerChiefSubtreeBonus -
+        divisionHeadSubtreeBonus,
     );
     totalAmount = baseCommission + rollupCommission + bonusAmountCombined;
   }
@@ -1221,6 +1327,10 @@ export function calculateMemberSettlement(
     center_chief_subtree_bonus_amount: centerChiefSubtreeBonus > 0 ? centerChiefSubtreeBonus : undefined,
     center_chief_subtree_units_in_month:
       member.rank === '센터장' ? centerChiefSubtreeUnits : undefined,
+    division_head_subtree_bonus_amount:
+      divisionHeadSubtreeBonus > 0 ? divisionHeadSubtreeBonus : undefined,
+    division_head_subtree_units_in_month:
+      member.rank === '사업본부장' ? divisionHeadSubtreeUnits : undefined,
     manual_adjustment_won: manualAdjustment !== 0 ? manualAdjustment : undefined,
     manual_adjustment_reason: manualAdjustment !== 0 ? '고객 김동건 정산 예외(-60만원)' : undefined,
   };
