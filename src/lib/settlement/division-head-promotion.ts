@@ -11,7 +11,10 @@ import {
   type PromotionOrderContractRef,
 } from '@/lib/settlement/leader-promotion';
 import type { CenterChiefPromotionThreshold } from '@/lib/settlement/center-chief-promotion';
-import { compareContractToCenterChiefThreshold } from '@/lib/settlement/center-chief-promotion';
+import {
+  compareContractToCenterChiefThreshold,
+  isCenterChiefThresholdUnknownDate,
+} from '@/lib/settlement/center-chief-promotion';
 
 /** 사업본부장 달성 경계: 산하 3번째 센터장 승격 시점 */
 export type DivisionHeadPromotionThreshold = {
@@ -48,13 +51,13 @@ function comparePromotionOrderTieBreak(
 
 /**
  * 센터장 달성 threshold를 정렬·단가 경계용으로 정규화.
- * `9999-12-31`(기록 전 이미 달성)은 created_at 날짜로 대체한다.
+ * 센터장 unknown sentinel(기록 전 이미 달성)은 created_at 날짜로 대체한다.
  */
 export function effectiveCenterChiefThresholdForOrdering(
   th: CenterChiefPromotionThreshold,
 ): CenterChiefPromotionThreshold {
   const join = String(th.threshold_join_date ?? '').slice(0, 10);
-  if (join && join !== '9999-12-31') return th;
+  if (join && !isCenterChiefThresholdUnknownDate(join)) return th;
   const created = normalizeCreatedAt(th.threshold_created_at);
   if (created) {
     return {

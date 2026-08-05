@@ -2237,6 +2237,7 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
           .map((id) => {
             const th = centerChiefThresholdByMemberId.get(id) ?? null;
             if (!th) return null;
+            if (String(th.threshold_join_date).slice(0, 10) === '9999-12-31') return null;
             return {
               member_id: id,
               previous_parent_id: parentByChild.get(id) ?? null,

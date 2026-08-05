@@ -29,6 +29,7 @@ import {
 import {
   computeCenterChiefPromotionThresholds,
   mergeCenterChiefPromotionEventThresholds,
+  isCenterChiefThresholdUnknownDate,
   type CenterChiefPromotionEventRecord,
 } from '@/lib/settlement/center-chief-promotion';
 import { computeDivisionHeadPromotionThresholds } from '@/lib/settlement/division-head-promotion';
@@ -755,7 +756,54 @@ export async function calculateMonthlySettlement(params: {
     centerChiefThresholdByMemberId,
     (ccPromoEvents ?? []) as any[],
     thresholdContractMetaById,
+    promotionThresholdByMemberId,
   );
+
+  // 이벤트에 sentinel/계약 누락이 있으면 리더 승급 threshold로 보정 후 저장
+  const ccEventRepairs: Array<{
+    member_id: string;
+    previous_parent_id: string | null;
+    threshold_leader_member_id: string;
+    threshold_join_date: string;
+    threshold_contract_id: string | null;
+  }> = [];
+  for (const r of (ccPromoEvents ?? []) as any[]) {
+    if (!r?.member_id || !r?.threshold_leader_member_id) continue;
+    const storedJoin = String(r.threshold_join_date ?? '').slice(0, 10);
+    const storedCid = r.threshold_contract_id ? String(r.threshold_contract_id) : null;
+    if (storedCid && !isCenterChiefThresholdUnknownDate(storedJoin)) continue;
+    const fixed = centerChiefThresholdByMemberId.get(String(r.member_id)) ?? null;
+    if (!fixed || isCenterChiefThresholdUnknownDate(fixed.threshold_join_date)) continue;
+    if (
+      fixed.threshold_join_date === storedJoin &&
+      (fixed.threshold_contract_id ?? null) === storedCid
+    ) {
+      continue;
+    }
+    ccEventRepairs.push({
+      member_id: String(r.member_id),
+      previous_parent_id: (r.previous_parent_id ?? null) as string | null,
+      threshold_leader_member_id: fixed.threshold_leader_member_id,
+      threshold_join_date: fixed.threshold_join_date,
+      threshold_contract_id: fixed.threshold_contract_id ?? null,
+    });
+    centerChiefEventsByMemberId.set(String(r.member_id), {
+      member_id: String(r.member_id),
+      previous_parent_id: (r.previous_parent_id ?? null) as string | null,
+      threshold_leader_member_id: fixed.threshold_leader_member_id,
+      threshold_join_date: fixed.threshold_join_date,
+      threshold_contract_id: fixed.threshold_contract_id ?? null,
+      created_at: (r.created_at ?? null) as string | null,
+    });
+  }
+  if (ccEventRepairs.length > 0) {
+    const { error: ccRepairErr } = await db
+      .from('center_chief_promotion_events')
+      .upsert(ccEventRepairs as any, { onConflict: 'member_id' });
+    if (ccRepairErr) {
+      throw new Error(`center_chief_promotion_events 보정 실패: ${ccRepairErr.message}`);
+    }
+  }
 
   const divisionHeadThresholdByMemberId = computeDivisionHeadPromotionThresholds(
     treeRows,
@@ -780,6 +828,7 @@ export async function calculateMonthlySettlement(params: {
     if (m.rank !== '리더' && m.rank !== '센터장') continue;
     const th = centerChiefThresholdByMemberId.get(m.id) ?? null;
     if (!th) continue;
+    if (isCenterChiefThresholdUnknownDate(th.threshold_join_date)) continue;
     newCcPromoRows.push({
       member_id: m.id,
       previous_parent_id: parentByChildForCc.get(m.id) ?? null,
