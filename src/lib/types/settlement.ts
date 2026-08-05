@@ -99,6 +99,10 @@ export interface RollupContractItem {
   division_head_rate_starts_ymd?: string | null;
   /** CENTER_BEFORE_DIVISION | DIVISION_AFTER_PROMOTION */
   division_head_rollup_segment?: 'CENTER_BEFORE_DIVISION' | 'DIVISION_AFTER_PROMOTION';
+  /** 리더 승급 확정일 = 산하 20구좌 달성 승격 계약 순서일 */
+  leader_promotion_confirmed_ymd?: string | null;
+  /** SALES_BEFORE_LEADER | LEADER_AFTER_PROMOTION */
+  leader_rollup_segment?: 'SALES_BEFORE_LEADER' | 'LEADER_AFTER_PROMOTION';
   /** 롤업 상위에 적용한 직급 (승급 전 구간은 리더) */
   upper_rank_applied?: RankType;
   /** 상위 직급 직접계약 단가 */
