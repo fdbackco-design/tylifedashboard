@@ -3,9 +3,11 @@ import { describe, it } from 'vitest';
 import type { OrgTreeRow } from '@/lib/types';
 import {
   buildPromotionCommissionWalkForMember,
+  collectLeaderPromotionDemotionMemberIds,
   comparePromotionAccumulationRows,
   explainPromotionAccumulationExclusion,
   isPromotionAccumulationJoinContractRow,
+  resolvePromotionUnitSplit,
   type AttributedJoinContractRow,
 } from './leader-promotion';
 
@@ -185,5 +187,68 @@ describe('leader promotion commission (walk SSOT)', () => {
     assert.equal(splitByContractId.get('after')?.prePromotionUnits, 0);
     assert.equal(splitByContractId.get('after')?.postPromotionUnits, 1);
     assert.equal(audit.find((a) => a.contractId === 'after')?.commissionPerUnit, 400_000);
+  });
+
+  it('7) walk에 없는 직접매출도 승급 threshold 이후면 40만', () => {
+    // 고객노드 재매핑으로 walk 귀속이 다른 멤버로 간 경우(이지현→임태순 등)
+    const threshold = {
+      threshold_contract_id: 'TY201',
+      threshold_join_date: '2026-07-27',
+    };
+    const emptyWalk = new Map();
+    const after = {
+      id: 'TY277',
+      join_date: '2026-07-24',
+      happy_call_at: '2026-07-28T00:00:00Z',
+      unit_count: 1,
+      created_at: '2026-07-24T12:00:00Z',
+      invoice_registered_at: '2026-08-04T01:00:00Z',
+    };
+    const before = {
+      id: 'TY100',
+      join_date: '2026-07-20',
+      happy_call_at: '2026-07-26T00:00:00Z',
+      unit_count: 1,
+      created_at: '2026-07-20T12:00:00Z',
+    };
+    assert.deepEqual(resolvePromotionUnitSplit(after, emptyWalk, threshold), {
+      prePromotionUnits: 0,
+      postPromotionUnits: 1,
+    });
+    assert.deepEqual(resolvePromotionUnitSplit(before, emptyWalk, threshold), {
+      prePromotionUnits: 1,
+      postPromotionUnits: 0,
+    });
+    // threshold 없으면 기존처럼 전량 30만
+    assert.deepEqual(resolvePromotionUnitSplit(after, emptyWalk, null), {
+      prePromotionUnits: 1,
+      postPromotionUnits: 0,
+    });
+  });
+});
+
+describe('collectLeaderPromotionDemotionMemberIds', () => {
+  it('이벤트가 있어도 인정 walk 미달이면 강등 대상', () => {
+    const rows: AttributedJoinContractRow[] = [
+      row('a', 1, { happy_call_at: '2026-07-01' }),
+      row('b', 1, { happy_call_at: '2026-07-02' }),
+    ];
+    const ids = collectLeaderPromotionDemotionMemberIds({
+      treeRows,
+      joinAttributed: rows,
+      promotionEventMemberIds: new Set([MEMBER]),
+      members: [{ id: MEMBER, rank: '리더' }],
+    });
+    assert.deepEqual(ids, [MEMBER]);
+  });
+
+  it('이벤트가 없으면 강등하지 않음', () => {
+    const ids = collectLeaderPromotionDemotionMemberIds({
+      treeRows,
+      joinAttributed: [],
+      promotionEventMemberIds: new Set(),
+      members: [{ id: MEMBER, rank: '리더' }],
+    });
+    assert.deepEqual(ids, []);
   });
 });

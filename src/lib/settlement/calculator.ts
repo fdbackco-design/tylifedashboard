@@ -375,6 +375,7 @@ function commissionPerUnitForDirectContract(
   promotionUnitSplitByMemberId?: Map<string, Map<string, PromotionUnitSplit>>,
   leaderRankEffectiveAtByMemberId?: Map<string, string | null>,
   centerChiefThresholdByMemberId?: Map<string, CenterChiefPromotionThreshold | null>,
+  promotionThresholdByMemberId?: Map<string, SalesMemberPromotionThreshold | null>,
 ): number {
   if (dbRank === '본사') return 0;
   const product = contractProductRef(contract);
@@ -399,8 +400,9 @@ function commissionPerUnitForDirectContract(
 
   if (dbRank === '영업사원' || dbRank === '리더') {
     const walk = promotionUnitSplitByMemberId?.get(memberId);
+    const threshold = promotionThresholdByMemberId?.get(memberId) ?? null;
     const units = Math.max(0, contract.unit_count ?? 1);
-    const split = resolvePromotionUnitSplit({ ...contract, unit_count: units }, walk);
+    const split = resolvePromotionUnitSplit({ ...contract, unit_count: units }, walk, threshold);
     if (split.postPromotionUnits > 0 && split.prePromotionUnits === 0) {
       return commissionPerUnitForRank(rules, '리더', refDate, product);
     }
@@ -435,6 +437,7 @@ function calcDirectContractsWithLeaderPromotion(
   leaderRankEffectiveAtByMemberId?: Map<string, string | null>,
   preIssuedCodeSettingsByMemberId?: Map<string, PreIssuedCodeMemberSetting>,
   centerChiefThresholdByMemberId?: Map<string, CenterChiefPromotionThreshold | null>,
+  promotionThresholdByMemberId?: Map<string, SalesMemberPromotionThreshold | null>,
 ): { items: ContractSettlementItem[]; total: number } {
   const auditByContractId = new Map<string, PromotionCommissionSplit>();
   const memberAudit = promotionCommissionAuditByMemberId?.get(member.id) ?? [];
@@ -455,6 +458,10 @@ function calcDirectContractsWithLeaderPromotion(
     const walk =
       promotionUnitSplitByMemberId?.get(rateMemberId) ??
       promotionUnitSplitByMemberId?.get(member.id);
+    const threshold =
+      promotionThresholdByMemberId?.get(rateMemberId) ??
+      promotionThresholdByMemberId?.get(member.id) ??
+      null;
 
     let auditRow =
       auditByContractId.get(c.id) ??
@@ -467,6 +474,8 @@ function calcDirectContractsWithLeaderPromotion(
           contractId: c.id,
           contractCode: c.contract_code,
           unitCount: c.unit_count,
+          threshold,
+          contract: ref,
         });
       }
       return {
@@ -518,12 +527,14 @@ function calcDirectContractsWithLeaderPromotion(
         promotionUnitSplitByMemberId,
         leaderRankEffectiveAtByMemberId,
         centerChiefThresholdByMemberId,
+        promotionThresholdByMemberId,
       );
       base = c.unit_count * commissionPerUnit;
     } else if (dbRank === '영업사원' || dbRank === '리더') {
       const { prePromotionUnits, postPromotionUnits } = resolvePromotionUnitSplit(
         { ...ref, unit_count: c.unit_count },
         walk,
+        threshold,
       );
       base = prePromotionUnits * salesRate + postPromotionUnits * leaderRate;
       commissionPerUnit =
@@ -533,6 +544,8 @@ function calcDirectContractsWithLeaderPromotion(
           contractId: c.id,
           contractCode: c.contract_code,
           unitCount: c.unit_count,
+          threshold,
+          contract: ref,
         });
       }
     } else {
@@ -545,6 +558,7 @@ function calcDirectContractsWithLeaderPromotion(
         promotionUnitSplitByMemberId,
         leaderRankEffectiveAtByMemberId,
         centerChiefThresholdByMemberId,
+        promotionThresholdByMemberId,
       );
       base = c.unit_count * commissionPerUnit;
     }
@@ -699,6 +713,7 @@ function calcRollupItemsWithLeaderPromotion(
         promotionUnitSplitByMemberId,
         leaderRankEffectiveAtByMemberId,
         centerChiefThresholdByMemberId,
+        promotionThresholdByMemberId,
       );
       // DB 센터장은 promotion walk 맵에 없어 commissionPerUnit(..., '리더')가 영업단가로 떨어진다.
       // 승급 전/대기 구간은 리더 직급 단가를 상한으로 쓴다(물품명 특별 단가 반영).
@@ -716,6 +731,7 @@ function calcRollupItemsWithLeaderPromotion(
               promotionUnitSplitByMemberId,
               leaderRankEffectiveAtByMemberId,
               centerChiefThresholdByMemberId,
+              promotionThresholdByMemberId,
             );
       const centerChiefUpper =
         node.rank === '센터장'
@@ -729,6 +745,7 @@ function calcRollupItemsWithLeaderPromotion(
               promotionUnitSplitByMemberId,
               leaderRankEffectiveAtByMemberId,
               centerChiefThresholdByMemberId,
+              promotionThresholdByMemberId,
             );
       const defaultUpper =
         node.rank === '센터장'
@@ -742,6 +759,7 @@ function calcRollupItemsWithLeaderPromotion(
               promotionUnitSplitByMemberId,
               leaderRankEffectiveAtByMemberId,
               centerChiefThresholdByMemberId,
+              promotionThresholdByMemberId,
             );
       const postDiff = Math.max(0, centerChiefUpper - lower);
       const preDiff = Math.max(0, leaderUpper - lower);
@@ -879,6 +897,7 @@ function calcRollupItemsWithLeaderPromotion(
           promotionUnitSplitByMemberId,
           leaderRankEffectiveAtByMemberId,
           centerChiefThresholdByMemberId,
+          promotionThresholdByMemberId,
         );
         const lower = commissionPerUnitForDirectContract(
           promotedId,
@@ -890,6 +909,7 @@ function calcRollupItemsWithLeaderPromotion(
           promotionUnitSplitByMemberId,
           leaderRankEffectiveAtByMemberId,
           centerChiefThresholdByMemberId,
+          promotionThresholdByMemberId,
         );
         const diff = Math.max(0, upper - lower);
         const sub = diff * eligibleUnits;
@@ -996,6 +1016,7 @@ export function calculateMemberSettlement(
       leaderEffectiveMap,
       leaderOpts?.preIssuedCodeSettingsByMemberId,
       leaderOpts?.centerChiefThresholdByMemberId,
+      thresholdMap,
     ));
     ({
       items: rollupItems,
