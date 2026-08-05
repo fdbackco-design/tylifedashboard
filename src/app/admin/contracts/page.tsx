@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import type { ContractStatus } from '@/lib/types';
+import { getContractDisplayProductName } from '@/lib/utils/contract-display-product';
 import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
 
 export const metadata: Metadata = { title: '계약 관리' };
@@ -66,6 +67,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
       join_date,
       product_type,
       item_name,
+      source_snapshot_json,
       rental_request_no,
       invoice_no,
       memo,
@@ -126,6 +128,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
     affiliation_name: string | null;
     product_type: string | null;
     item_name: string | null;
+    source_snapshot_json: Record<string, string | null> | null;
     unit_count: number;
     join_method: string;
     status: ContractStatus;
@@ -161,7 +164,15 @@ export default async function ContractsPage({ searchParams }: PageProps) {
           | null,
         invoice_no: ((c as { invoice_no?: string | null }).invoice_no ?? null) as string | null,
         memo: ((c as { memo?: string | null }).memo ?? null) as string | null,
+        product_type: ((c as { product_type?: string | null }).product_type ?? null) as string | null,
+        item_name: ((c as { item_name?: string | null }).item_name ?? null) as string | null,
+        source_snapshot_json: ((c as { source_snapshot_json?: Record<string, string | null> | null })
+          .source_snapshot_json ?? null) as Record<string, string | null> | null,
       });
+
+    const snapshotOf = (c: Row): Record<string, string | null> | null =>
+      ((c as { source_snapshot_json?: Record<string, string | null> | null }).source_snapshot_json ??
+        null) as Record<string, string | null> | null;
 
     for (const c of rows) {
       const customer = (c as { customers?: { name?: string } | null }).customers;
@@ -182,6 +193,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
             | null,
           product_type: ((c as { product_type?: string | null }).product_type ?? null) as string | null,
           item_name: ((c as { item_name?: string | null }).item_name ?? null) as string | null,
+          source_snapshot_json: snapshotOf(c),
           rental_request_no: ((c as { rental_request_no?: string | null }).rental_request_no ?? null) as
             | string
             | null,
@@ -205,8 +217,17 @@ export default async function ContractsPage({ searchParams }: PageProps) {
       if (!existing.item_name) {
         existing.item_name = ((c as { item_name?: string | null }).item_name ?? null) as string | null;
       }
-      if (!existing.product_type) {
-        existing.product_type = ((c as { product_type?: string | null }).product_type ?? null) as string | null;
+      if (!existing.product_type || existing.product_type === '일반') {
+        const nextType = ((c as { product_type?: string | null }).product_type ?? null) as string | null;
+        if (nextType && nextType !== '일반') {
+          existing.product_type = nextType;
+        }
+      }
+      if (!existing.source_snapshot_json?.['상품명']) {
+        const snap = snapshotOf(c);
+        if (snap?.['상품명']) {
+          existing.source_snapshot_json = snap;
+        }
       }
       if (!existing.rental_request_no) {
         existing.rental_request_no = ((c as { rental_request_no?: string | null }).rental_request_no ?? null) as
@@ -319,7 +340,7 @@ export default async function ContractsPage({ searchParams }: PageProps) {
                   '가입일',
                   '고객명',
                   '담당사원',
-                  'product_type',
+                  '상품명',
                   '물품명',
                   '구좌수',
                   '가입방법',
@@ -385,7 +406,11 @@ export default async function ContractsPage({ searchParams }: PageProps) {
                       )}
                     </td>
                     <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                      {c.product_type ?? '-'}
+                      {getContractDisplayProductName({
+                        product_type: c.product_type,
+                        item_name: c.item_name,
+                        source_snapshot_json: c.source_snapshot_json,
+                      })}
                     </td>
                     <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
                       {c.item_name ?? '-'}
