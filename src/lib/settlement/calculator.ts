@@ -47,6 +47,7 @@ import {
 } from './constants';
 import {
   productCommissionPerUnitForRank,
+  resolveProductCommissionKind,
   type ProductCommissionRef,
 } from './product-commission-rates';
 import { getSettlementWindowForYearMonth } from '@/lib/settlement/settlement-window';
@@ -132,10 +133,12 @@ function commissionPerUnitForRank(
 function contractProductRef(c: {
   item_name?: string | null;
   product_type?: string | null;
+  source_snapshot_json?: Record<string, string | null> | null;
 }): ProductCommissionRef {
   return {
     item_name: c.item_name ?? null,
     product_type: c.product_type ?? null,
+    source_snapshot_json: c.source_snapshot_json ?? null,
   };
 }
 
@@ -169,6 +172,15 @@ function calcDirectContracts(
   rule: SettlementRule,
 ): { items: ContractSettlementItem[]; total: number } {
   const items: ContractSettlementItem[] = contracts.map((c) => {
+    if (resolveProductCommissionKind(contractProductRef(c)) === 'care_plan_zero') {
+      return {
+        contract_id: c.id,
+        contract_code: c.contract_code,
+        unit_count: c.unit_count,
+        commission_per_unit: 0,
+        subtotal: 0,
+      };
+    }
     const base = c.unit_count * rule.commission_per_unit;
     const penalty = commissionPenaltyWonForItemName((c as { item_name?: string }).item_name, c.unit_count);
     return {
@@ -395,6 +407,9 @@ function contractPromotionRef(c: Contract): PromotionOrderContractRef & ProductC
     created_at: (c as { created_at?: string | null }).created_at ?? null,
     item_name: (c as { item_name?: string | null }).item_name ?? null,
     product_type: (c as { product_type?: string | null }).product_type ?? null,
+    source_snapshot_json:
+      ((c as { source_snapshot_json?: Record<string, string | null> | null }).source_snapshot_json ??
+        null) as Record<string, string | null> | null,
   };
 }
 
@@ -424,18 +439,42 @@ function calcDirectContractsWithLeaderPromotion(
     const dbRank = originRank ?? member.rank;
     const ref = contractPromotionRef(c);
     const product = contractProductRef(c);
-    const salesRate = commissionPerUnitForRank(rules, '영업사원', refDate, product);
-    const leaderRate = commissionPerUnitForRank(rules, '리더', refDate, product);
-    const centerChiefRate = commissionPerUnitForRank(rules, '센터장', refDate, product);
     const walk =
       promotionUnitSplitByMemberId?.get(rateMemberId) ??
       promotionUnitSplitByMemberId?.get(member.id);
 
-    let commissionPerUnit: number;
-    let base: number;
     let auditRow =
       auditByContractId.get(c.id) ??
       promotionCommissionAuditByMemberId?.get(rateMemberId)?.find((r) => r.contractId === c.id);
+
+    // TY케어플랜: 수당 0원 (선발급 특례·패널티·승급 단가 모두 미적용)
+    if (resolveProductCommissionKind(product) === 'care_plan_zero') {
+      if (!auditRow && (dbRank === '영업사원' || dbRank === '리더')) {
+        auditRow = promotionCommissionSplitForNonWalkContract({
+          contractId: c.id,
+          contractCode: c.contract_code,
+          unitCount: c.unit_count,
+        });
+      }
+      return {
+        contract_id: c.id,
+        contract_code: c.contract_code,
+        unit_count: c.unit_count,
+        commission_per_unit: 0,
+        subtotal: 0,
+        promotion_cumulative_units_before: auditRow?.cumulativeUnitsBefore,
+        promotion_cumulative_units_after: auditRow?.cumulativeUnitsAfter,
+        promotion_is_promotion_contract: auditRow?.isPromotionContract,
+        promotion_reason: auditRow?.promotionReason,
+      };
+    }
+
+    const salesRate = commissionPerUnitForRank(rules, '영업사원', refDate, product);
+    const leaderRate = commissionPerUnitForRank(rules, '리더', refDate, product);
+    const centerChiefRate = commissionPerUnitForRank(rules, '센터장', refDate, product);
+
+    let commissionPerUnit: number;
+    let base: number;
 
     const effectiveAtRaw = leaderRankEffectiveAtByMemberId?.get(rateMemberId) ?? null;
     const effectiveAt = (effectiveAtRaw ?? '').trim();
