@@ -8,7 +8,7 @@ import {
   happycallYmdSeoul,
   SETTLEMENT_VALID_HAPPYCALL_RESULTS,
 } from '@/lib/settlement/settlement-eligibility-v2';
-import { hasValidInvoiceNo } from '@/lib/utils/invoice-no';
+import { hasJoinSatisfyingInvoiceNo } from '@/lib/utils/invoice-no';
 import {
   buildDoubleUpPromotionAudit,
   promotionEligibleUnitsForContract,
@@ -360,6 +360,9 @@ export function explainPromotionAccumulationExclusion(row: {
   sales_link_status?: string | null;
   happycall_result?: string | null;
   invoice_no?: string | null;
+  product_type?: string | null;
+  item_name?: string | null;
+  source_snapshot_json?: Record<string, string | null> | null;
 }): { eligible: boolean; exclusion_reason: string | null } {
   if (!row.sales_member_id) {
     return { eligible: false, exclusion_reason: 'NO_SALES_MEMBER' };
@@ -379,7 +382,13 @@ export function explainPromotionAccumulationExclusion(row: {
     if (!SETTLEMENT_VALID_HAPPYCALL_RESULTS.has(hc)) {
       return { eligible: false, exclusion_reason: 'HAPPYCALL_NOT_SUCCESS' };
     }
-    if (!hasValidInvoiceNo(row.invoice_no)) {
+    if (
+      !hasJoinSatisfyingInvoiceNo(row.invoice_no, {
+        product_type: row.product_type,
+        item_name: row.item_name,
+        source_snapshot_json: row.source_snapshot_json,
+      })
+    ) {
       return { eligible: false, exclusion_reason: 'INVOICE_MISSING' };
     }
     return { eligible: true, exclusion_reason: null };

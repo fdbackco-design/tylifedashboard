@@ -4,10 +4,11 @@
  * - 렌탈기준 미충족(준비·대기)은 최우선
  * - 2026-06 개정: 해약이 아니고 송장번호가 있으면 가입으로 표시한다.
  *   (렌탈신청번호 유무는 더 이상 따지지 않는다.)
+ * - TY스페셜라이프케어: 송장에 '설치완료'가 포함되면 숫자 송장과 동일하게 가입으로 표시
  * - TY갤럭시케어_무 · TY케어플랜: 송장 없이 해피콜 성공이면 가입으로 표시
  * - 그 외에는 DB status 그대로
  */
-import { hasValidInvoiceNo } from '@/lib/utils/invoice-no';
+import { hasJoinSatisfyingInvoiceNo } from '@/lib/utils/invoice-no';
 import {
   isInvoiceExemptHappyCallJoinContract,
   meetsInvoiceExemptHappyCallJoinCondition,
@@ -38,7 +39,7 @@ export function getContractDisplayStatus(c: ContractDisplayStatusInput): string 
   if ((status === '준비' || status === '대기') && v === '렌탈기준 미충족') {
     return '렌탈 미충족';
   }
-  const hasInvoice = hasValidInvoiceNo(c.invoice_no);
+  const hasInvoice = hasJoinSatisfyingInvoiceNo(c.invoice_no, c);
   if (status === '가입' || hasInvoice) {
     return '가입';
   }

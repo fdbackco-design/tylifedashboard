@@ -37,4 +37,14 @@ describe('getContractDisplayStatus', () => {
       }),
     ).toBe('가입');
   });
+
+  it('TY스페셜라이프케어는 송장에 설치완료가 있으면 가입으로 표시한다', () => {
+    expect(
+      getContractDisplayStatus({
+        status: '준비',
+        invoice_no: '설치완료 [true]',
+        product_type: 'TY스페셜라이프케어',
+      }),
+    ).toBe('가입');
+  });
 });

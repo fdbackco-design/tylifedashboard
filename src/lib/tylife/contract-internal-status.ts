@@ -7,9 +7,10 @@
  *   - 취소/해약/반품 등 종료 상태 아님
  *   ※ 렌탈신청번호는 사용하지 않음
  *   ※ TY갤럭시케어_무 · TY케어플랜 은 송장 없이 해피콜만으로 가입
+ *   ※ TY스페셜라이프케어 는 송장에 '설치완료' 포함 시 숫자 송장과 동일하게 인정
  */
 import type { ContractInsert, ContractStatus } from '../types/contract';
-import { hasValidInvoiceNo } from '../utils/invoice-no';
+import { hasJoinSatisfyingInvoiceNo, hasValidInvoiceNo } from '../utils/invoice-no';
 import {
   isInvoiceExemptHappyCallJoinContract,
   meetsInvoiceExemptHappyCallJoinCondition,
@@ -81,7 +82,16 @@ export function meetsInternalJoinCondition(params: {
   if (isInvoiceExemptHappyCallJoinContract(params)) {
     return meetsInvoiceExemptHappyCallJoinCondition(params);
   }
-  if (!hasValidInvoiceNo(params.invoice_no)) return false;
+  // TY스페셜라이프케어: 숫자 송장 또는 송장에 '설치완료' 포함 시 충족
+  if (
+    !hasJoinSatisfyingInvoiceNo(params.invoice_no, {
+      product_type: params.product_type,
+      item_name: params.item_name,
+      source_snapshot_json: params.source_snapshot_json,
+    })
+  ) {
+    return false;
+  }
   const { result: hc } = resolveHappycallEligibilityFields(
     params.happy_call_at,
     params.happycall_result,

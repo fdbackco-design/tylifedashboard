@@ -47,7 +47,7 @@ import {
   meetsInvoiceExemptHappyCallJoinCondition,
   resolveHappycallEligibilityFields,
 } from './galaxy-care-mu';
-import { hasValidInvoiceNo } from '@/lib/utils/invoice-no';
+import { hasJoinSatisfyingInvoiceNo } from '@/lib/utils/invoice-no';
 
 export const SETTLEMENT_VALID_HAPPYCALL_RESULTS: ReadonlySet<string> = new Set([
   '성공',
@@ -397,7 +397,11 @@ export function evaluateContractEligibility(
   // - 2026-06 이후: invoice_registered_at 의 ymd <= yearMonth-30(공휴일 보정) 이어야 충족.
   //   invoice_registered_at IS NULL 이면서 invoice_no 가 존재하면 "자동 기록 이전부터 있던 송장"
   //   으로 간주(=충족된 것으로 처리). 자동 기록 도입 이전 데이터 보호용.
-  const hasInvoice = hasValidInvoiceNo(c.invoice_no);
+  const hasInvoice = hasJoinSatisfyingInvoiceNo(c.invoice_no, {
+    product_type: c.product_type,
+    item_name: c.item_name,
+    source_snapshot_json: c.source_snapshot_json,
+  });
   if (!hasInvoice) {
     return {
       result: 'DEFERRED',
@@ -442,6 +446,7 @@ export function evaluateContractEligibility(
  *   2) sales_member_id 존재 & sales_link_status == 'linked' (null 은 linked 로 간주)
  *   3) happycall_result ∈ SETTLEMENT_VALID_HAPPYCALL_RESULTS (and NOT in CANCELLED set)
  *   4) invoice_no 가 존재(공백 제외) — TY갤럭시케어_무 · TY케어플랜 은 해피콜 일시+결과만으로 인정
+ *      TY스페셜라이프케어 는 송장에 '설치완료' 포함 시 숫자 송장과 동일하게 인정
  */
 export type ContractEligibilityStaticInput = {
   status?: string | null;
@@ -468,7 +473,15 @@ export function isV2EligibleStatic(c: ContractEligibilityStaticInput): boolean {
     return meetsInvoiceExemptHappyCallJoinCondition(c);
   }
   if (!SETTLEMENT_VALID_HAPPYCALL_RESULTS.has(hc)) return false;
-  if (!hasValidInvoiceNo(c.invoice_no)) return false;
+  if (
+    !hasJoinSatisfyingInvoiceNo(c.invoice_no, {
+      product_type: c.product_type,
+      item_name: c.item_name,
+      source_snapshot_json: c.source_snapshot_json,
+    })
+  ) {
+    return false;
+  }
   return true;
 }
 
