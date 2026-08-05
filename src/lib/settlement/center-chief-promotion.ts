@@ -174,12 +174,14 @@ export function compareContractToCenterChiefThreshold(
 /**
  * 센터장 단가/20만 롤업 적용 여부.
  * 리더 승급과 동일: 승급 계약(threshold) 자체는 제외, **그 다음 계약부터** post.
+ * `9999-12-31`은 기록 전 이미 센터장 달성 → 전 계약 post.
  */
 export function isContractAtOrAfterCenterChiefPostRollup(
   contract: PromotionOrderContractRef & { unit_count?: number },
   threshold: CenterChiefPromotionThreshold | null,
 ): boolean {
   if (!threshold) return false;
+  if (String(threshold.threshold_join_date).slice(0, 10) === '9999-12-31') return true;
   return compareContractToCenterChiefThreshold(contract, threshold) > 0;
 }
 
@@ -199,6 +201,9 @@ export function splitContractUnitsByCenterChiefThreshold(
   const total = Math.max(0, contract.unit_count);
   if (!threshold || total === 0) {
     return { preCenterChiefUnits: total, postCenterChiefUnits: 0 };
+  }
+  if (String(threshold.threshold_join_date).slice(0, 10) === '9999-12-31') {
+    return { preCenterChiefUnits: 0, postCenterChiefUnits: total };
   }
   if (compareContractToCenterChiefThreshold(contract, threshold) > 0) {
     return { preCenterChiefUnits: 0, postCenterChiefUnits: total };
@@ -307,6 +312,7 @@ export function mergeCenterChiefPromotionEventThresholds(
     threshold_leader_member_id?: string | null;
     threshold_join_date?: string | null;
     threshold_contract_id?: string | null;
+    created_at?: string | null;
   }>,
   thresholdContractMetaById: ReadonlyMap<
     string,
@@ -330,7 +336,7 @@ export function mergeCenterChiefPromotionEventThresholds(
         : String(r.threshold_join_date).slice(0, 10),
       threshold_contract_id: cid,
       threshold_invoice_registered_at: meta?.invoice_registered_at ?? null,
-      threshold_created_at: meta?.created_at ?? null,
+      threshold_created_at: meta?.created_at ?? (r.created_at ?? null),
     });
   }
 }

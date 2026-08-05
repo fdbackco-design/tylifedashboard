@@ -1,136 +1,146 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import type { OrgTreeRow } from '@/lib/types';
-import type { RankType } from '@/lib/types/organization';
+import type { CenterChiefPromotionThreshold } from './center-chief-promotion';
 import {
-  computeDivisionHeadPromotionMemberIds,
-  computeDivisionHeadDemotionMemberIds,
-  DIVISION_HEAD_PROMOTION_MIN_CENTER_CHIEFS,
-} from './leader-promotion';
+  computeDivisionHeadThresholdForMember,
+  isContractAtOrAfterDivisionHeadPostRate,
+} from './division-head-promotion';
 
-const HEAD = 'division-candidate';
-const C1 = 'center-1';
-const C2 = 'center-2';
-const C3 = 'center-3';
-const C4 = 'center-4';
-const L1 = 'leader-1';
+const HEAD = 'head';
+const CC1 = 'cc1';
+const CC2 = 'cc2';
+const CC3 = 'cc3';
 
-function ranks(entries: Array<[string, RankType]>): Map<string, RankType> {
-  return new Map(entries);
-}
-
-describe('division head promotion', () => {
-  it(`산하 센터장 ${DIVISION_HEAD_PROMOTION_MIN_CENTER_CHIEFS}명 이상이면 사업본부장 승격`, () => {
+describe('division head promotion rate boundary', () => {
+  it('3번째 센터장 승급 계약 다음부터 본부장 단가', () => {
     const treeRows: OrgTreeRow[] = [
-      { id: HEAD, name: 'Head', rank: '센터장', parent_id: null, depth: 0 },
-      { id: C1, name: 'C1', rank: '센터장', parent_id: HEAD, depth: 1 },
-      { id: C2, name: 'C2', rank: '센터장', parent_id: HEAD, depth: 1 },
-      { id: C3, name: 'C3', rank: '센터장', parent_id: HEAD, depth: 1 },
-      { id: L1, name: 'L1', rank: '리더', parent_id: HEAD, depth: 1 },
+      { id: HEAD, name: 'H', rank: '사업본부장', parent_id: null, depth: 0 },
+      { id: CC1, name: 'A', rank: '센터장', parent_id: HEAD, depth: 1 },
+      { id: CC2, name: 'B', rank: '센터장', parent_id: HEAD, depth: 1 },
+      { id: CC3, name: 'C', rank: '센터장', parent_id: HEAD, depth: 1 },
     ];
-    const rankById = ranks([
-      [HEAD, '센터장'],
-      [C1, '센터장'],
-      [C2, '센터장'],
-      [C3, '센터장'],
-      [L1, '리더'],
+    const rankById = new Map([
+      [HEAD, '사업본부장' as const],
+      [CC1, '센터장' as const],
+      [CC2, '센터장' as const],
+      [CC3, '센터장' as const],
+    ]);
+    const ccTh = new Map<string, CenterChiefPromotionThreshold | null>([
+      [
+        CC1,
+        {
+          threshold_leader_member_id: 'l1',
+          threshold_join_date: '2026-07-01',
+          threshold_contract_id: 'c1',
+          threshold_created_at: '2026-07-01T10:00:00Z',
+        },
+      ],
+      [
+        CC2,
+        {
+          threshold_leader_member_id: 'l2',
+          threshold_join_date: '2026-07-15',
+          threshold_contract_id: 'c2',
+          threshold_created_at: '2026-07-15T10:00:00Z',
+        },
+      ],
+      [
+        CC3,
+        {
+          threshold_leader_member_id: 'l3',
+          threshold_join_date: '2026-07-27',
+          threshold_contract_id: 'ty073',
+          threshold_created_at: '2026-07-27T10:00:00Z',
+        },
+      ],
     ]);
 
-    const promoted = computeDivisionHeadPromotionMemberIds(treeRows, rankById);
-    assert.deepEqual(promoted, [HEAD]);
+    const dhTh = computeDivisionHeadThresholdForMember(HEAD, treeRows, rankById, ccTh);
+    assert.ok(dhTh);
+    assert.equal(dhTh!.threshold_center_chief_member_id, CC3);
+    assert.equal(dhTh!.threshold_join_date, '2026-07-27');
+    assert.equal(dhTh!.threshold_contract_id, 'ty073');
+
+    const before = {
+      id: 'ty108',
+      join_date: '2026-07-03',
+      happy_call_at: '2026-07-07',
+      created_at: '2026-07-03T12:00:00Z',
+    };
+    const onThreshold = {
+      id: 'ty073',
+      join_date: '2026-07-27',
+      happy_call_at: '2026-07-27',
+      created_at: '2026-07-27T10:00:00Z',
+    };
+    const after = {
+      id: 'ty999',
+      join_date: '2026-07-28',
+      happy_call_at: '2026-07-28',
+      created_at: '2026-07-28T12:00:00Z',
+    };
+
+    assert.equal(isContractAtOrAfterDivisionHeadPostRate(before, dhTh), false);
+    assert.equal(isContractAtOrAfterDivisionHeadPostRate(onThreshold, dhTh), false);
+    assert.equal(isContractAtOrAfterDivisionHeadPostRate(after, dhTh), true);
   });
 
-  it('산하 센터장 2명이면 승격하지 않음', () => {
+  it('9999-12-31 센터장 threshold는 created_at으로 정렬', () => {
     const treeRows: OrgTreeRow[] = [
-      { id: HEAD, name: 'Head', rank: '센터장', parent_id: null, depth: 0 },
-      { id: C1, name: 'C1', rank: '센터장', parent_id: HEAD, depth: 1 },
-      { id: C2, name: 'C2', rank: '센터장', parent_id: HEAD, depth: 1 },
+      { id: HEAD, name: 'H', rank: '사업본부장', parent_id: null, depth: 0 },
+      { id: CC1, name: 'A', rank: '센터장', parent_id: HEAD, depth: 1 },
+      { id: CC2, name: 'B', rank: '센터장', parent_id: HEAD, depth: 1 },
+      { id: CC3, name: 'C', rank: '센터장', parent_id: HEAD, depth: 1 },
     ];
-    const rankById = ranks([
-      [HEAD, '센터장'],
-      [C1, '센터장'],
-      [C2, '센터장'],
+    const rankById = new Map([
+      [HEAD, '사업본부장' as const],
+      [CC1, '센터장' as const],
+      [CC2, '센터장' as const],
+      [CC3, '센터장' as const],
+    ]);
+    const ccTh = new Map<string, CenterChiefPromotionThreshold | null>([
+      [
+        CC1,
+        {
+          threshold_leader_member_id: 'l1',
+          threshold_join_date: '9999-12-31',
+          threshold_contract_id: null,
+          threshold_created_at: '2026-07-31T09:32:46Z',
+        },
+      ],
+      [
+        CC2,
+        {
+          threshold_leader_member_id: 'l2',
+          threshold_join_date: '9999-12-31',
+          threshold_contract_id: null,
+          threshold_created_at: '2026-08-04T01:58:25Z',
+        },
+      ],
+      [
+        CC3,
+        {
+          threshold_leader_member_id: 'l3',
+          threshold_join_date: '2026-07-27',
+          threshold_contract_id: 'ty073',
+          threshold_created_at: '2026-07-27T10:00:00Z',
+        },
+      ],
     ]);
 
-    assert.deepEqual(computeDivisionHeadPromotionMemberIds(treeRows, rankById), []);
-  });
+    const dhTh = computeDivisionHeadThresholdForMember(HEAD, treeRows, rankById, ccTh);
+    // 정렬: CC3(07-27) → CC1(07-31) → CC2(08-04) → 3번째는 CC2
+    assert.ok(dhTh);
+    assert.equal(dhTh!.threshold_center_chief_member_id, CC2);
+    assert.equal(dhTh!.threshold_join_date, '2026-08-04');
 
-  it('손자 노드 센터장도 산하 인원에 포함', () => {
-    const treeRows: OrgTreeRow[] = [
-      { id: HEAD, name: 'Head', rank: '센터장', parent_id: null, depth: 0 },
-      { id: L1, name: 'L1', rank: '리더', parent_id: HEAD, depth: 1 },
-      { id: C1, name: 'C1', rank: '센터장', parent_id: L1, depth: 2 },
-      { id: C2, name: 'C2', rank: '센터장', parent_id: L1, depth: 2 },
-      { id: C3, name: 'C3', rank: '센터장', parent_id: L1, depth: 2 },
-    ];
-    const rankById = ranks([
-      [HEAD, '센터장'],
-      [L1, '리더'],
-      [C1, '센터장'],
-      [C2, '센터장'],
-      [C3, '센터장'],
-    ]);
-
-    assert.deepEqual(computeDivisionHeadPromotionMemberIds(treeRows, rankById), [HEAD]);
-  });
-
-  it('customer 가상 센터장은 산하 인원에서 제외', () => {
-    const treeRows: OrgTreeRow[] = [
-      { id: HEAD, name: 'Head', rank: '센터장', parent_id: null, depth: 0 },
-      { id: C1, name: 'C1', rank: '센터장', parent_id: HEAD, depth: 1 },
-      { id: C2, name: 'C2', rank: '센터장', parent_id: HEAD, depth: 1 },
-      { id: C3, name: 'C3', rank: '센터장', parent_id: HEAD, depth: 1 },
-    ];
-    const rankById = ranks([
-      [HEAD, '센터장'],
-      [C1, '센터장'],
-      [C2, '센터장'],
-      [C3, '센터장'],
-    ]);
-    const externalIdByMemberId = new Map<string, string | null>([
-      [HEAD, 'm-head'],
-      [C1, 'm-c1'],
-      [C2, 'm-c2'],
-      [C3, 'customer:abc'],
-    ]);
-
-    assert.deepEqual(
-      computeDivisionHeadPromotionMemberIds(treeRows, rankById, externalIdByMemberId),
-      [],
-    );
-  });
-
-  it('산하 센터장 부족 시 사업본부장 강등', () => {
-    const treeRows: OrgTreeRow[] = [
-      { id: HEAD, name: 'Head', rank: '사업본부장', parent_id: null, depth: 0 },
-      { id: C1, name: 'C1', rank: '센터장', parent_id: HEAD, depth: 1 },
-      { id: C2, name: 'C2', rank: '센터장', parent_id: HEAD, depth: 1 },
-      { id: C4, name: 'C4', rank: '리더', parent_id: HEAD, depth: 1 },
-    ];
-    const rankById = ranks([
-      [HEAD, '사업본부장'],
-      [C1, '센터장'],
-      [C2, '센터장'],
-      [C4, '리더'],
-    ]);
-
-    assert.deepEqual(computeDivisionHeadDemotionMemberIds(treeRows, rankById), [HEAD]);
-  });
-
-  it('산하 센터장 3명 이상이면 사업본부장 유지(강등 없음)', () => {
-    const treeRows: OrgTreeRow[] = [
-      { id: HEAD, name: 'Head', rank: '사업본부장', parent_id: null, depth: 0 },
-      { id: C1, name: 'C1', rank: '센터장', parent_id: HEAD, depth: 1 },
-      { id: C2, name: 'C2', rank: '센터장', parent_id: HEAD, depth: 1 },
-      { id: C3, name: 'C3', rank: '센터장', parent_id: HEAD, depth: 1 },
-    ];
-    const rankById = ranks([
-      [HEAD, '사업본부장'],
-      [C1, '센터장'],
-      [C2, '센터장'],
-      [C3, '센터장'],
-    ]);
-
-    assert.deepEqual(computeDivisionHeadDemotionMemberIds(treeRows, rankById), []);
+    const julyContract = {
+      id: 'ty117',
+      join_date: '2026-07-13',
+      happy_call_at: '2026-07-15',
+      created_at: '2026-07-13T12:00:00Z',
+    };
+    assert.equal(isContractAtOrAfterDivisionHeadPostRate(julyContract, dhTh), false);
   });
 });

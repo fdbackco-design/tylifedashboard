@@ -31,6 +31,7 @@ import {
   mergeCenterChiefPromotionEventThresholds,
   type CenterChiefPromotionEventRecord,
 } from '@/lib/settlement/center-chief-promotion';
+import { computeDivisionHeadPromotionThresholds } from '@/lib/settlement/division-head-promotion';
 import type { Contract, OrganizationMember, SettlementRule } from '@/lib/types';
 import type { RankType } from '@/lib/types/organization';
 import type { GroupBonusContractInput } from '@/lib/settlement/group-bonus';
@@ -756,6 +757,13 @@ export async function calculateMonthlySettlement(params: {
     thresholdContractMetaById,
   );
 
+  const divisionHeadThresholdByMemberId = computeDivisionHeadPromotionThresholds(
+    treeRows,
+    rankByIdForCenterChief,
+    centerChiefThresholdByMemberId,
+    externalIdByMemberId,
+  );
+
   const parentByChildForCc = new Map<string, string | null>();
   for (const e of edgesRaw) parentByChildForCc.set(e.child_id, e.parent_id ?? null);
 
@@ -961,6 +969,7 @@ export async function calculateMonthlySettlement(params: {
     groupBonusContracts,
     incentiveAmountOverrideByMemberId,
     centerChiefThresholdByMemberId,
+    divisionHeadThresholdByMemberId,
     preIssuedCodeSettingsByMemberId: preIssuedSettingsByMemberId,
   };
 
