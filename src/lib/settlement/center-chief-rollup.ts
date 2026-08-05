@@ -3,6 +3,7 @@ import type { RollupContractItem } from '@/lib/types/settlement';
 import type { PromotionOrderContractRef } from '@/lib/settlement/leader-promotion';
 import {
   centerChiefPostRollupStartsYmd,
+  displayCenterChiefPromotionConfirmedYmd,
   splitContractUnitsByCenterChiefThreshold,
   type CenterChiefPromotionThreshold,
 } from '@/lib/settlement/center-chief-promotion';
@@ -75,7 +76,9 @@ export function buildDivisionHeadRollupAuditFields(params: {
 } {
   const hcYmd = contractJoinOrderYmd(params.contract);
   const segment = divisionHeadRollupSegmentLabel(params.phase, params.nodeRank);
-  const confirmed = params.threshold?.threshold_join_date ?? null;
+  const confirmed = displayCenterChiefPromotionConfirmedYmd(
+    params.threshold?.threshold_join_date ?? null,
+  );
 
   return {
     contract_join_date: String(params.contract.join_date ?? '').slice(0, 10) || undefined,
@@ -148,7 +151,9 @@ export function buildCenterChiefRollupAuditFields(params: {
 > {
   const hcYmd = contractJoinOrderYmd(params.contract);
   const segment = centerChiefRollupSegmentLabel(params.phase, params.nodeRank);
-  const confirmed = params.threshold?.threshold_join_date ?? null;
+  const confirmed = displayCenterChiefPromotionConfirmedYmd(
+    params.threshold?.threshold_join_date ?? null,
+  );
   const rateStarts = confirmed ? centerChiefPostRollupStartsYmd(params.threshold!) : null;
 
   return {

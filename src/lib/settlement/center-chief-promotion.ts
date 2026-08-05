@@ -12,6 +12,25 @@ import {
   type SalesMemberPromotionThreshold,
 } from '@/lib/settlement/leader-promotion';
 
+/**
+ * 5번째 리더의 승급일·effective_at이 없을 때 쓰는 정렬/계산용 sentinel.
+ * 의미: 기록 전 이미 센터장 → 전 계약 post. UI에는 노출하지 않는다.
+ */
+export const CENTER_CHIEF_THRESHOLD_UNKNOWN_DATE = '9999-12-31';
+
+export function isCenterChiefThresholdUnknownDate(ymd: string | null | undefined): boolean {
+  return String(ymd ?? '').slice(0, 10) === CENTER_CHIEF_THRESHOLD_UNKNOWN_DATE;
+}
+
+/** 감사·UI용 승급 확정일. sentinel이면 null */
+export function displayCenterChiefPromotionConfirmedYmd(
+  ymd: string | null | undefined,
+): string | null {
+  const s = String(ymd ?? '').slice(0, 10);
+  if (!s || isCenterChiefThresholdUnknownDate(s)) return null;
+  return s;
+}
+
 /** 센터장 달성 경계: 산하 5번째 리더 승격 시점 */
 export type CenterChiefPromotionThreshold = {
   /** 산하 5번째로 달성한 리더 멤버 id */
@@ -86,7 +105,7 @@ function leaderPromotionSortKey(
     };
   }
   return {
-    date: '9999-12-31',
+    date: CENTER_CHIEF_THRESHOLD_UNKNOWN_DATE,
     invoice_registered_at: null,
     created_at: null,
     contractId: '',
@@ -181,7 +200,7 @@ export function isContractAtOrAfterCenterChiefPostRollup(
   threshold: CenterChiefPromotionThreshold | null,
 ): boolean {
   if (!threshold) return false;
-  if (String(threshold.threshold_join_date).slice(0, 10) === '9999-12-31') return true;
+  if (isCenterChiefThresholdUnknownDate(threshold.threshold_join_date)) return true;
   return compareContractToCenterChiefThreshold(contract, threshold) > 0;
 }
 
@@ -202,7 +221,7 @@ export function splitContractUnitsByCenterChiefThreshold(
   if (!threshold || total === 0) {
     return { preCenterChiefUnits: total, postCenterChiefUnits: 0 };
   }
-  if (String(threshold.threshold_join_date).slice(0, 10) === '9999-12-31') {
+  if (isCenterChiefThresholdUnknownDate(threshold.threshold_join_date)) {
     return { preCenterChiefUnits: 0, postCenterChiefUnits: total };
   }
   if (compareContractToCenterChiefThreshold(contract, threshold) > 0) {
@@ -269,7 +288,7 @@ export function computeCenterChiefThresholdForMember(
 
   return {
     threshold_leader_member_id: fifthLeaderId,
-    threshold_join_date: '9999-12-31',
+    threshold_join_date: CENTER_CHIEF_THRESHOLD_UNKNOWN_DATE,
     threshold_contract_id: null,
   };
 }
@@ -304,6 +323,8 @@ export function computeCenterChiefPromotionThresholds(
 
 /**
  * `center_chief_promotion_events`에 기록된 5번째 리더·승격일을 threshold 맵 SSOT로 덮어쓴다.
+ * - 이벤트에 sentinel(9999)/계약 누락이 있으면 해당 리더의 리더 승급 threshold로 보정한다.
+ * - 보정 후에도 sentinel이면 이벤트를 무시하고 live compute 값을 유지한다.
  */
 export function mergeCenterChiefPromotionEventThresholds(
   centerChiefThresholdByMemberId: Map<string, CenterChiefPromotionThreshold | null>,
@@ -323,20 +344,48 @@ export function mergeCenterChiefPromotionEventThresholds(
       created_at?: string | null;
     }
   >,
+  leaderPromotionThresholdByMemberId?: ReadonlyMap<string, SalesMemberPromotionThreshold | null>,
 ): void {
   for (const r of events) {
     if (!r?.member_id || !r.threshold_leader_member_id || !r.threshold_join_date) continue;
+    const memberId = String(r.member_id);
     const leaderId = String(r.threshold_leader_member_id);
-    const cid = r.threshold_contract_id ? String(r.threshold_contract_id) : null;
+    let cid = r.threshold_contract_id ? String(r.threshold_contract_id) : null;
+    let joinDate = String(r.threshold_join_date).slice(0, 10);
+    let invoiceAt: string | null = null;
+    let createdAt: string | null = r.created_at ?? null;
+
+    const needsLeaderFallback = !cid || isCenterChiefThresholdUnknownDate(joinDate);
+    if (needsLeaderFallback) {
+      const leaderTh = leaderPromotionThresholdByMemberId?.get(leaderId) ?? null;
+      if (leaderTh) {
+        if (!cid && leaderTh.threshold_contract_id) {
+          cid = String(leaderTh.threshold_contract_id);
+        }
+        if (isCenterChiefThresholdUnknownDate(joinDate)) {
+          joinDate = String(leaderTh.threshold_join_date).slice(0, 10);
+        }
+        invoiceAt = leaderTh.threshold_invoice_registered_at ?? invoiceAt;
+        createdAt = leaderTh.threshold_created_at ?? createdAt;
+      }
+    }
+
     const meta = cid ? thresholdContractMetaById.get(cid) : undefined;
-    centerChiefThresholdByMemberId.set(String(r.member_id), {
+    if (meta) {
+      joinDate = contractJoinOrderYmd(meta);
+      invoiceAt = meta.invoice_registered_at ?? invoiceAt;
+      createdAt = meta.created_at ?? createdAt;
+    }
+
+    // 여전히 sentinel이면 잘못된 이벤트(예: 승급일 없는 멤버를 5번째로 기록) → live 유지
+    if (isCenterChiefThresholdUnknownDate(joinDate)) continue;
+
+    centerChiefThresholdByMemberId.set(memberId, {
       threshold_leader_member_id: leaderId,
-      threshold_join_date: meta
-        ? contractJoinOrderYmd(meta)
-        : String(r.threshold_join_date).slice(0, 10),
+      threshold_join_date: joinDate,
       threshold_contract_id: cid,
-      threshold_invoice_registered_at: meta?.invoice_registered_at ?? null,
-      threshold_created_at: meta?.created_at ?? (r.created_at ?? null),
+      threshold_invoice_registered_at: invoiceAt,
+      threshold_created_at: createdAt,
     });
   }
 }

@@ -7,7 +7,9 @@ import {
   compareSubtreeLeaderPromotionOrder,
   centerChiefPostRollupStartsYmd,
   isContractAtOrAfterCenterChiefPostRollup,
+  mergeCenterChiefPromotionEventThresholds,
   splitContractUnitsByCenterChiefThreshold,
+  CENTER_CHIEF_THRESHOLD_UNKNOWN_DATE,
   type CenterChiefPromotionThreshold,
 } from './center-chief-promotion';
 import type { SalesMemberPromotionThreshold } from './leader-promotion';
@@ -159,5 +161,66 @@ describe('center chief promotion', () => {
       preCenterChiefUnits: 0,
       postCenterChiefUnits: 1,
     });
+  });
+});
+
+describe('mergeCenterChiefPromotionEventThresholds', () => {
+  it('이벤트 sentinel/계약 누락 시 5번째 리더 승급 threshold로 보정', () => {
+    const map = new Map<string, CenterChiefPromotionThreshold | null>();
+    const leaderTh: SalesMemberPromotionThreshold = {
+      threshold_contract_id: 'c-leader5',
+      threshold_join_date: '2026-07-28',
+      threshold_created_at: '2026-07-28T10:00:00Z',
+    };
+    mergeCenterChiefPromotionEventThresholds(
+      map,
+      [
+        {
+          member_id: CENTER,
+          threshold_leader_member_id: L5,
+          threshold_join_date: CENTER_CHIEF_THRESHOLD_UNKNOWN_DATE,
+          threshold_contract_id: null,
+        },
+      ],
+      new Map([
+        [
+          'c-leader5',
+          {
+            join_date: '2026-07-20',
+            happy_call_at: '2026-07-28T01:00:00Z',
+            created_at: '2026-07-28T10:00:00Z',
+          },
+        ],
+      ]),
+      new Map([[L5, leaderTh]]),
+    );
+    const th = map.get(CENTER);
+    assert.ok(th);
+    assert.equal(th!.threshold_leader_member_id, L5);
+    assert.equal(th!.threshold_contract_id, 'c-leader5');
+    assert.equal(th!.threshold_join_date, '2026-07-28');
+  });
+
+  it('보정 불가 sentinel 이벤트는 live compute를 덮어쓰지 않는다', () => {
+    const live: CenterChiefPromotionThreshold = {
+      threshold_leader_member_id: L5,
+      threshold_join_date: '2026-07-27',
+      threshold_contract_id: 'c-live',
+    };
+    const map = new Map<string, CenterChiefPromotionThreshold | null>([[CENTER, live]]);
+    mergeCenterChiefPromotionEventThresholds(
+      map,
+      [
+        {
+          member_id: CENTER,
+          threshold_leader_member_id: L6,
+          threshold_join_date: CENTER_CHIEF_THRESHOLD_UNKNOWN_DATE,
+          threshold_contract_id: null,
+        },
+      ],
+      new Map(),
+      new Map(),
+    );
+    assert.deepEqual(map.get(CENTER), live);
   });
 });

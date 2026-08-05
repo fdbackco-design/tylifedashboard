@@ -10,6 +10,7 @@ import {
   getHappycallWindowForYearMonth,
   happycallYmdSeoul,
 } from '@/lib/settlement/settlement-eligibility-v2';
+import { displayCenterChiefPromotionConfirmedYmd } from '@/lib/settlement/center-chief-promotion';
 
 const MEMBER_PAGE_CONTRACT_SELECT =
   'id, contract_code, join_date, status, unit_count, item_name, product_type, source_snapshot_json, sales_member_id, settlement_sales_member_id, customer_id, sales_link_status, is_cancelled, rental_request_no, invoice_no, invoice_registered_at, settlement_deferred, deferred_to_month, memo, happy_call_at, happycall_result, customers(name)';
@@ -877,7 +878,9 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                                   : '-'}
                             </td>
                             <td className="px-3 py-2 tabular-nums text-xs whitespace-nowrap">
-                              {r.center_chief_promotion_confirmed_ymd ?? '-'}
+                              {displayCenterChiefPromotionConfirmedYmd(
+                                r.center_chief_promotion_confirmed_ymd,
+                              ) ?? '-'}
                             </td>
                             <td className="px-3 py-2 text-xs whitespace-nowrap">
                               {r.upper_rank_applied ?? '-'}
