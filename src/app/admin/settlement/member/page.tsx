@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { getSettlementWindowDisplayForYearMonth } from '@/lib/settlement/settlement-window';
+import { getContractDisplayProductName } from '@/lib/utils/contract-display-product';
 import { getContractDisplayStatus } from '@/lib/utils/contract-display-status';
 import { isOrgDisplayHiddenMemberName } from '@/lib/organization/org-display-hidden';
 import {
@@ -299,11 +300,25 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         origin,
         customer_name: ((c.customers as any)?.name as string | undefined) ?? '-',
         item_name: (c.item_name as string | null | undefined) ?? null,
+        product_type: getContractDisplayProductName({
+          product_type: (c.product_type as string | null | undefined) ?? null,
+          item_name: (c.item_name as string | null | undefined) ?? null,
+          source_snapshot_json: (c.source_snapshot_json ?? null) as Record<
+            string,
+            string | null
+          > | null,
+        }),
         display_status: getContractDisplayStatus({
           status: String(c.status ?? ''),
           rental_request_no: (c.rental_request_no ?? null) as string | null,
           invoice_no: (c.invoice_no ?? null) as string | null,
           memo: (c.memo ?? null) as string | null,
+          product_type: (c.product_type as string | null | undefined) ?? null,
+          item_name: (c.item_name as string | null | undefined) ?? null,
+          source_snapshot_json: (c.source_snapshot_json ?? null) as Record<
+            string,
+            string | null
+          > | null,
         }),
         raw_sales_member_id: rawSales,
         effective_settlement_member_id,
@@ -331,6 +346,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         // 표시값은 첫 항목 기준(동일 키 그룹 내에는 보통 동일하나, 다를 수 있어도 UI 요구는 구좌 묶기)
         display_status: string;
         item_name: string | null;
+        product_type: string | null;
         unit_count: number;
         origin: string;
         raw_sales_member_id: string;
@@ -350,6 +366,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
           hc_ymd: r.hc_ymd,
           display_status: r.display_status,
           item_name: r.item_name,
+          product_type: r.product_type,
           unit_count: Number(r.unit_count ?? 0),
           origin: r.origin,
           raw_sales_member_id: r.raw_sales_member_id,
@@ -362,6 +379,9 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
       existing.unit_count += Number(r.unit_count ?? 0);
       // item_name이 비어있던 케이스만 보강
       if (!existing.item_name && r.item_name) existing.item_name = r.item_name;
+      if ((!existing.product_type || existing.product_type === '-') && r.product_type) {
+        existing.product_type = r.product_type;
+      }
     }
 
     return [...m.values()].sort((a, b) => (b.sort_key ?? '').localeCompare(a.sort_key ?? ''));
@@ -392,6 +412,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     join_ymd: string;
     hc_ymd: string;
     item_name: string | null;
+    product_type: string | null;
     display_status: string;
   };
   const rollupContractMetaById = new Map<string, RollupContractMeta>();
@@ -399,7 +420,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     const { data: metaRows } = await db
       .from('contracts')
       .select(
-        'id, status, join_date, happy_call_at, item_name, rental_request_no, invoice_no, memo, customers(name)',
+        'id, status, join_date, happy_call_at, item_name, product_type, source_snapshot_json, rental_request_no, invoice_no, memo, customers(name)',
       )
       .in('id', rollupContractIds);
     for (const c of (metaRows ?? []) as any[]) {
@@ -408,11 +429,25 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         join_ymd: String(c.join_date ?? '').slice(0, 10),
         hc_ymd: happycallYmdSeoul(c.happy_call_at),
         item_name: (c.item_name as string | null | undefined) ?? null,
+        product_type: getContractDisplayProductName({
+          product_type: (c.product_type as string | null | undefined) ?? null,
+          item_name: (c.item_name as string | null | undefined) ?? null,
+          source_snapshot_json: (c.source_snapshot_json ?? null) as Record<
+            string,
+            string | null
+          > | null,
+        }),
         display_status: getContractDisplayStatus({
           status: String(c.status ?? ''),
           rental_request_no: (c.rental_request_no ?? null) as string | null,
           invoice_no: (c.invoice_no ?? null) as string | null,
           memo: (c.memo ?? null) as string | null,
+          product_type: (c.product_type as string | null | undefined) ?? null,
+          item_name: (c.item_name as string | null | undefined) ?? null,
+          source_snapshot_json: (c.source_snapshot_json ?? null) as Record<
+            string,
+            string | null
+          > | null,
         }),
       });
     }
@@ -458,6 +493,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     join_ymd: string;
     hc_ymd: string;
     item_name: string | null;
+    product_type: string | null;
     display_status: string;
     from_member_id: string;
     from_member_name: string;
@@ -481,12 +517,14 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     const join_ymd = meta?.join_ymd ?? '';
     const hc_ymd = meta?.hc_ymd ?? '';
     const item_name = meta?.item_name ?? null;
+    const product_type = meta?.product_type ?? null;
     const display_status = meta?.display_status ?? '-';
     const key = [
       customer_name,
       hc_ymd,
       join_ymd,
       item_name ?? '',
+      product_type ?? '',
       display_status,
       r.from_member_id,
     ].join('||');
@@ -507,6 +545,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         join_ymd,
         hc_ymd,
         item_name,
+        product_type,
         display_status,
         from_member_id: r.from_member_id,
         from_member_name: fromName,
@@ -529,6 +568,9 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     existing.unit_count += units;
     existing.subtotal += sub;
     if (!existing.item_name && item_name) existing.item_name = item_name;
+    if ((!existing.product_type || existing.product_type === '-') && product_type) {
+      existing.product_type = product_type;
+    }
   }
   const groupedRollupRows = [...groupedRollupMap.values()].sort((a, b) => {
     if (a.sort_join_ymd !== b.sort_join_ymd) return b.sort_join_ymd.localeCompare(a.sort_join_ymd);
@@ -766,23 +808,23 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    {[
-                      '계약코드',
-                      '고객명',
-                      '해피콜 일시',
-                      '가입일',
-                      '상품명',
-                      '계약 상태',
-                      '산하 멤버',
-                      '산하 직급',
-                      '실제 계약 담당자',
-                      ...(showCenterChiefRollupAudit
-                        ? ['수당 구간', '승급 확정일', '상위 직급', '상위 단가', '하위 단가', '조직 경로']
-                        : []),
-                      '구좌',
-                      '구좌당 롤업',
-                      '롤업 소계',
-                    ].map((h) => (
+                      {[
+                        '계약코드',
+                        '고객명',
+                        '해피콜 일시',
+                        '가입일',
+                        '물품명 / 상품명',
+                        '계약 상태',
+                        '산하 멤버',
+                        '산하 직급',
+                        '실제 계약 담당자',
+                        ...(showCenterChiefRollupAudit
+                          ? ['수당 구간', '승급 확정일', '상위 직급', '상위 단가', '하위 단가', '조직 경로']
+                          : []),
+                        '구좌',
+                        '구좌당 롤업',
+                        '롤업 소계',
+                      ].map((h) => (
                       <th
                         key={h}
                         className="px-3 py-2 text-left text-xs font-semibold text-gray-600 whitespace-nowrap"
@@ -807,8 +849,13 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                         <td className="px-3 py-2 tabular-nums text-gray-600 whitespace-nowrap">
                           {r.join_ymd || '-'}
                         </td>
-                        <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">
-                          {r.item_name ?? '-'}
+                        <td className="px-3 py-2 text-xs text-gray-700">
+                          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                            <span className="whitespace-nowrap">{r.item_name?.trim() ? r.item_name : '-'}</span>
+                            {r.product_type && r.product_type !== '-' && (
+                              <span className="whitespace-nowrap text-gray-500">{r.product_type}</span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-3 py-2 text-xs whitespace-nowrap">{r.display_status}</td>
                         <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">
@@ -984,7 +1031,7 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                         '고객명',
                         '해피콜 일시',
                         '가입일',
-                        '물품명',
+                        '물품명 / 상품명',
                         '표시상태',
                         '구좌',
                         '귀속(산하)',
@@ -1087,7 +1134,16 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                             {r.join_ymd}
                           </td>
                           <td className="px-2 sm:px-3 py-2 text-gray-700 leading-snug">
-                            <span className="line-clamp-2 break-words">{r.item_name ?? '-'}</span>
+                            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                              <span className="line-clamp-2 break-words">
+                                {r.item_name?.trim() ? r.item_name : '-'}
+                              </span>
+                              {r.product_type && r.product_type !== '-' && (
+                                <span className="shrink-0 whitespace-nowrap text-gray-500">
+                                  {r.product_type}
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-2 sm:px-3 py-2 whitespace-nowrap">{r.display_status}</td>
                           <td className="px-2 sm:px-3 py-2 tabular-nums text-right whitespace-nowrap">

@@ -26,6 +26,17 @@ describe('product commission kind', () => {
   it('갤럭시케어 등은 미적용', () => {
     assert.equal(resolveProductCommissionKind({ item_name: '에코백스', product_type: 'TY갤럭시케어' }), null);
   });
+
+  it('TY케어플랜은 수당 0원 상품군', () => {
+    assert.equal(resolveProductCommissionKind({ product_type: 'TY케어플랜' }), 'care_plan_zero');
+    assert.equal(
+      resolveProductCommissionKind({
+        product_type: '일반',
+        source_snapshot_json: { 상품명: 'TY케어플랜' },
+      }),
+      'care_plan_zero',
+    );
+  });
 });
 
 describe('product commission rates by rank', () => {
@@ -43,6 +54,14 @@ describe('product commission rates by rank', () => {
     assert.equal(productCommissionPerUnitForRank('리더', ref), 350_000);
     assert.equal(productCommissionPerUnitForRank('센터장', ref), 420_000);
     assert.equal(productCommissionPerUnitForRank('사업본부장', ref), 450_000);
+  });
+
+  it('TY케어플랜: 전 직급 0원', () => {
+    const ref = { product_type: 'TY케어플랜' };
+    assert.equal(productCommissionPerUnitForRank('영업사원', ref), 0);
+    assert.equal(productCommissionPerUnitForRank('리더', ref), 0);
+    assert.equal(productCommissionPerUnitForRank('센터장', ref), 0);
+    assert.equal(productCommissionPerUnitForRank('사업본부장', ref), 0);
   });
 
   it('미해당 상품은 null', () => {
