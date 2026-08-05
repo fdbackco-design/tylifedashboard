@@ -8,7 +8,14 @@ import {
   isContractAtOrAfterCenterChiefPostRollup,
   type CenterChiefPromotionThreshold,
 } from './center-chief-promotion';
-import { getRollupAmountPerUnit } from './calculator';
+import {
+  buildOrgTree,
+  calculateMemberSettlement,
+  getRollupAmountPerUnit,
+} from './calculator';
+import type { Contract } from '@/lib/types';
+import type { SettlementRule } from '@/lib/types/settlement';
+import type { OrgTreeRow } from '@/lib/types';
 
 const th: CenterChiefPromotionThreshold = {
   threshold_leader_member_id: 'leader-5',
@@ -17,20 +24,38 @@ const th: CenterChiefPromotionThreshold = {
 };
 
 describe('center chief rollup', () => {
-  it('승급 확정일 당일까지 LEADER_BEFORE_CENTER, 다음날부터 CENTER_AFTER', () => {
+  it('승급 계약 자체는 pre, 다음 계약부터 CENTER_AFTER', () => {
+    const thWithMeta: CenterChiefPromotionThreshold = {
+      ...th,
+      threshold_invoice_registered_at: '2026-06-20T10:00:00Z',
+      threshold_created_at: '2026-06-20T10:00:01Z',
+    };
     assert.equal(
       splitCenterChiefRollupUnits(
-        { id: 'a', join_date: '2026-06-20', happy_call_at: '2026-06-20', unit_count: 1 },
+        {
+          id: 'c-l5',
+          join_date: '2026-06-20',
+          happy_call_at: '2026-06-20',
+          invoice_registered_at: '2026-06-20T10:00:00Z',
+          created_at: '2026-06-20T10:00:01Z',
+          unit_count: 1,
+        },
         '센터장',
-        th,
+        thWithMeta,
       ).preCenterChiefUnits,
       1,
     );
     assert.equal(
       splitCenterChiefRollupUnits(
-        { id: 'b', join_date: '2026-06-21', happy_call_at: '2026-06-21', unit_count: 2 },
+        {
+          id: 'after',
+          join_date: '2026-06-20',
+          happy_call_at: '2026-06-20',
+          created_at: '2026-06-20T11:00:00Z',
+          unit_count: 2,
+        },
         '센터장',
-        th,
+        thWithMeta,
       ).postCenterChiefUnits,
       2,
     );
@@ -60,13 +85,14 @@ describe('center chief rollup', () => {
 });
 
 describe('center chief direct commission boundary', () => {
-  it('승급 확정일 다음날 전 계약은 리더 단가 구간, 이후는 센터장 단가 구간', () => {
+  it('승급 계약 이전이면 리더 단가, 다음 계약부터 센터장 단가', () => {
     const ccTh: CenterChiefPromotionThreshold = {
       threshold_leader_member_id: 'leader-5',
       threshold_join_date: '2026-07-27',
       threshold_contract_id: 'c-l5',
+      threshold_invoice_registered_at: '2026-07-27T10:00:00Z',
+      threshold_created_at: '2026-07-27T10:00:01Z',
     };
-    // 박성현 TY073/074: 해피콜 7/20 → 승급(7/27) 전 → 리더 단가
     assert.equal(
       isContractAtOrAfterCenterChiefPostRollup(
         { id: 'ty073', join_date: '2026-07-17', happy_call_at: '2026-07-20' },
@@ -74,13 +100,114 @@ describe('center chief direct commission boundary', () => {
       ),
       false,
     );
-    // 승급 다음날(7/28)부터 센터장 단가
     assert.equal(
       isContractAtOrAfterCenterChiefPostRollup(
-        { id: 'after', join_date: '2026-07-28', happy_call_at: '2026-07-28' },
+        {
+          id: 'c-l5',
+          join_date: '2026-07-27',
+          happy_call_at: '2026-07-27',
+          invoice_registered_at: '2026-07-27T10:00:00Z',
+          created_at: '2026-07-27T10:00:01Z',
+        },
+        ccTh,
+      ),
+      false,
+    );
+    assert.equal(
+      isContractAtOrAfterCenterChiefPostRollup(
+        {
+          id: 'after',
+          join_date: '2026-07-27',
+          happy_call_at: '2026-07-27',
+          created_at: '2026-07-27T11:00:00Z',
+        },
         ccTh,
       ),
       true,
     );
+  });
+});
+
+describe('center chief rollup after subordinate leader promotion', () => {
+  function rule(rank: SettlementRule['rank'], commission_per_unit: number): SettlementRule {
+    return {
+      id: `r-${rank}`,
+      rank,
+      base_amount_per_unit: 0,
+      commission_per_unit,
+      incentive_unit_threshold: null,
+      incentive_amount: null,
+      effective_from: '2020-01-01',
+      effective_until: null,
+      note: null,
+      created_at: '2020-01-01T00:00:00.000Z',
+    };
+  }
+
+  const rules: SettlementRule[] = [
+    rule('영업사원', 300_000),
+    rule('리더', 400_000),
+    rule('센터장', 500_000),
+  ];
+
+  it('산하 리더 승급 이후에도 센터장 승급 다음 계약은 센터장 차액 롤업', () => {
+    const centerId = 'center';
+    const leaderId = 'leader-child';
+    const salesId = 'sales';
+    const rows: OrgTreeRow[] = [
+      { id: centerId, name: '센터장', rank: '센터장', parent_id: null, depth: 0 },
+      { id: leaderId, name: '리더', rank: '리더', parent_id: centerId, depth: 1 },
+      { id: salesId, name: '영업', rank: '영업사원', parent_id: leaderId, depth: 2 },
+    ];
+    const tree = buildOrgTree(rows);
+    const centerNode = tree.find((n) => n.id === centerId)!;
+
+    const postContract = {
+      id: 'c-post',
+      contract_code: 'TY-POST',
+      join_date: '2026-07-29',
+      happy_call_at: '2026-07-28',
+      unit_count: 1,
+      sales_member_id: salesId,
+      status: '가입',
+      is_cancelled: false,
+    } as Contract;
+
+    // 산하 리더 walk: 해당 계약은 리더 승급 이후 → pre=0 (기존 상위 리더라면 제외될 계약)
+    const leaderWalk = new Map([
+      [postContract.id, { prePromotionUnits: 0, postPromotionUnits: 1 }],
+    ]);
+    const promotionUnitSplitByMemberId = new Map([[leaderId, leaderWalk]]);
+
+    const ccTh: CenterChiefPromotionThreshold = {
+      threshold_leader_member_id: 'l5',
+      threshold_join_date: '2026-07-27',
+      threshold_contract_id: 'c-l5',
+    };
+
+    const settle = calculateMemberSettlement(
+      { id: centerId, name: '센터장', rank: '센터장' },
+      [],
+      centerNode,
+      new Map([[salesId, [postContract]]]),
+      rules,
+      '2026-07',
+      {
+        treeRows: rows,
+        promotionThresholdByMemberId: new Map(),
+        joinOnlyAttributed: [],
+        settlementEndDate: '2026-07-25',
+        promotionUnitSplitByMemberId,
+        centerChiefThresholdByMemberId: new Map([[centerId, ccTh]]),
+      },
+    );
+
+    const hit = (settle.calculation_detail.rollup_contract_items ?? []).find(
+      (r) => r.contract_code === 'TY-POST',
+    );
+    assert.ok(hit, '센터장 승급 이후 산하 계약이 롤업에 포함되어야 함');
+    assert.equal(hit.rollup_amount_per_unit, 100_000); // 50만 − 직속 리더 40만
+    assert.equal(hit.center_chief_rollup_segment, 'CENTER_AFTER_PROMOTION');
+    assert.equal(hit.included_reason, 'center_chief_post_threshold');
   });
 });

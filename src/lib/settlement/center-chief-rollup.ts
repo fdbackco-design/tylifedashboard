@@ -3,6 +3,7 @@ import type { RollupContractItem } from '@/lib/types/settlement';
 import type { PromotionOrderContractRef } from '@/lib/settlement/leader-promotion';
 import {
   centerChiefPostRollupStartsYmd,
+  splitContractUnitsByCenterChiefThreshold,
   type CenterChiefPromotionThreshold,
 } from '@/lib/settlement/center-chief-promotion';
 import { contractJoinOrderYmd } from '@/lib/settlement/leader-promotion';
@@ -18,7 +19,7 @@ export type CenterChiefRollupUnitSplit = {
 /**
  * 센터장(DB) 기준 계약별 롤업 구간 분할.
  * - threshold 없음(5명 미달 등): 전량 LEADER_BEFORE_CENTER
- * - threshold 있음: 해피콜 완료일 다음날부터 CENTER_AFTER_PROMOTION
+ * - threshold 있음: 승급 계약 다음 계약부터 CENTER_AFTER_PROMOTION (리더 승급과 동일)
  */
 export function splitCenterChiefRollupUnits(
   contract: PromotionOrderContractRef & { unit_count: number },
@@ -29,15 +30,7 @@ export function splitCenterChiefRollupUnits(
   if (nodeRank !== '센터장' || total === 0) {
     return { preCenterChiefUnits: total, postCenterChiefUnits: 0 };
   }
-  if (!threshold) {
-    return { preCenterChiefUnits: total, postCenterChiefUnits: 0 };
-  }
-  const orderYmd = contractJoinOrderYmd(contract);
-  const postStarts = centerChiefPostRollupStartsYmd(threshold);
-  if (orderYmd >= postStarts) {
-    return { preCenterChiefUnits: 0, postCenterChiefUnits: total };
-  }
-  return { preCenterChiefUnits: total, postCenterChiefUnits: 0 };
+  return splitContractUnitsByCenterChiefThreshold(contract, threshold);
 }
 
 export function centerChiefRollupSegmentLabel(

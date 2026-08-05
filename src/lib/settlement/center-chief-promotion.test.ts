@@ -98,7 +98,7 @@ describe('center chief promotion', () => {
     assert.equal(th.threshold_contract_id, 'c-l5');
   });
 
-  it('승급 계약 해피콜 다음날부터 postCenterChiefUnits (당일은 pre)', () => {
+  it('승급 계약 자체는 pre, 그 다음 계약부터 post (리더와 동일)', () => {
     const ccTh: CenterChiefPromotionThreshold = {
       threshold_leader_member_id: L5,
       threshold_join_date: '2026-06-20',
@@ -107,7 +107,7 @@ describe('center chief promotion', () => {
       threshold_created_at: '2026-06-20T10:00:01Z',
     };
 
-    assert.equal(centerChiefPostRollupStartsYmd(ccTh), '2026-06-21');
+    assert.equal(centerChiefPostRollupStartsYmd(ccTh), '2026-06-20');
 
     const before = {
       id: 'before',
@@ -123,6 +123,14 @@ describe('center chief promotion', () => {
       created_at: '2026-06-20T10:00:01Z',
       unit_count: 1,
     };
+    const sameDayAfter = {
+      id: 'same-day-after',
+      join_date: '2026-06-20',
+      happy_call_at: '2026-06-20',
+      // 동일 해피콜일: created_at이 승급 계약보다 뒤면 post
+      created_at: '2026-06-20T11:00:01Z',
+      unit_count: 1,
+    };
     const onNextDay = {
       id: 'next-day',
       join_date: '2026-06-21',
@@ -132,6 +140,7 @@ describe('center chief promotion', () => {
 
     assert.equal(isContractAtOrAfterCenterChiefPostRollup(before, ccTh), false);
     assert.equal(isContractAtOrAfterCenterChiefPostRollup(onThreshold, ccTh), false);
+    assert.equal(isContractAtOrAfterCenterChiefPostRollup(sameDayAfter, ccTh), true);
     assert.equal(isContractAtOrAfterCenterChiefPostRollup(onNextDay, ccTh), true);
 
     assert.deepEqual(splitContractUnitsByCenterChiefThreshold(before, ccTh), {
@@ -141,6 +150,10 @@ describe('center chief promotion', () => {
     assert.deepEqual(splitContractUnitsByCenterChiefThreshold(onThreshold, ccTh), {
       preCenterChiefUnits: 1,
       postCenterChiefUnits: 0,
+    });
+    assert.deepEqual(splitContractUnitsByCenterChiefThreshold(sameDayAfter, ccTh), {
+      preCenterChiefUnits: 0,
+      postCenterChiefUnits: 1,
     });
     assert.deepEqual(splitContractUnitsByCenterChiefThreshold(onNextDay, ccTh), {
       preCenterChiefUnits: 0,
