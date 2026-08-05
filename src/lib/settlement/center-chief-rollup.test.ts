@@ -4,7 +4,10 @@ import {
   splitCenterChiefRollupUnits,
   centerChiefRollupSegmentLabel,
 } from './center-chief-rollup';
-import type { CenterChiefPromotionThreshold } from './center-chief-promotion';
+import {
+  isContractAtOrAfterCenterChiefPostRollup,
+  type CenterChiefPromotionThreshold,
+} from './center-chief-promotion';
 import { getRollupAmountPerUnit } from './calculator';
 
 const th: CenterChiefPromotionThreshold = {
@@ -53,5 +56,31 @@ describe('center chief rollup', () => {
     assert.equal(getRollupAmountPerUnit('리더', '영업사원', rules, d), leaderRate - salesRate);
     // 승급 전 구간은 센터장도 리더 상한 − 하위와 동일 차액
     assert.equal(leaderRate - salesRate, 100_000);
+  });
+});
+
+describe('center chief direct commission boundary', () => {
+  it('승급 확정일 다음날 전 계약은 리더 단가 구간, 이후는 센터장 단가 구간', () => {
+    const ccTh: CenterChiefPromotionThreshold = {
+      threshold_leader_member_id: 'leader-5',
+      threshold_join_date: '2026-07-27',
+      threshold_contract_id: 'c-l5',
+    };
+    // 박성현 TY073/074: 해피콜 7/20 → 승급(7/27) 전 → 리더 단가
+    assert.equal(
+      isContractAtOrAfterCenterChiefPostRollup(
+        { id: 'ty073', join_date: '2026-07-17', happy_call_at: '2026-07-20' },
+        ccTh,
+      ),
+      false,
+    );
+    // 승급 다음날(7/28)부터 센터장 단가
+    assert.equal(
+      isContractAtOrAfterCenterChiefPostRollup(
+        { id: 'after', join_date: '2026-07-28', happy_call_at: '2026-07-28' },
+        ccTh,
+      ),
+      true,
+    );
   });
 });
