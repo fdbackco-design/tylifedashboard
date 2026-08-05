@@ -93,6 +93,12 @@ export interface RollupContractItem {
   center_chief_rate_starts_ymd?: string | null;
   /** LEADER_BEFORE_CENTER | CENTER_AFTER_PROMOTION */
   center_chief_rollup_segment?: 'LEADER_BEFORE_CENTER' | 'CENTER_AFTER_PROMOTION';
+  /** 사업본부장 승급 확정일 = 3번째 센터장 승급 순서일 */
+  division_head_promotion_confirmed_ymd?: string | null;
+  /** 사업본부장 단가 적용 시작 순서일(표시용) */
+  division_head_rate_starts_ymd?: string | null;
+  /** CENTER_BEFORE_DIVISION | DIVISION_AFTER_PROMOTION */
+  division_head_rollup_segment?: 'CENTER_BEFORE_DIVISION' | 'DIVISION_AFTER_PROMOTION';
   /** 롤업 상위에 적용한 직급 (승급 전 구간은 리더) */
   upper_rank_applied?: RankType;
   /** 상위 직급 직접계약 단가 */
