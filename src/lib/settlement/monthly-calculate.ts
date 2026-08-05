@@ -262,9 +262,15 @@ export async function calculateMonthlySettlement(params: {
     happy_call_at: (r.happy_call_at ?? null) as string | null,
     created_at: (r.created_at ?? null) as string | null,
     invoice_registered_at: (r.invoice_registered_at ?? null) as string | null,
+    // 상품별 수당 단가(케어플랜 0원 등) 판정에 필요
+    product_type: (r.product_type ?? null) as string | null,
+    item_name: (r.item_name ?? null) as string | null,
+    source_snapshot_json: (r.source_snapshot_json ?? null) as Record<string, string | null> | null,
   }));
 
   const itemNameByContractId = new Map<string, string | null>();
+  const productTypeByContractId = new Map<string, string | null>();
+  const sourceSnapshotByContractId = new Map<string, Record<string, string | null> | null>();
   const createdAtByContractId = new Map<string, string | null>();
   const customerIdByContractId = new Map<string, string | null>();
   // 그룹 보너스 해피콜 조건(happy_call_at <= 2026-06-12, result in {성공,완료,계약변경}) 판정용
@@ -276,6 +282,11 @@ export async function calculateMonthlySettlement(params: {
     if (!r?.id) continue;
     const id = String(r.id);
     itemNameByContractId.set(id, (r.item_name ?? null) as string | null);
+    productTypeByContractId.set(id, (r.product_type ?? null) as string | null);
+    sourceSnapshotByContractId.set(
+      id,
+      (r.source_snapshot_json ?? null) as Record<string, string | null> | null,
+    );
     createdAtByContractId.set(id, (r.created_at ?? null) as string | null);
     invoiceRegisteredAtByContractId.set(id, (r.invoice_registered_at ?? null) as string | null);
     customerIdByContractId.set(id, (r.customer_id ?? null) as string | null);
@@ -419,10 +430,20 @@ export async function calculateMonthlySettlement(params: {
 
   // 월정산 직접 계약 귀속은 v_contract_settlement_base의 sales_member_id(effective)와 동일하게 둔다.
   const normalizedContracts = normalizedContractsBase.map((c) => {
-    const item_name = itemNameByContractId.get(c.id) ?? null;
+    const item_name = itemNameByContractId.get(c.id) ?? c.item_name ?? null;
+    const product_type = productTypeByContractId.get(c.id) ?? c.product_type ?? null;
+    const source_snapshot_json =
+      sourceSnapshotByContractId.get(c.id) ?? c.source_snapshot_json ?? null;
     const created_at = createdAtByContractId.get(c.id) ?? null;
     const invoice_registered_at = invoiceRegisteredAtByContractId.get(c.id) ?? null;
-    return { ...c, item_name, created_at, invoice_registered_at };
+    return {
+      ...c,
+      item_name,
+      product_type,
+      source_snapshot_json,
+      created_at,
+      invoice_registered_at,
+    };
   });
 
   // 리더 승격(20구좌) walk: 가입 인정 계약만 누적.

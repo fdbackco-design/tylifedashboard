@@ -180,7 +180,9 @@ export function normalizeContractFromList(
   const happycallResultFinal = happycallResultFromSheet !== ''
     ? happycallResultFromSheet
     : (happycallSplit.tail || null);
-  const productType = normalizeProductType(item.product_type_raw ?? '');
+  const productType = normalizeProductType(
+    item.product_type_raw || item._snapshot?.['상품명'] || '',
+  );
 
   return {
     contract_code: item.contract_code,
