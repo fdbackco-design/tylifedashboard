@@ -1673,26 +1673,31 @@ export function buildPromotionUnitSplitByMemberId(
 }
 
 /**
- * 누적 walk 맵 기준 구좌 분할. walk에 없는 계약은 가입 누적 미포함 → 전량 승격 전(30만).
+ * 누적 walk 맵 기준 구좌 분할.
+ * - walk에 있으면 walk split SSOT.
+ * - walk에 없어도 승급 threshold가 있으면 순서일(해피콜 우선) 기준으로 분할.
+ *   (고객노드 재매핑으로 walk 귀속이 다른 멤버로 간 직접매출 계약 등)
+ * - threshold도 없으면 전량 승격 전(30만).
  */
 export function resolvePromotionUnitSplit(
   contract: PromotionOrderContractRef & { unit_count: number },
   walkSplitByContractId?: Map<string, PromotionUnitSplit> | null,
+  threshold?: SalesMemberPromotionThreshold | null,
 ): PromotionUnitSplit {
   const total = Math.max(0, contract.unit_count ?? 0);
   if (total === 0) {
     return { prePromotionUnits: 0, postPromotionUnits: 0 };
   }
-  if (!walkSplitByContractId) {
-    return { prePromotionUnits: total, postPromotionUnits: 0 };
-  }
-  const fromWalk = walkSplitByContractId.get(contract.id);
+  const fromWalk = walkSplitByContractId?.get(contract.id);
   if (fromWalk) {
     if (fromWalk.prePromotionUnits + fromWalk.postPromotionUnits === total) {
       return fromWalk;
     }
     const pre = Math.min(total, Math.max(0, fromWalk.prePromotionUnits));
     return { prePromotionUnits: pre, postPromotionUnits: total - pre };
+  }
+  if (threshold) {
+    return splitContractUnitsByPromotionThreshold(contract, threshold);
   }
   return { prePromotionUnits: total, postPromotionUnits: 0 };
 }
@@ -1702,8 +1707,38 @@ export function promotionCommissionSplitForNonWalkContract(params: {
   contractId: string;
   contractCode: string;
   unitCount: number;
+  /** walk 밖이지만 승급 threshold로 단가를 판정한 경우 */
+  threshold?: SalesMemberPromotionThreshold | null;
+  contract?: PromotionOrderContractRef;
 }): PromotionCommissionSplit {
   const units = Math.max(0, params.unitCount);
+  if (params.threshold && params.contract) {
+    const split = splitContractUnitsByPromotionThreshold(
+      { ...params.contract, unit_count: units },
+      params.threshold,
+    );
+    const promotionReason = promotionReasonFromThresholdSplit(
+      params.contractId,
+      split,
+      params.threshold,
+    );
+    const commissionPerUnit: 300_000 | 400_000 =
+      split.postPromotionUnits > 0 && split.prePromotionUnits === 0
+        ? PROMOTION_LEADER_COMMISSION_PER_UNIT
+        : PROMOTION_SALES_COMMISSION_PER_UNIT;
+    return {
+      contractId: params.contractId,
+      contractCode: params.contractCode,
+      unitCount: units,
+      cumulativeUnitsBefore: 0,
+      cumulativeUnitsAfter: 0,
+      isPromotionContract: promotionReason === 'PROMOTION_CONTRACT',
+      commissionPerUnit,
+      promotionReason,
+      prePromotionUnits: split.prePromotionUnits,
+      postPromotionUnits: split.postPromotionUnits,
+    };
+  }
   return {
     contractId: params.contractId,
     contractCode: params.contractCode,
