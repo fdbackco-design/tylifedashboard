@@ -8,6 +8,7 @@ import { buildOrgStructuralTreeContext } from '@/lib/organization/org-structural
 import {
   computeLeaderPromotionThresholds,
   collectLeaderPromotionApplyCandidates,
+  collectLeaderPromotionDemotionMemberIds,
   mergeLeaderPromotionEventThresholds,
   refreshPromotionThresholdsFromJoinAttributed,
   isPromotionAccumulationJoinContractRow,
@@ -497,6 +498,35 @@ export async function calculateMonthlySettlement(params: {
         previous_parent_id: (r.previous_parent_id ?? null) as string | null,
         created_at: (r.created_at ?? null) as string | null,
       });
+    }
+  }
+
+  // 정책 승급 보정: 이벤트는 있으나 현재 인정 walk 미달이면 강등·이벤트 삭제
+  const leaderDemoteIds = collectLeaderPromotionDemotionMemberIds({
+    treeRows,
+    joinAttributed,
+    promotionEventMemberIds: policyPromotedLeaderIds,
+    members: (membersRaw as OrganizationMember[]).map((m) => ({
+      id: m.id,
+      rank: m.rank as RankType,
+      external_id: m.external_id ?? null,
+    })),
+  });
+  if (leaderDemoteIds.length > 0) {
+    await db
+      .from('organization_members')
+      .update({ rank: '영업사원' })
+      .in('id', leaderDemoteIds)
+      .eq('rank', '리더');
+    await db.from('leader_promotion_events').delete().in('member_id', leaderDemoteIds);
+    for (const mid of leaderDemoteIds) {
+      policyPromotedLeaderIds.delete(mid);
+      promotionEventsByMemberId.delete(mid);
+      prevParentByMemberId.delete(mid);
+      prevLeaderByPromotedMemberId.delete(mid);
+      leaderMaintBlockByMemberId.delete(mid);
+      const m = (membersRaw as OrganizationMember[]).find((x) => x.id === mid);
+      if (m) m.rank = '영업사원';
     }
   }
 

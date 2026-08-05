@@ -3,6 +3,7 @@ import { describe, it } from 'vitest';
 import type { OrgTreeRow } from '@/lib/types';
 import {
   buildPromotionCommissionWalkForMember,
+  collectLeaderPromotionDemotionMemberIds,
   comparePromotionAccumulationRows,
   explainPromotionAccumulationExclusion,
   isPromotionAccumulationJoinContractRow,
@@ -185,5 +186,31 @@ describe('leader promotion commission (walk SSOT)', () => {
     assert.equal(splitByContractId.get('after')?.prePromotionUnits, 0);
     assert.equal(splitByContractId.get('after')?.postPromotionUnits, 1);
     assert.equal(audit.find((a) => a.contractId === 'after')?.commissionPerUnit, 400_000);
+  });
+});
+
+describe('collectLeaderPromotionDemotionMemberIds', () => {
+  it('이벤트가 있어도 인정 walk 미달이면 강등 대상', () => {
+    const rows: AttributedJoinContractRow[] = [
+      row('a', 1, { happy_call_at: '2026-07-01' }),
+      row('b', 1, { happy_call_at: '2026-07-02' }),
+    ];
+    const ids = collectLeaderPromotionDemotionMemberIds({
+      treeRows,
+      joinAttributed: rows,
+      promotionEventMemberIds: new Set([MEMBER]),
+      members: [{ id: MEMBER, rank: '리더' }],
+    });
+    assert.deepEqual(ids, [MEMBER]);
+  });
+
+  it('이벤트가 없으면 강등하지 않음', () => {
+    const ids = collectLeaderPromotionDemotionMemberIds({
+      treeRows,
+      joinAttributed: [],
+      promotionEventMemberIds: new Set(),
+      members: [{ id: MEMBER, rank: '리더' }],
+    });
+    assert.deepEqual(ids, []);
   });
 });

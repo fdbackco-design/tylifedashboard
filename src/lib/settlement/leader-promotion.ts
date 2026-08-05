@@ -1847,6 +1847,35 @@ export function collectLeaderPromotionApplyCandidates(params: {
 }
 
 /**
+ * 정책 승급(leader_promotion_events)이 있으나 현재 더블업 인정 walk가 20 미만인 멤버.
+ * (규칙 변경·잘못된 승급 소급 보정용 — 이벤트가 없는 수동 리더는 건드리지 않는다.)
+ */
+export function collectLeaderPromotionDemotionMemberIds(params: {
+  treeRows: OrgTreeRow[];
+  joinAttributed: AttributedJoinContractRow[];
+  promotionEventMemberIds: ReadonlySet<string>;
+  members: ReadonlyArray<{ id: string; rank: RankType; external_id?: string | null }>;
+  minUnits?: number;
+}): string[] {
+  if (params.promotionEventMemberIds.size === 0) return [];
+  const thresholds = computeLeaderPromotionThresholds(
+    params.treeRows,
+    params.joinAttributed,
+    params.members,
+    params.minUnits ?? LEADER_PROMOTION_MIN_UNITS,
+  );
+  const out: string[] = [];
+  for (const m of params.members) {
+    if (!params.promotionEventMemberIds.has(m.id)) continue;
+    if (isCustomerVirtualOrgMember(m.external_id)) continue;
+    if (m.rank !== '영업사원' && m.rank !== '리더') continue;
+    if (thresholds.get(m.id)) continue;
+    out.push(m.id);
+  }
+  return out;
+}
+
+/**
  * 산하(본인 제외)에 rank가 '리더'인 멤버가 CENTER_CHIEF_PROMOTION_MIN_LEADERS 이상이면
  * 해당 멤버(현재 직급이 리더인 경우)를 센터장으로 승격 대상으로 본다.
  *

@@ -49,6 +49,7 @@ import {
 } from '../organization/account-issued-customer-identity';
 import {
   collectLeaderPromotionApplyCandidates,
+  collectLeaderPromotionDemotionMemberIds,
   computeCenterChiefPromotionMemberIds,
   computeCenterChiefDemotionMemberIds,
   computeDivisionHeadPromotionMemberIds,
@@ -2099,14 +2100,61 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
         const parentByChild = new Map<string, string | null>();
         for (const e of edgesRaw) parentByChild.set(e.child_id, e.parent_id ?? null);
 
+        const membersForPromo = membersRaw.map((m) => ({
+          id: m.id as string,
+          rank: m.rank as RankType,
+          external_id: (m as { external_id?: string | null }).external_id ?? null,
+        }));
+
+        // 인정 walk 미달 정책 승급 보정(강등) — 승급 적용보다 먼저 수행해 sync가 잘못 재승급하지 않게 한다.
+        const { data: existingLeaderPromoRows } = await db
+          .from('leader_promotion_events')
+          .select('member_id');
+        const existingLeaderPromoIds = new Set(
+          ((existingLeaderPromoRows ?? []) as Array<{ member_id: string }>).map((r) =>
+            String(r.member_id),
+          ),
+        );
+        const leaderDemoteIds = collectLeaderPromotionDemotionMemberIds({
+          treeRows,
+          joinAttributed,
+          promotionEventMemberIds: existingLeaderPromoIds,
+          members: membersForPromo,
+        });
+        if (leaderDemoteIds.length > 0) {
+          const { error: demoteLeaderErr } = await db
+            .from('organization_members')
+            .update({ rank: '영업사원' })
+            .in('id', leaderDemoteIds)
+            .eq('rank', '리더');
+          if (demoteLeaderErr) {
+            throw new Error(`리더 강등 반영 실패: ${demoteLeaderErr.message}`);
+          }
+          const { error: delPromoErr } = await db
+            .from('leader_promotion_events')
+            .delete()
+            .in('member_id', leaderDemoteIds);
+          if (delPromoErr) {
+            throw new Error(`leader_promotion_events 삭제 실패: ${delPromoErr.message}`);
+          }
+          for (const id of leaderDemoteIds) {
+            rankById.set(id, '영업사원');
+            const m = membersRaw.find((x) => x.id === id);
+            if (m) m.rank = '영업사원';
+          }
+          await log(db, runId, 'info', '리더 강등 반영(인정 walk 미달)', {
+            count: leaderDemoteIds.length,
+            member_ids: leaderDemoteIds,
+          });
+        }
+
         const { rankUpMemberIds, eventRows: leaderPromotionEventRows, thresholds: promotionThresholdByMemberId } =
           collectLeaderPromotionApplyCandidates({
             treeRows,
             joinAttributed,
-            members: membersRaw.map((m) => ({
-              id: m.id as string,
-              rank: m.rank as RankType,
-              external_id: (m as { external_id?: string | null }).external_id ?? null,
+            members: membersForPromo.map((m) => ({
+              ...m,
+              rank: (rankById.get(m.id) ?? m.rank) as RankType,
             })),
             parentByChild,
           });
