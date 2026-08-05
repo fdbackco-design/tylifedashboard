@@ -379,7 +379,7 @@ function commissionPerUnitForDirectContract(
   if (dbRank === '본사') return 0;
   const product = contractProductRef(contract);
 
-  // DB 센터장: 승급 확정일 다음날부터 센터장 단가, 그 전까지는 리더 단가
+  // DB 센터장: 승급 계약 다음 계약부터 센터장 단가, 그 전까지는 리더 단가
   if (dbRank === '센터장') {
     const ccTh = centerChiefThresholdByMemberId?.get(memberId) ?? null;
     if (ccTh && isContractAtOrAfterCenterChiefPostRollup(contract, ccTh)) {
@@ -507,7 +507,7 @@ function calcDirectContractsWithLeaderPromotion(
       }
     }
 
-    // DB 센터장 직접수당: 롤업과 동일하게 승급 확정일 다음날부터 50만, 이전은 리더 40만
+    // DB 센터장 직접수당: 롤업과 동일하게 승급 계약 다음 계약부터 50만, 이전은 리더 40만
     if (dbRank === '센터장') {
       commissionPerUnit = commissionPerUnitForDirectContract(
         rateMemberId,
@@ -667,7 +667,11 @@ function calcRollupItemsWithLeaderPromotion(
     // 월 중 정책 승격:
     // - childThreshold: 자식이 승격한 이후 계약은 부모(node) 롤업에서 제외(기존 상위가 못 받음).
     // - nodeThreshold: node 본인이 승격하기 전 산하 계약은 node 롤업에서 제외(이전 상위 리더 귀속).
+    // - 센터장: 산하 리더 승급 후에도 센터장 차액 롤업을 유지해야 하므로 childWalk 제외를 적용하지 않는다.
+    //   (승급 전 구간은 리더 상한−리더 하한=0이라 직속 리더 라인에는 금액이 안 붙고,
+    //    승급 계약 다음 계약부터 센터장 상한−하위 차액만 잡힌다.)
     const childContractsAllWithOwner = collectSubtreeContractsWithOwner(child, contractsByMember);
+    const applyChildPromotionExclusion = node.rank !== '센터장';
 
     let childUnits = 0;
     let subtotal = 0;
@@ -677,10 +681,10 @@ function calcRollupItemsWithLeaderPromotion(
       const eligibleUnits = rollupEligibleUnitsForParentSubtree(
         { ...ref, unit_count: c.unit_count },
         nodeThreshold,
-        childThreshold,
+        applyChildPromotionExclusion ? childThreshold : null,
         promotionUnitSplitByMemberId,
         node.id,
-        child.id,
+        applyChildPromotionExclusion ? child.id : undefined,
       );
       if (eligibleUnits <= 0) continue;
 

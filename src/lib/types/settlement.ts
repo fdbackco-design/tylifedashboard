@@ -89,7 +89,7 @@ export interface RollupContractItem {
   org_path_label?: string;
   /** 센터장 승급 확정일 = 5번째 리더 승급 계약 해피콜 완료일 */
   center_chief_promotion_confirmed_ymd?: string | null;
-  /** 센터장 차액 롤업 적용 시작일 (확정일 다음날) */
+  /** 센터장 승급 계약 순서일(이 계약 다음부터 차액 롤업 적용) */
   center_chief_rate_starts_ymd?: string | null;
   /** LEADER_BEFORE_CENTER | CENTER_AFTER_PROMOTION */
   center_chief_rollup_segment?: 'LEADER_BEFORE_CENTER' | 'CENTER_AFTER_PROMOTION';

@@ -121,7 +121,7 @@ export function centerChiefThresholdToPromotionRef(
   };
 }
 
-/** 승급 계약(5번째 리더) 해피콜 완료일(YMD) 기준 다음날 — 센터장 20만 롤업 시작일 */
+/** @deprecated 캘린더 다음날 규칙은 폐기. 승급 계약 순서일 표시용으로만 유지. */
 export function addOneCalendarDayYmd(ymd: string): string {
   const parts = ymd.slice(0, 10).split('-').map((x) => Number(x));
   const y = parts[0] ?? 0;
@@ -132,22 +132,55 @@ export function addOneCalendarDayYmd(ymd: string): string {
   return dt.toISOString().slice(0, 10);
 }
 
+/**
+ * 감사·표시용: 센터장 승급 계약(5번째 리더 승급 계약) 순서일.
+ * 실제 post 적용은 이 계약 **다음 계약**부터(리더 승급과 동일).
+ */
 export function centerChiefPostRollupStartsYmd(threshold: CenterChiefPromotionThreshold): string {
-  return addOneCalendarDayYmd(threshold.threshold_join_date);
+  return String(threshold.threshold_join_date).slice(0, 10);
 }
 
 /**
- * 센터장 20만 롤업 적용 구간: 승급 계약 해피콜 완료일 **다음날**부터(포함).
- * 순서일은 contractJoinOrderYmd(해피콜 YMD 우선)와 동일.
+ * 계약 vs 센터장 승급 계약 순서 비교.
+ * - &lt;0: 승급 계약보다 앞 (pre)
+ * - 0: 승급 계약 자체 (pre)
+ * - &gt;0: 승급 계약 다음 (post)
+ *
+ * 순서: 해피콜 YMD → created_at → id.
+ * (invoice_registered_at은 타 멤버 승급계약과 비교 시 sync 배치 시각이 섞여 순서가 뒤집힐 수 있어 쓰지 않는다.)
+ */
+export function compareContractToCenterChiefThreshold(
+  contract: PromotionOrderContractRef,
+  threshold: CenterChiefPromotionThreshold,
+): number {
+  const aj = contractJoinOrderYmd(contract);
+  const tj = String(threshold.threshold_join_date).slice(0, 10);
+  if (aj !== tj) return aj.localeCompare(tj);
+
+  const ca = normalizeCreatedAt(contract.created_at);
+  const cb = normalizeCreatedAt(threshold.threshold_created_at);
+  if (ca !== cb) {
+    if (!ca) return 1;
+    if (!cb) return -1;
+    return ca.localeCompare(cb);
+  }
+
+  const tid = threshold.threshold_contract_id ? String(threshold.threshold_contract_id) : '';
+  if (!tid) return 0;
+  if (contract.id === tid) return 0;
+  return contract.id.localeCompare(tid);
+}
+
+/**
+ * 센터장 단가/20만 롤업 적용 여부.
+ * 리더 승급과 동일: 승급 계약(threshold) 자체는 제외, **그 다음 계약부터** post.
  */
 export function isContractAtOrAfterCenterChiefPostRollup(
-  contract: PromotionOrderContractRef,
+  contract: PromotionOrderContractRef & { unit_count?: number },
   threshold: CenterChiefPromotionThreshold | null,
 ): boolean {
   if (!threshold) return false;
-  const aj = contractJoinOrderYmd(contract);
-  const start = centerChiefPostRollupStartsYmd(threshold);
-  return aj >= start;
+  return compareContractToCenterChiefThreshold(contract, threshold) > 0;
 }
 
 /** @deprecated isContractAtOrAfterCenterChiefPostRollup 사용 */
@@ -158,7 +191,7 @@ export function isContractAtOrAfterCenterChiefThreshold(
   return isContractAtOrAfterCenterChiefPostRollup(contract, threshold);
 }
 
-/** 센터장 승급 전(10만)/이후(20만) 구좌 분할 — 경계는 승급 계약 해피콜 다음날 */
+/** 센터장 승급 전(10만)/이후(20만) 구좌 분할 — 승급 계약 다음 계약부터 post */
 export function splitContractUnitsByCenterChiefThreshold(
   contract: PromotionOrderContractRef & { unit_count: number },
   threshold: CenterChiefPromotionThreshold | null,
@@ -167,7 +200,7 @@ export function splitContractUnitsByCenterChiefThreshold(
   if (!threshold || total === 0) {
     return { preCenterChiefUnits: total, postCenterChiefUnits: 0 };
   }
-  if (isContractAtOrAfterCenterChiefPostRollup(contract, threshold)) {
+  if (compareContractToCenterChiefThreshold(contract, threshold) > 0) {
     return { preCenterChiefUnits: 0, postCenterChiefUnits: total };
   }
   return { preCenterChiefUnits: total, postCenterChiefUnits: 0 };
