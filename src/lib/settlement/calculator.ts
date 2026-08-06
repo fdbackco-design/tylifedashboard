@@ -37,6 +37,7 @@ import {
   calculateDivisionHeadSubtreeBonus,
   subtreeSettlementUnitsForDivisionHeadBonus,
 } from './division-head-bonus';
+import { getSettlementManualAdjustment } from './manual-adjustment';
 import type { PreIssuedCodeMemberSetting } from './pre-issued-code-special';
 import {
   computeNormalUnitPriceForRank,
@@ -1255,8 +1256,12 @@ export function calculateMemberSettlement(
     totalAmount = baseCommission + rollupCommission + bonusAmountCombined;
   }
 
-  // 수동 예외 차감 규칙은 사용하지 않는다.
-  const manualAdjustment = 0;
+  // 수동 가감(환수·예외) — member+월 고정. 재계산에도 유지.
+  const manualAdj = getSettlementManualAdjustment(member.id, yearMonth);
+  const manualAdjustment = manualAdj?.amount_won ?? 0;
+  if (manualAdjustment !== 0) {
+    totalAmount += manualAdjustment;
+  }
   // 가입 구좌가 0이면 합계는 항상 0원으로 고정(음수 방지)
   if (totalUnitCount === 0) totalAmount = 0;
 
@@ -1364,7 +1369,8 @@ export function calculateMemberSettlement(
     division_head_subtree_units_in_month:
       member.rank === '사업본부장' ? divisionHeadSubtreeUnits : undefined,
     manual_adjustment_won: manualAdjustment !== 0 ? manualAdjustment : undefined,
-    manual_adjustment_reason: manualAdjustment !== 0 ? '고객 김동건 정산 예외(-60만원)' : undefined,
+    manual_adjustment_reason:
+      manualAdjustment !== 0 ? (manualAdj?.reason ?? null) : undefined,
   };
 
   return {
