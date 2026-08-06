@@ -65,6 +65,7 @@ import {
   mergeExistingContractFields,
   resolveInternalContractStatus,
   isEligibleForHqCustomerAttribution,
+  isForceCancelledContractCode,
   type ExistingContractMergeSource,
 } from './contract-internal-status';
 import {
@@ -1488,11 +1489,15 @@ async function processItem(
       product_type: contractFinal.product_type,
       item_name: contractFinal.item_name,
       source_snapshot_json: contractFinal.source_snapshot_json ?? null,
+      contractCode: item.contract_code,
     });
     contractFinal = {
       ...contractFinal,
       ty_source_status: tySourceStatus,
       status: internalStatus,
+      ...(isForceCancelledContractCode(item.contract_code)
+        ? { status: '취소' as ContractStatus, is_cancelled: true }
+        : {}),
     };
 
     // TY케어플랜: 가입 인정 시 가입일 = 해피콜 성공일 (송장·렌탈 불필요)
