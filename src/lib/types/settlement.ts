@@ -133,7 +133,7 @@ export interface LeaderPromotionSettlementDetail {
   applied_commission_per_unit: number | null;
   /** DB 규칙 기반 유지 장려금(기존 incentive_amount에 들어가는 부분) */
   rule_incentive_amount: number;
-  /** 리더 유지(당월 25일까지 20구좌 이상) 1회성 장려금 */
+  /** 리더 유지(당월 25일까지 20구좌 이상) 1회성 장려금. 센터장이 센터장 보너스 미달 시 폴백으로도 지급될 수 있다. */
   leader_maintenance_bonus_amount: number;
   leader_maintenance_bonus_eligible: boolean;
   /** 산하 전체 가입 누적 walk 기준 수당 판정 근거 (검증용) */
@@ -171,6 +171,7 @@ export interface SettlementCalculationDetail {
   group_bonus_amount?: number;
   /**
    * 센터장 월정산 보너스(산하 정산 대상 100구좌 이상 시 300만원, 하위 센터장 조직 제외).
+   * 사업본부장이 본부장 보너스(300구좌) 미달 시 폴백으로도 지급될 수 있다.
    * incentive_amount에 합산된다.
    */
   center_chief_subtree_bonus_amount?: number;

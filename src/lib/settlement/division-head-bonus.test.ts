@@ -4,6 +4,7 @@ import type { OrgTreeRow } from '@/lib/types';
 import type { Contract } from '@/lib/types/contract';
 import {
   calculateDivisionHeadSubtreeBonus,
+  divisionHeadSubtreeBonusForUnits,
   divisionHeadSubtreeBonusThreshold,
   subtreeSettlementUnitsForDivisionHeadBonus,
 } from './division-head-bonus';
@@ -45,6 +46,11 @@ describe('division head subtree bonus', () => {
       calculateDivisionHeadSubtreeBonus({ rank: '센터장', subtreeSettlementUnits: 400 }),
       0,
     );
+  });
+
+  it('divisionHeadSubtreeBonusForUnits는 직급 무관 구좌만 판정', () => {
+    assert.equal(divisionHeadSubtreeBonusForUnits(299), 0);
+    assert.equal(divisionHeadSubtreeBonusForUnits(300), 5_000_000);
   });
 
   it('하위 사업본부장 조직은 제외하고 센터장·리더 라인은 포함', () => {

@@ -59,6 +59,17 @@ export function subtreeSettlementUnitsForCenterChiefBonus(params: {
 }
 
 /**
+ * 센터장 월정산 보너스 금액(구좌만 판정).
+ * 직급 폴백(월중 본부장 승급 등)은 호출측에서 담당한다.
+ */
+export function centerChiefSubtreeBonusForUnits(subtreeSettlementUnits: number): number {
+  const cfg = DEFAULT_INCENTIVE_CONFIG.센터장;
+  if (!cfg) return 0;
+  if (subtreeSettlementUnits < cfg.threshold) return 0;
+  return cfg.amount;
+}
+
+/**
  * 센터장 월정산 보너스: 해당 정산월에 산하(하위 센터장 조직 제외) 정산 대상 구좌가
  * 기준 이상이면 지급. (DEFAULT_INCENTIVE_CONFIG.센터장: 100구좌 / 300만원)
  */
@@ -68,10 +79,7 @@ export function calculateCenterChiefSubtreeBonus(params: {
   subtreeSettlementUnits: number;
 }): number {
   if (params.rank !== '센터장') return 0;
-  const cfg = DEFAULT_INCENTIVE_CONFIG.센터장;
-  if (!cfg) return 0;
-  if (params.subtreeSettlementUnits < cfg.threshold) return 0;
-  return cfg.amount;
+  return centerChiefSubtreeBonusForUnits(params.subtreeSettlementUnits);
 }
 
 export function centerChiefSubtreeBonusThreshold(): number {

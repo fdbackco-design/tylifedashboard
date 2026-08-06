@@ -32,7 +32,7 @@ import {
   buildDivisionHeadRollupAuditFields,
   buildLeaderRollupAuditFields,
 } from './center-chief-rollup';
-import { calculateCenterChiefSubtreeBonus, subtreeSettlementUnitsForCenterChiefBonus } from './center-chief-bonus';
+import { calculateCenterChiefSubtreeBonus, centerChiefSubtreeBonusForUnits, subtreeSettlementUnitsForCenterChiefBonus } from './center-chief-bonus';
 import {
   calculateDivisionHeadSubtreeBonus,
   subtreeSettlementUnitsForDivisionHeadBonus,
@@ -1154,9 +1154,10 @@ export function calculateMemberSettlement(
   const subordinateUnitCount = collectSubordinateUnits(orgNode, contractsByMember);
   const directUnitCount = eligible.reduce((s, c) => s + c.unit_count, 0);
   const totalUnitCount = directUnitCount + subordinateUnitCount;
-  /** 센터장 보너스 판정용: 하위 센터장 조직 제외 후 정산월 대상 구좌 합 */
+
+  /** 센터장 보너스 집계(하위 센터장 컷). 센터장·본부장(폴백) 모두 계산 가능 */
   const centerChiefSubtreeUnits =
-    member.rank === '센터장' && leaderOpts
+    leaderOpts && (member.rank === '센터장' || member.rank === '사업본부장')
       ? subtreeSettlementUnitsForCenterChiefBonus({
           memberId: member.id,
           treeRows: leaderOpts.treeRows,
@@ -1164,7 +1165,7 @@ export function calculateMemberSettlement(
         })
       : 0;
 
-  /** 사업본부장 보너스 판정용: 하위 사업본부장 조직 제외 후 정산월 대상 구좌 합 */
+  /** 사업본부장 보너스 집계(하위 본부장 컷) */
   const divisionHeadSubtreeUnits =
     member.rank === '사업본부장' && leaderOpts
       ? subtreeSettlementUnitsForDivisionHeadBonus({
@@ -1179,8 +1180,33 @@ export function calculateMemberSettlement(
   // (필요 시 별도 컬럼/규칙으로 다시 설계)
   const ruleIncentiveAmount = 0;
 
+  // 월중 승급 보너스 폴백:
+  // - 센터장: 100구좌 미달이면 리더 유지장려(20구좌) 기준 지급
+  // - 사업본부장: 300구좌 미달이면 센터장 보너스(100구좌) 기준 지급
+  let divisionHeadSubtreeBonus = 0;
+  let centerChiefSubtreeBonus = 0;
+  if (member.rank === '사업본부장') {
+    divisionHeadSubtreeBonus = calculateDivisionHeadSubtreeBonus({
+      rank: member.rank,
+      subtreeSettlementUnits: divisionHeadSubtreeUnits,
+    });
+    if (divisionHeadSubtreeBonus === 0) {
+      centerChiefSubtreeBonus = centerChiefSubtreeBonusForUnits(centerChiefSubtreeUnits);
+    }
+  } else if (member.rank === '센터장') {
+    centerChiefSubtreeBonus = calculateCenterChiefSubtreeBonus({
+      rank: member.rank,
+      subtreeSettlementUnits: centerChiefSubtreeUnits,
+    });
+  }
+
   let leaderMaintenanceBonus = 0;
-  if (leaderOpts && (member.rank === '영업사원' || member.rank === '리더')) {
+  const mayTakeLeaderMaintenanceFallback =
+    member.rank === '센터장' && centerChiefSubtreeBonus === 0;
+  if (
+    leaderOpts &&
+    (member.rank === '영업사원' || member.rank === '리더' || mayTakeLeaderMaintenanceFallback)
+  ) {
     const th = leaderOpts.promotionThresholdByMemberId.get(member.id) ?? null;
     const { start_date, end_date } = getHappycallWindowForYearMonth(yearMonth);
     // 유지장려금 집계는 "하위 리더 컷" 규칙을 적용한다.
@@ -1196,13 +1222,16 @@ export function calculateMemberSettlement(
 
     // 누적 가입 구좌가 20 이상이면 고정 100만원 1회 지급.
     // (이전 정책의 "20구좌마다 100만원" 누적 산식은 잘못된 구현이었음 — 40구좌라도 100만원 1회)
-    // 정책 승격으로 DB rank가 리더로 올라간 경우에도 유지장려금 판정은 영업사원 기준으로 동작해야 한다.
+    // 정책 승격으로 DB rank가 리더/센터장으로 올라간 경우에도 유지장려금 판정은 영업사원 기준으로 동작해야 한다.
     const eligible = isLeaderMaintenanceBonusEligible({
-      memberDbRank: member.rank === '리더' ? '영업사원' : member.rank,
+      memberDbRank:
+        member.rank === '리더' || member.rank === '센터장' ? '영업사원' : member.rank,
       promotionThreshold: th,
       subtreeJoinUnitsAsOf25: periodUnits,
     });
-    leaderMaintenanceBonus = eligible ? LEADER_MAINTENANCE_BONUS_WON : 0;
+    const alreadyPaid =
+      leaderOpts.leaderMaintenanceBonusAlreadyPaidByMemberId?.get(member.id) === true;
+    leaderMaintenanceBonus = eligible && !alreadyPaid ? LEADER_MAINTENANCE_BONUS_WON : 0;
   }
 
   // 2026-06 한정 그룹 보너스 (2구좌당 5만원, 가입일+고객명+담당사원 그룹화)
@@ -1211,22 +1240,6 @@ export function calculateMemberSettlement(
   let groupBonus = leaderOpts?.groupBonusContracts
     ? calculateGroupBonusForMember(member.id, leaderOpts.groupBonusContracts, yearMonth)
     : 0;
-
-  const centerChiefSubtreeBonus =
-    member.rank === '센터장'
-      ? calculateCenterChiefSubtreeBonus({
-          rank: member.rank,
-          subtreeSettlementUnits: centerChiefSubtreeUnits,
-        })
-      : 0;
-
-  const divisionHeadSubtreeBonus =
-    member.rank === '사업본부장'
-      ? calculateDivisionHeadSubtreeBonus({
-          rank: member.rank,
-          subtreeSettlementUnits: divisionHeadSubtreeUnits,
-        })
-      : 0;
 
   let bonusAmountCombined =
     ruleIncentiveAmount +
@@ -1363,7 +1376,10 @@ export function calculateMemberSettlement(
     group_bonus_amount: groupBonus,
     center_chief_subtree_bonus_amount: centerChiefSubtreeBonus > 0 ? centerChiefSubtreeBonus : undefined,
     center_chief_subtree_units_in_month:
-      member.rank === '센터장' ? centerChiefSubtreeUnits : undefined,
+      member.rank === '센터장' ||
+      (member.rank === '사업본부장' && centerChiefSubtreeBonus > 0)
+        ? centerChiefSubtreeUnits
+        : undefined,
     division_head_subtree_bonus_amount:
       divisionHeadSubtreeBonus > 0 ? divisionHeadSubtreeBonus : undefined,
     division_head_subtree_units_in_month:

@@ -61,6 +61,17 @@ export function subtreeSettlementUnitsForDivisionHeadBonus(params: {
 }
 
 /**
+ * 사업본부장 월정산 보너스 금액(구좌만 판정).
+ * 직급 폴백은 호출측에서 담당한다.
+ */
+export function divisionHeadSubtreeBonusForUnits(subtreeSettlementUnits: number): number {
+  const cfg = DEFAULT_INCENTIVE_CONFIG.사업본부장;
+  if (!cfg) return 0;
+  if (subtreeSettlementUnits < cfg.threshold) return 0;
+  return cfg.amount;
+}
+
+/**
  * 사업본부장 월정산 보너스: 해당 정산월에 산하(하위 사업본부장 조직 제외) 정산 대상 구좌가
  * 기준 이상이면 지급. (DEFAULT_INCENTIVE_CONFIG.사업본부장: 300구좌 / 500만원)
  */
@@ -70,10 +81,7 @@ export function calculateDivisionHeadSubtreeBonus(params: {
   subtreeSettlementUnits: number;
 }): number {
   if (params.rank !== '사업본부장') return 0;
-  const cfg = DEFAULT_INCENTIVE_CONFIG.사업본부장;
-  if (!cfg) return 0;
-  if (params.subtreeSettlementUnits < cfg.threshold) return 0;
-  return cfg.amount;
+  return divisionHeadSubtreeBonusForUnits(params.subtreeSettlementUnits);
 }
 
 export function divisionHeadSubtreeBonusThreshold(): number {
