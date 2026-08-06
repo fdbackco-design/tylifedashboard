@@ -19,6 +19,23 @@ import {
 import { SETTLEMENT_VALID_HAPPYCALL_RESULTS } from '../settlement/settlement-eligibility-v2';
 import { DEFAULT_ITEM_NAME_PLACEHOLDER } from './normalize';
 
+/**
+ * 운영에서 강제 취소 고정한 계약 코드.
+ * TY 원본이 가입/준비여도 sync·정산에서 취소로 유지한다.
+ * (수동 취소 후 sync가 다시 가입으로 되돌린 케이스 방어)
+ */
+export const FORCE_CANCELLED_CONTRACT_CODES: ReadonlySet<string> = new Set([
+  'TY12820260716',
+  'TY12720260716',
+  'TY05120260718',
+  'TY05020260718',
+]);
+
+export function isForceCancelledContractCode(contractCode: string | null | undefined): boolean {
+  const code = String(contractCode ?? '').trim();
+  return code.length > 0 && FORCE_CANCELLED_CONTRACT_CODES.has(code);
+}
+
 const TY_SIMPLE_PROGRESS_STATUSES: ReadonlySet<ContractStatus> = new Set([
   '준비',
   '대기',
@@ -114,7 +131,12 @@ export function resolveInternalContractStatus(params: {
   product_type?: string | null;
   item_name?: string | null;
   source_snapshot_json?: Record<string, string | null> | null;
+  contractCode?: string | null;
 }): ContractStatus {
+  if (isForceCancelledContractCode(params.contractCode)) {
+    return '취소';
+  }
+
   const tyTerminal = isTyTerminalClose({
     tySourceStatus: params.tySourceStatus,
     isCancelled: params.isCancelled,
