@@ -15,12 +15,20 @@ const LEADER = 'leader-c';
 const SALES = 'sales-d';
 const OTHER_HEAD = 'head-e';
 
-function contract(id: string, memberId: string, units: number): Contract {
+function contract(
+  id: string,
+  memberId: string,
+  units: number,
+  happyCallYmd = '2026-07-01',
+): Contract {
   return {
     id,
     contract_code: id,
     unit_count: units,
     sales_member_id: memberId,
+    join_date: happyCallYmd,
+    happy_call_at: `${happyCallYmd}T03:00:00Z`,
+    created_at: `${happyCallYmd}T04:00:00Z`,
   } as Contract;
 }
 
@@ -80,5 +88,41 @@ describe('division head subtree bonus', () => {
       calculateDivisionHeadSubtreeBonus({ rank: '사업본부장', subtreeSettlementUnits: units }),
       5_000_000,
     );
+  });
+
+  it('하위 센터장→본부장 승급 확정 계약까지는 상위 본부장 보너스에 포함', () => {
+    const treeRows: OrgTreeRow[] = [
+      { id: HEAD, name: 'H', rank: '사업본부장', parent_id: null, depth: 0 },
+      { id: OTHER_HEAD, name: 'OH', rank: '사업본부장', parent_id: HEAD, depth: 1 },
+      { id: SALES, name: 'S', rank: '영업사원', parent_id: OTHER_HEAD, depth: 2 },
+    ];
+    const contractsByMember = new Map<string, Contract[]>([
+      [HEAD, [contract('h1', HEAD, 50, '2026-07-01')]],
+      [OTHER_HEAD, [
+        contract('oh-pre', OTHER_HEAD, 40, '2026-07-05'),
+        contract('oh-th', OTHER_HEAD, 10, '2026-07-12'),
+        contract('oh-post', OTHER_HEAD, 200, '2026-07-25'),
+      ]],
+      [SALES, [contract('s-post', SALES, 80, '2026-07-26')]],
+    ]);
+
+    const units = subtreeSettlementUnitsForDivisionHeadBonus({
+      memberId: HEAD,
+      treeRows,
+      contractsByMember,
+      divisionHeadThresholdByMemberId: new Map([
+        [
+          OTHER_HEAD,
+          {
+            threshold_center_chief_member_id: 'third-cc',
+            threshold_join_date: '2026-07-12',
+            threshold_contract_id: 'oh-th',
+            threshold_created_at: '2026-07-12T04:00:00Z',
+          },
+        ],
+      ]),
+    });
+    // H(50) + OH 승급 전(40) + 승급 확정(10) = 100. 승급 후 제외
+    assert.equal(units, 100);
   });
 });
