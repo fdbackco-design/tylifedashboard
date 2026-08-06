@@ -1327,7 +1327,7 @@ async function processItem(
     const { data: existingContract } = await db
       .from('contracts')
       .select(
-        'id, status, ty_source_status, unit_count, invoice_no, rental_request_no, item_name, happycall_result, happy_call_at, performance_path_json, settlement_deferred, deferred_reason, sales_member_id, sales_link_status',
+        'id, status, ty_source_status, unit_count, invoice_no, rental_request_no, item_name, happycall_result, happy_call_at, performance_path_json, settlement_deferred, deferred_reason, sales_member_id, sales_link_status, is_cancelled',
       )
       .eq('contract_code', item.contract_code)
       .maybeSingle();
@@ -1346,6 +1346,7 @@ async function processItem(
       deferred_reason: string | null;
       sales_member_id: string | null;
       sales_link_status: string | null;
+      is_cancelled: boolean | null;
     } | null;
     const existingPathStamped = ec != null && ec.performance_path_json != null;
     const ecTySource = (ec?.ty_source_status ?? ec?.status ?? null) as string | null;
@@ -1471,6 +1472,7 @@ async function processItem(
           item_name: ec.item_name,
           happycall_result: ec.happycall_result,
           happy_call_at: ec.happy_call_at,
+          is_cancelled: ec.is_cancelled,
         }
       : null;
     contractFinal = mergeExistingContractFields(contractFinal, ecMergeSource);
