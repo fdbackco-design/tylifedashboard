@@ -4,6 +4,7 @@ import type { OrgTreeRow } from '@/lib/types';
 import type { Contract } from '@/lib/types/contract';
 import {
   calculateCenterChiefSubtreeBonus,
+  centerChiefSubtreeBonusForUnits,
   centerChiefSubtreeBonusThreshold,
   subtreeSettlementUnitsForCenterChiefBonus,
 } from './center-chief-bonus';
@@ -44,6 +45,11 @@ describe('center chief subtree bonus', () => {
       calculateCenterChiefSubtreeBonus({ rank: '리더', subtreeSettlementUnits: 200 }),
       0,
     );
+  });
+
+  it('centerChiefSubtreeBonusForUnits는 직급 무관 구좌만 판정 (월중 본부장 승급 폴백용)', () => {
+    assert.equal(centerChiefSubtreeBonusForUnits(99), 0);
+    assert.equal(centerChiefSubtreeBonusForUnits(100), 3_000_000);
   });
 
   it('하위 센터장 조직은 집계에서 제외 (리더 유지장려금의 하위 리더 컷과 대칭)', () => {
