@@ -29,6 +29,8 @@ export const FORCE_CANCELLED_CONTRACT_CODES: ReadonlySet<string> = new Set([
   'TY12720260716',
   'TY05120260718',
   'TY05020260718',
+  'TY01020260719',
+  'TY00920260719',
 ]);
 
 export function isForceCancelledContractCode(contractCode: string | null | undefined): boolean {
