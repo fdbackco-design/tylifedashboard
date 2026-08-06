@@ -30,6 +30,7 @@ import {
   buildCenterChiefRollupAuditFields,
   splitDivisionHeadRollupUnits,
   buildDivisionHeadRollupAuditFields,
+  buildLeaderRollupAuditFields,
 } from './center-chief-rollup';
 import { calculateCenterChiefSubtreeBonus, subtreeSettlementUnitsForCenterChiefBonus } from './center-chief-bonus';
 import {
@@ -841,7 +842,11 @@ function calcRollupItemsWithLeaderPromotion(
             ? '리더'
             : node.rank === '사업본부장' && phase === 'pre'
               ? '센터장'
-              : node.rank;
+              : node.rank === '리더' || node.rank === '영업사원'
+                ? phase === 'pre'
+                  ? '영업사원'
+                  : '리더'
+                : node.rank;
         const upperDirect =
           node.rank === '센터장' && phase === 'pre'
             ? leaderUpper
@@ -891,7 +896,20 @@ function calcRollupItemsWithLeaderPromotion(
                   upperDirectCommissionPerUnit: upperDirect,
                   lowerDirectCommissionPerUnit: lower,
                 })
-              : {}),
+              : node.rank === '리더' || node.rank === '영업사원'
+                ? buildLeaderRollupAuditFields({
+                    contract: { ...cref, join_date: c.join_date },
+                    nodeName: node.name,
+                    nodeRank: node.rank,
+                    childName: child.name,
+                    ownerName,
+                    threshold: nodeThreshold,
+                    phase: phase === 'pre' ? 'pre' : 'post',
+                    upperRankApplied,
+                    upperDirectCommissionPerUnit: upperDirect,
+                    lowerDirectCommissionPerUnit: lower,
+                  })
+                : {}),
         });
       };
 
@@ -1000,6 +1018,20 @@ function calcRollupItemsWithLeaderPromotion(
             rollup_amount_per_unit: diff,
             subtotal: sub,
             included_reason: 'previous_leader_pre_promotion',
+            ...(node.rank === '리더' || node.rank === '영업사원'
+              ? buildLeaderRollupAuditFields({
+                  contract: { ...contractPromotionRef(c), join_date: c.join_date },
+                  nodeName: node.name,
+                  nodeRank: node.rank,
+                  childName: '(승격자)',
+                  ownerName,
+                  threshold: nodeThreshold,
+                  phase: 'post',
+                  upperRankApplied: node.rank === '리더' ? '리더' : node.rank,
+                  upperDirectCommissionPerUnit: upper,
+                  lowerDirectCommissionPerUnit: lower,
+                })
+              : {}),
           });
         }
       }

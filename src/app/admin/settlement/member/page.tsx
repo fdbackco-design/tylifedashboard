@@ -403,7 +403,11 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
   const showDivisionHeadRollupAudit =
     String(member.rank ?? '') === '사업본부장' ||
     rollupContractItemsRaw.some((r) => r.division_head_rollup_segment);
-  const showRollupAuditColumns = showCenterChiefRollupAudit || showDivisionHeadRollupAudit;
+  const showLeaderRollupAudit =
+    String(member.rank ?? '') === '리더' ||
+    rollupContractItemsRaw.some((r) => r.leader_rollup_segment);
+  const showRollupAuditColumns =
+    showCenterChiefRollupAudit || showDivisionHeadRollupAudit || showLeaderRollupAudit;
   const rollupItems: RollupItem[] = Array.isArray(calcDetail?.rollup_items)
     ? (calcDetail!.rollup_items as RollupItem[])
     : [];
@@ -512,6 +516,8 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
     center_chief_promotion_confirmed_ymd?: string | null;
     division_head_rollup_segment?: RollupContractItem['division_head_rollup_segment'];
     division_head_promotion_confirmed_ymd?: string | null;
+    leader_rollup_segment?: RollupContractItem['leader_rollup_segment'];
+    leader_promotion_confirmed_ymd?: string | null;
     upper_rank_applied?: RankType;
     upper_direct_commission_per_unit?: number;
     lower_direct_commission_per_unit?: number;
@@ -566,6 +572,8 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
         center_chief_promotion_confirmed_ymd: r.center_chief_promotion_confirmed_ymd,
         division_head_rollup_segment: r.division_head_rollup_segment,
         division_head_promotion_confirmed_ymd: r.division_head_promotion_confirmed_ymd,
+        leader_rollup_segment: r.leader_rollup_segment,
+        leader_promotion_confirmed_ymd: r.leader_promotion_confirmed_ymd,
         upper_rank_applied: r.upper_rank_applied,
         upper_direct_commission_per_unit: r.upper_direct_commission_per_unit,
         lower_direct_commission_per_unit: r.lower_direct_commission_per_unit,
@@ -880,17 +888,20 @@ export default async function SettlementMemberSubtreePage({ searchParams }: Page
                           <>
                             <td className="px-3 py-2 text-xs whitespace-nowrap">
                               {r.division_head_rollup_segment === 'DIVISION_AFTER_PROMOTION' ||
-                              r.center_chief_rollup_segment === 'CENTER_AFTER_PROMOTION'
+                              r.center_chief_rollup_segment === 'CENTER_AFTER_PROMOTION' ||
+                              r.leader_rollup_segment === 'LEADER_AFTER_PROMOTION'
                                 ? '승급 후'
                                 : r.division_head_rollup_segment === 'CENTER_BEFORE_DIVISION' ||
-                                    r.center_chief_rollup_segment === 'LEADER_BEFORE_CENTER'
+                                    r.center_chief_rollup_segment === 'LEADER_BEFORE_CENTER' ||
+                                    r.leader_rollup_segment === 'SALES_BEFORE_LEADER'
                                   ? '승급 전/대기'
                                   : '-'}
                             </td>
                             <td className="px-3 py-2 tabular-nums text-xs whitespace-nowrap">
                               {displayCenterChiefPromotionConfirmedYmd(
                                 r.division_head_promotion_confirmed_ymd ??
-                                  r.center_chief_promotion_confirmed_ymd,
+                                  r.center_chief_promotion_confirmed_ymd ??
+                                  r.leader_promotion_confirmed_ymd,
                               ) ?? '-'}
                             </td>
                             <td className="px-3 py-2 text-xs whitespace-nowrap">

@@ -39,6 +39,7 @@ export type ExistingContractMergeSource = {
   item_name: string | null;
   happycall_result: string | null;
   happy_call_at?: string | null;
+  is_cancelled?: boolean | null;
 };
 
 export function isTySimpleProgressStatus(status: ContractStatus): boolean {
@@ -114,18 +115,26 @@ export function resolveInternalContractStatus(params: {
   item_name?: string | null;
   source_snapshot_json?: Record<string, string | null> | null;
 }): ContractStatus {
-  if (
-    isTyTerminalClose({
-      tySourceStatus: params.tySourceStatus,
-      isCancelled: params.isCancelled,
-      tyStatusRaw: params.tyStatusRaw,
-    })
-  ) {
+  const tyTerminal = isTyTerminalClose({
+    tySourceStatus: params.tySourceStatus,
+    isCancelled: params.isCancelled,
+    tyStatusRaw: params.tyStatusRaw,
+  });
+
+  if (tyTerminal) {
     return resolveTerminalInternalStatus({
       tySourceStatus: params.tySourceStatus,
       isCancelled: params.isCancelled,
       tyStatusRaw: params.tyStatusRaw,
     });
+  }
+
+  // 수동 취소/해약 보존: TY 원본이 종료가 아니어도 DB에 이미 취소·해약이면 유지
+  if (
+    params.existingInternalStatus === '취소' ||
+    params.existingInternalStatus === '해약'
+  ) {
+    return params.existingInternalStatus;
   }
 
   if (
@@ -180,6 +189,11 @@ export function mergeExistingContractFields(
     existing.item_name !== DEFAULT_ITEM_NAME_PLACEHOLDER
   ) {
     merged = { ...merged, item_name: existing.item_name ?? undefined };
+  }
+
+  // 수동 취소 보존: DB is_cancelled=true 인데 TY 리스트가 아직 취소를 안 주면 유지
+  if (existing.is_cancelled === true && !merged.is_cancelled) {
+    merged = { ...merged, is_cancelled: true };
   }
 
   return merged;
