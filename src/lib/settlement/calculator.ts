@@ -1162,6 +1162,7 @@ export function calculateMemberSettlement(
           memberId: member.id,
           treeRows: leaderOpts.treeRows,
           contractsByMember,
+          centerChiefThresholdByMemberId: leaderOpts.centerChiefThresholdByMemberId,
         })
       : 0;
 
@@ -1172,6 +1173,7 @@ export function calculateMemberSettlement(
           memberId: member.id,
           treeRows: leaderOpts.treeRows,
           contractsByMember,
+          divisionHeadThresholdByMemberId: leaderOpts.divisionHeadThresholdByMemberId,
         })
       : 0;
 

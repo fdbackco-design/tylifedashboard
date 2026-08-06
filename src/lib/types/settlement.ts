@@ -171,6 +171,7 @@ export interface SettlementCalculationDetail {
   group_bonus_amount?: number;
   /**
    * 센터장 월정산 보너스(산하 정산 대상 100구좌 이상 시 300만원, 하위 센터장 조직 제외).
+   * 하위 리더→센터장 승급 확정 계약까지의 구좌는 포함한다.
    * 사업본부장이 본부장 보너스(300구좌) 미달 시 폴백으로도 지급될 수 있다.
    * incentive_amount에 합산된다.
    */
@@ -179,6 +180,7 @@ export interface SettlementCalculationDetail {
   center_chief_subtree_units_in_month?: number;
   /**
    * 사업본부장 월정산 보너스(산하 정산 대상 300구좌 이상 시 500만원, 하위 사업본부장 조직 제외).
+   * 하위 센터장→본부장 승급 확정 계약까지의 구좌는 포함한다.
    * incentive_amount에 합산된다.
    */
   division_head_subtree_bonus_amount?: number;
