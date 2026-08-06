@@ -1211,6 +1211,7 @@ export function calculateMemberSettlement(
     const { start_date, end_date } = getHappycallWindowForYearMonth(yearMonth);
     // 유지장려금 집계는 "하위 리더 컷" 규칙을 적용한다.
     // - 자식 노드 중 리더 이상이면 그 노드와 그 후손을 제외 → 해당 리더 본인의 유지장려금 계산에만 잡힘.
+    // - 예외: 하위 영업사원→리더 승급 확정 계약까지의 구좌는 상위 리더 유지장려에 포함.
     // - 롤업수당 계산(`calcRollupItemsWithLeaderPromotion`)은 별도 함수이고 영향 없음.
     const periodUnits = subtreeJoinUnitsForLeaderMaintenanceInWindow({
       memberId: member.id,
@@ -1218,6 +1219,8 @@ export function calculateMemberSettlement(
       joinContractsAttributed: leaderOpts.joinOnlyAttributed,
       startInclusive: start_date,
       endInclusive: end_date,
+      promotionThresholdByMemberId: leaderOpts.promotionThresholdByMemberId,
+      promotionUnitSplitByMemberId: leaderOpts.promotionUnitSplitByMemberId,
     });
 
     // 누적 가입 구좌가 20 이상이면 고정 100만원 1회 지급.

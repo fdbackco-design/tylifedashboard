@@ -1390,6 +1390,10 @@ function leaderMaintenancePeriodYmd(c: AttributedJoinContractRow): string | null
   return ymd || null;
 }
 
+function isLeaderOrAboveRank(rank: RankType | undefined): boolean {
+  return rank === '리더' || rank === '센터장' || rank === '사업본부장' || rank === '본사';
+}
+
 /**
  * 루트 멤버를 포함한 subtree를 모으되, 자식 중 "리더 이상" 직급(리더/센터장/사업본부장/본사)
  * 노드는 그 노드와 그 후손을 모두 제외한다.
@@ -1411,11 +1415,29 @@ function collectSubtreeMemberIdsExcludingDownLeaders(
     for (const ch of childrenByParent.get(id) ?? []) {
       const r = rankById.get(ch);
       // 자식 노드가 리더 이상이면, 그 노드와 그 후손은 유지장려금 집계에서 제외
-      if (r === '리더' || r === '센터장' || r === '사업본부장' || r === '본사') continue;
+      if (isLeaderOrAboveRank(r)) continue;
       stack.push(ch);
     }
   }
   return out;
+}
+
+/**
+ * 유지장려 하위 리더 컷에서 잘린 리더급 자식들.
+ * (baseSubtree에 속한 노드의 자식 중 리더 이상)
+ */
+function collectCutDownLeaderIds(
+  baseSubtree: Set<string>,
+  childrenByParent: Map<string, string[]>,
+  rankById: Map<string, RankType>,
+): string[] {
+  const cut: string[] = [];
+  for (const id of baseSubtree) {
+    for (const ch of childrenByParent.get(id) ?? []) {
+      if (isLeaderOrAboveRank(rankById.get(ch))) cut.push(ch);
+    }
+  }
+  return cut;
 }
 
 /**
@@ -1424,12 +1446,14 @@ function collectSubtreeMemberIdsExcludingDownLeaders(
  * 기준일은 join_date 가 아니라 happy_call_at(서울 YMD)이다.
  * 윈도우 경계는 정산 v2 `getHappycallWindowForYearMonth` 와 동일하게 호출 측에서 넘긴다.
  *
- * `subtreeJoinUnitsJoinOnlyInWindow`와 동일한 subtree 컷 규칙(하위 리더 제외)을 적용한다.
- * 자식 중 리더 이상 직급 노드를 만나면 해당 노드와 그 후손을 모두 컷한다.
+ * 규칙:
+ *  - 기본: 하위 리더·센터장·본부장·본사 조직은 제외(해당 리더 본인 유지장려에만 잡힘).
+ *  - 예외: 잘린 하위 리더(센터장 등)가 영업사원→리더 승급한 경우,
+ *    그 승급 확정 계약까지(승급 전 구좌)는 상위 리더 유지장려에 포함한다.
  *
- * 예) 리더 A 산하에 리더 B → 영업사원 C(10구좌)가 있을 때:
- *  - A 호출: 10구좌가 합산되지 않는다(B부터 컷).
- *  - B 호출: 자기 자신의 subtree(B + C)에서 10구좌가 합산된다.
+ * 예) 리더 A 산하 영업사원 B가 승급해 리더가 된 뒤:
+ *  - B 승급 전·승급 확정 계약 구좌 → A 유지장려에 포함
+ *  - B 승급 이후 구좌 → A에서 제외(B 본인 유지장려에만)
  */
 export function subtreeJoinUnitsForLeaderMaintenanceInWindow(params: {
   memberId: string;
@@ -1437,12 +1461,15 @@ export function subtreeJoinUnitsForLeaderMaintenanceInWindow(params: {
   joinContractsAttributed: AttributedJoinContractRow[];
   startInclusive: string;
   endInclusive: string;
+  /** 하위 승급자 컷 예외(승급 확정 계약까지 포함)에 사용 */
+  promotionThresholdByMemberId?: Map<string, SalesMemberPromotionThreshold | null>;
+  promotionUnitSplitByMemberId?: Map<string, Map<string, PromotionUnitSplit>>;
 }): number {
   const childrenByParent = buildChildrenByParentFromRows(params.treeRows);
   const rankById = new Map<string, RankType>();
   for (const r of params.treeRows) rankById.set(r.id, r.rank);
 
-  const subtree = collectSubtreeMemberIdsExcludingDownLeaders(
+  const baseSubtree = collectSubtreeMemberIdsExcludingDownLeaders(
     params.memberId,
     childrenByParent,
     rankById,
@@ -1451,10 +1478,39 @@ export function subtreeJoinUnitsForLeaderMaintenanceInWindow(params: {
   const end = params.endInclusive.slice(0, 10);
   let sum = 0;
   for (const c of params.joinContractsAttributed) {
-    if (!subtree.has(c.sales_member_id)) continue;
+    if (!baseSubtree.has(c.sales_member_id)) continue;
     const periodYmd = leaderMaintenancePeriodYmd(c);
     if (!periodYmd || periodYmd < start || periodYmd > end) continue;
     sum += Math.max(0, c.unit_count ?? 0);
+  }
+
+  const thresholds = params.promotionThresholdByMemberId;
+  if (!thresholds) return sum;
+
+  const cutLeaders = collectCutDownLeaderIds(baseSubtree, childrenByParent, rankById);
+  for (const cutId of cutLeaders) {
+    const th = thresholds.get(cutId) ?? null;
+    if (!th) continue;
+    const underCut = collectSubtreeMemberIdsDownstream(cutId, childrenByParent);
+    const walk = params.promotionUnitSplitByMemberId?.get(cutId);
+    for (const c of params.joinContractsAttributed) {
+      if (!underCut.has(c.sales_member_id)) continue;
+      const periodYmd = leaderMaintenancePeriodYmd(c);
+      if (!periodYmd || periodYmd < start || periodYmd > end) continue;
+      const pre = resolvePromotionUnitSplit(
+        {
+          id: c.id,
+          join_date: c.join_date,
+          happy_call_at: c.happy_call_at,
+          invoice_registered_at: c.invoice_registered_at,
+          created_at: c.created_at,
+          unit_count: Math.max(0, c.unit_count ?? 0),
+        },
+        walk,
+        th,
+      ).prePromotionUnits;
+      sum += pre;
+    }
   }
   return sum;
 }
