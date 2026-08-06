@@ -98,6 +98,7 @@ export default function SettlementLineTableClient(props: {
     const sumAgg = (memberIds: Set<string>) => {
       let rollup = 0;
       let leaderMaint = 0;
+      let total = 0;
       let directContractCount = 0;
       let directUnitSum = 0;
       for (const id of memberIds) {
@@ -105,10 +106,11 @@ export default function SettlementLineTableClient(props: {
         if (!m) continue;
         rollup += m.rollup ?? 0;
         leaderMaint += m.leaderMaint ?? 0;
+        total += m.total ?? 0;
         directContractCount += m.directContractCount ?? 0;
         directUnitSum += m.directUnitSum ?? 0;
       }
-      return { rollup, leaderMaint, directContractCount, directUnitSum };
+      return { rollup, leaderMaint, total, directContractCount, directUnitSum };
     };
 
     // 산하 분리 보기: 행 재구성(재귀)
@@ -132,7 +134,8 @@ export default function SettlementLineTableClient(props: {
         base: meta?.base ?? 0,
         rollup: agg.rollup,
         leaderMaint: agg.leaderMaint,
-        total: (meta?.base ?? 0) + agg.rollup + agg.leaderMaint,
+        // total_amount 기준(수동 환수 등 가감 포함). base+rollup+보너스로 재합산하지 않는다.
+        total: agg.total,
         directContractCount: agg.directContractCount,
         directUnitSum: agg.directUnitSum,
         ownDirectUnitSum: meta?.directUnitSum ?? 0,
@@ -153,7 +156,7 @@ export default function SettlementLineTableClient(props: {
         base: meta.base,
         rollup: meta.rollup,
         leaderMaint: meta.leaderMaint,
-        total: meta.base + meta.rollup + meta.leaderMaint,
+        total: meta.total,
         directContractCount: meta.directContractCount,
         directUnitSum: meta.directUnitSum,
         ownDirectUnitSum: meta.directUnitSum,
@@ -190,7 +193,8 @@ export default function SettlementLineTableClient(props: {
     let excludedUnits = 0;
     const rows = expandedRowsBase.map((r) => {
       const base = r.base ?? 0;
-      const totalBeforeSelfToggle = base + (r.rollup ?? 0) + (r.leaderMaint ?? 0);
+      // monthly_settlements.total_amount(수동 환수 포함)를 기준으로 한다.
+      const totalBeforeSelfToggle = Number(r.total ?? 0);
       const included = selfIncludedByTopId[r.topLineId] ?? true;
       const rank = props.rankByMemberId[r.topLineId] ?? r.topRank ?? '';
       const perUnit = rank === '리더' ? LEADER_SELF_CONTRACT_COMMISSION_PER_UNIT_WON : SELF_CONTRACT_COMMISSION_PER_UNIT_WON;
