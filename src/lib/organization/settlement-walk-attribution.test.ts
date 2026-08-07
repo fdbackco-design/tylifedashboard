@@ -140,4 +140,54 @@ describe('settlement walk org attribution', () => {
     assert.equal(homonymCtx.remapMemberId(customerParkId), customerParkId);
     assert.equal(homonymCtx.treeRows.find((row) => row.id === leaderParkId)?.parent_id, otherParentId);
   });
+
+  it('정성훈 split: HQ settlement override여도 다른 담당자 계약은 고객노드(송영희 산하) walk에 넣지 않는다', () => {
+    const jungCustomerId = 'f21273ec-f980-4ac0-b16c-bf6ae4e7a606';
+    const songId = 'song-younghee';
+    const jaewonId = 'lee-jaewon';
+    const jungMemberId = 'jung-sunghoon-node';
+    const splitCtx = buildOrgStructuralTreeContext({
+      membersRaw: [
+        { id: hqId, name: '안성준', rank: '본사', phone: null, external_id: null, source_customer_id: null },
+        { id: songId, name: '송영희', rank: '리더', phone: null, external_id: null, source_customer_id: null },
+        { id: jaewonId, name: '이재원', rank: '센터장', phone: null, external_id: null, source_customer_id: null },
+        {
+          id: jungMemberId,
+          name: '정성훈',
+          rank: '영업사원',
+          phone: '01099998888',
+          external_id: `customer:${jungCustomerId}`,
+          source_customer_id: jungCustomerId,
+        },
+      ],
+      edgesRaw: [
+        { parent_id: hqId, child_id: songId },
+        { parent_id: hqId, child_id: jaewonId },
+        { parent_id: songId, child_id: jungMemberId },
+      ],
+      customerBirthDateById: new Map([[jungCustomerId, '1980-01-01']]),
+    });
+
+    const mayToJaewon = splitCtx.resolveSettlementWalkSalesMemberId({
+      sales_member_id: jaewonId,
+      settlement_sales_member_id: hqId,
+      customer_id: jungCustomerId,
+      status: '가입',
+      customer_name: '정성훈',
+      customer_phone: '01099998888',
+      customer_birth_date: '1980-01-01',
+    });
+    assert.equal(mayToJaewon, jaewonId);
+
+    const julyUnderSong = splitCtx.resolveSettlementWalkSalesMemberId({
+      sales_member_id: songId,
+      settlement_sales_member_id: null,
+      customer_id: jungCustomerId,
+      status: '가입',
+      customer_name: '정성훈',
+      customer_phone: '01099998888',
+      customer_birth_date: '1980-01-01',
+    });
+    assert.equal(julyUnderSong, jungMemberId);
+  });
 });

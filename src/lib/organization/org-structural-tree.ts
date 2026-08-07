@@ -3,6 +3,7 @@ import {
   type ContractSalesRemapInput,
   type OrgMemberForContractRemap,
 } from '@/lib/organization/org-contract-sales-remap';
+import { ORG_CUSTOMER_NODE_SPLIT_BY_SALES_PARENT_IDS } from '@/lib/organization/org-customer-node-split';
 import type { OrgTreeRow } from '@/lib/types';
 
 export type OrgStructuralTreeContext = {
@@ -95,6 +96,24 @@ export function buildOrgStructuralTreeContext(params: {
   const resolveSettlementWalkSalesMemberId = (
     c: ContractSalesRemapInput & { settlement_sales_member_id?: string | null },
   ): string => {
+    // 정성훈 등: 자기구매(고객노드) 일괄 귀속을 쓰지 않고, 조직도와 같이
+    // 실제 담당자 기준으로 두고 고객 노드 parent와 담당자가 같을 때만 고객 노드로 붙인다.
+    // (HQ settlement override가 있어도 조직 표시/승급 walk는 sales_member_id를 따른다.)
+    if (ORG_CUSTOMER_NODE_SPLIT_BY_SALES_PARENT_IDS.has(c.customer_id)) {
+      const salesId = remapMemberId(c.sales_member_id);
+      const customerKey = remapCustomerMemberId(
+        c.customer_id,
+        c.customer_name ?? null,
+        c.customer_phone ?? null,
+        c.customer_birth_date ?? null,
+      );
+      if (customerKey && customerKey !== salesId) {
+        const customerParentId = edgeMap.get(customerKey) ?? null;
+        if (customerParentId === salesId) return customerKey;
+      }
+      return salesId;
+    }
+
     const effective = (c.settlement_sales_member_id ?? c.sales_member_id) as string;
     return resolveContractSalesMemberId({
       ...c,
