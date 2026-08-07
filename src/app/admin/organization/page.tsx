@@ -31,6 +31,14 @@ import AdminOrgTreeWithMetrics from './AdminOrgTreeWithMetrics';
 export const metadata: Metadata = { title: '조직도' };
 export const dynamic = 'force-dynamic';
 
+/**
+ * 고객 노드에 계약을 이중 부착할 때, 담당자별로 나눠 보이게 할 고객.
+ * (동일 고객·다른 담당자 계약이 한 parent 노드에 몰리는 케이스 한정)
+ */
+const ORG_CUSTOMER_NODE_SPLIT_BY_SALES_PARENT_IDS: ReadonlySet<string> = new Set([
+  'f21273ec-f980-4ac0-b16c-bf6ae4e7a606', // 정성훈
+]);
+
 function formatWon(value: number): string {
   return `${Math.round(value).toLocaleString('ko-KR')}원`;
 }
@@ -187,6 +195,14 @@ export default async function OrganizationPage({
     customerBirthDateById,
   });
 
+  const parentByChildId = new Map<string, string | null>();
+  for (const e of edgesRaw as Array<{ parent_id: string | null; child_id: string }>) {
+    parentByChildId.set(e.child_id, e.parent_id);
+  }
+  for (const [childId, parentId] of parentOverrideByChildId) {
+    parentByChildId.set(childId, parentId);
+  }
+
   const contractsByMember: Record<string, ContractItem[]> = {};
   for (const c of rawContractRows) {
     const key = resolveContractSalesMemberId({
@@ -230,6 +246,11 @@ export default async function OrganizationPage({
       c.customers?.birth_date ?? null,
     );
     if (customerKey && customerKey !== key) {
+      // 정성훈 등: 고객 노드에는 현재 parent와 동일 담당자 계약만 표시
+      if (ORG_CUSTOMER_NODE_SPLIT_BY_SALES_PARENT_IDS.has(c.customer_id)) {
+        const customerParentId = parentByChildId.get(customerKey) ?? null;
+        if (customerParentId !== c.sales_member_id) continue;
+      }
       if (!contractsByMember[customerKey]) contractsByMember[customerKey] = [];
       contractsByMember[customerKey].push(contractItem);
     }
