@@ -184,6 +184,7 @@ export default async function OrganizationPage({
   const {
     members,
     tree,
+    remapMemberId,
     resolveContractSalesMemberId,
     remapCustomerMemberId,
     salesMemberDisplayName,
@@ -197,26 +198,30 @@ export default async function OrganizationPage({
 
   const parentByChildId = new Map<string, string | null>();
   for (const e of edgesRaw as Array<{ parent_id: string | null; child_id: string }>) {
-    parentByChildId.set(e.child_id, e.parent_id);
+    parentByChildId.set(remapMemberId(e.child_id), e.parent_id ? remapMemberId(e.parent_id) : null);
   }
   for (const [childId, parentId] of parentOverrideByChildId) {
-    parentByChildId.set(childId, parentId);
+    parentByChildId.set(remapMemberId(childId), parentId ? remapMemberId(parentId) : null);
   }
 
   const contractsByMember: Record<string, ContractItem[]> = {};
   for (const c of rawContractRows) {
-    const key = resolveContractSalesMemberId({
-      sales_member_id: c.sales_member_id,
-      customer_id: c.customer_id,
-      status: c.status,
-      rental_request_no: c.rental_request_no ?? null,
-      invoice_no: c.invoice_no ?? null,
-      memo: c.memo ?? null,
-      customer_phone: c.customers?.phone ?? null,
-      contract_code: c.contract_code,
-      customer_name: c.customers?.name ?? '',
-      customer_birth_date: c.customers?.birth_date ?? null,
-    });
+    const splitBySalesParent = ORG_CUSTOMER_NODE_SPLIT_BY_SALES_PARENT_IDS.has(c.customer_id);
+    // 정성훈: 자기구매(고객노드) 귀속을 쓰지 않고 실제 담당자로 표시해 담당자별 분리
+    const key = splitBySalesParent
+      ? remapMemberId(c.sales_member_id)
+      : resolveContractSalesMemberId({
+          sales_member_id: c.sales_member_id,
+          customer_id: c.customer_id,
+          status: c.status,
+          rental_request_no: c.rental_request_no ?? null,
+          invoice_no: c.invoice_no ?? null,
+          memo: c.memo ?? null,
+          customer_phone: c.customers?.phone ?? null,
+          contract_code: c.contract_code,
+          customer_name: c.customers?.name ?? '',
+          customer_birth_date: c.customers?.birth_date ?? null,
+        });
     if (!contractsByMember[key]) contractsByMember[key] = [];
     const contractItem: ContractItem = {
       id: c.id,
@@ -247,9 +252,9 @@ export default async function OrganizationPage({
     );
     if (customerKey && customerKey !== key) {
       // 정성훈 등: 고객 노드에는 현재 parent와 동일 담당자 계약만 표시
-      if (ORG_CUSTOMER_NODE_SPLIT_BY_SALES_PARENT_IDS.has(c.customer_id)) {
+      if (splitBySalesParent) {
         const customerParentId = parentByChildId.get(customerKey) ?? null;
-        if (customerParentId !== c.sales_member_id) continue;
+        if (customerParentId !== remapMemberId(c.sales_member_id)) continue;
       }
       if (!contractsByMember[customerKey]) contractsByMember[customerKey] = [];
       contractsByMember[customerKey].push(contractItem);
