@@ -1478,6 +1478,14 @@ async function processItem(
       : null;
     contractFinal = mergeExistingContractFields(contractFinal, ecMergeSource);
 
+    // 운영 강제 취소: TY 원본이 가입/준비여도 내부 status·is_cancelled를 취소로 고정
+    const forceCancelled = isForceCancelledContractCode(
+      item.contract_code ?? contractFinal.contract_code,
+    );
+    if (forceCancelled) {
+      contractFinal = { ...contractFinal, is_cancelled: true };
+    }
+
     const internalStatus = resolveInternalContractStatus({
       tySourceStatus,
       tyStatusRaw: item.status_raw ?? null,
@@ -1489,15 +1497,13 @@ async function processItem(
       product_type: contractFinal.product_type,
       item_name: contractFinal.item_name,
       source_snapshot_json: contractFinal.source_snapshot_json ?? null,
-      contractCode: item.contract_code,
+      contractCode: item.contract_code ?? contractFinal.contract_code,
     });
     contractFinal = {
       ...contractFinal,
       ty_source_status: tySourceStatus,
-      status: internalStatus,
-      ...(isForceCancelledContractCode(item.contract_code)
-        ? { status: '취소' as ContractStatus, is_cancelled: true }
-        : {}),
+      status: forceCancelled ? ('취소' as ContractStatus) : internalStatus,
+      ...(forceCancelled ? { is_cancelled: true } : {}),
     };
 
     // TY케어플랜: 가입 인정 시 가입일 = 해피콜 성공일 (송장·렌탈 불필요)
