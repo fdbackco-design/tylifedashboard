@@ -220,6 +220,11 @@ export function mergeExistingContractFields(
     merged = { ...merged, is_cancelled: true };
   }
 
+  // 운영 강제 취소 allowlist: TY 원본이 가입이어도 is_cancelled 고정
+  if (isForceCancelledContractCode(merged.contract_code)) {
+    merged = { ...merged, is_cancelled: true };
+  }
+
   return merged;
 }
 
