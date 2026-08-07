@@ -551,24 +551,43 @@ export async function calculateMonthlySettlement(params: {
     parentByChild: parentByChildForPromo,
   });
 
-  const newPromoRows = leaderPromotionEventRows.filter((row) => !promotionEventsByMemberId.has(row.member_id));
-  for (const row of newPromoRows) {
+  // 신규 승급 + 조직도/walk 변경으로 threshold 계약·일자가 바뀐 기존 이벤트 갱신.
+  // previous_parent_id 는 최초 승급 시점 상위이므로 기존 값이 있으면 유지한다.
+  const promoRowsToUpsert: typeof leaderPromotionEventRows = [];
+  for (const row of leaderPromotionEventRows) {
+    const existing = promotionEventsByMemberId.get(row.member_id);
+    if (!existing) {
+      promoRowsToUpsert.push(row);
+      continue;
+    }
+    if (
+      existing.threshold_contract_id !== row.threshold_contract_id ||
+      existing.threshold_join_date !== row.threshold_join_date
+    ) {
+      promoRowsToUpsert.push({
+        ...row,
+        previous_parent_id: existing.previous_parent_id ?? row.previous_parent_id,
+      });
+    }
+  }
+  for (const row of promoRowsToUpsert) {
+    const existing = promotionEventsByMemberId.get(row.member_id);
     promotionEventsByMemberId.set(row.member_id, {
       member_id: row.member_id,
       threshold_contract_id: row.threshold_contract_id,
       threshold_join_date: row.threshold_join_date,
       previous_parent_id: row.previous_parent_id,
-      created_at: null,
+      created_at: existing?.created_at ?? null,
     });
     policyPromotedLeaderIds.add(row.member_id);
   }
 
-  if (newPromoRows.length > 0) {
+  if (promoRowsToUpsert.length > 0) {
     const { error: newPromoErr } = await db
       .from('leader_promotion_events')
-      .upsert(newPromoRows as any, { onConflict: 'member_id' });
+      .upsert(promoRowsToUpsert as any, { onConflict: 'member_id' });
     if (newPromoErr) {
-      throw new Error(`walk 기반 leader_promotion_events 생성 실패: ${newPromoErr.message}`);
+      throw new Error(`walk 기반 leader_promotion_events 생성/갱신 실패: ${newPromoErr.message}`);
     }
   }
 
@@ -616,7 +635,8 @@ export async function calculateMonthlySettlement(params: {
     })),
   );
 
-  const eventRowsWithThreshold = ((promoEvents ?? []) as any[]).filter(
+  // 방금 upsert/갱신된 이벤트 맵을 SSOT로 사용 (로드 시점 promoEvents 배열은 stale일 수 있음)
+  const eventRowsWithThreshold = [...promotionEventsByMemberId.values()].filter(
     (r) => r?.member_id && r?.threshold_contract_id && r?.threshold_join_date,
   );
   const thresholdContractIds = [
@@ -649,7 +669,7 @@ export async function calculateMonthlySettlement(params: {
   }
   mergeLeaderPromotionEventThresholds(
     promotionThresholdByMemberId,
-    (promoEvents ?? []) as any[],
+    eventRowsWithThreshold,
     thresholdContractMetaById,
   );
 

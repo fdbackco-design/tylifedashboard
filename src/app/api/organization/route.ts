@@ -38,6 +38,16 @@ function getEffectiveStartYearMonthSeoul(): string {
   return `${y}-${String(m).padStart(2, '0')}`;
 }
 
+function previousYearMonth(yearMonth: string): string | null {
+  const m = /^(\d{4})-(\d{2})$/.exec(yearMonth);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  if (!y || !mo) return null;
+  if (mo === 1) return `${y - 1}-12`;
+  return `${y}-${String(mo - 1).padStart(2, '0')}`;
+}
+
 async function wouldCreateCycle(params: {
   db: ReturnType<typeof createAdminSupabaseClient>;
   parentId: string | null;
@@ -165,30 +175,58 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
   if (upErr) return NextResponse.json({ error: `organization_edges 업데이트 실패: ${upErr.message}` }, { status: 500 });
 
   // 적용 시작월 규칙(Seoul): 26일~말일 => 다음달, 1일~25일 => 이번달
+  // 산하 이동은 이전 달 승급 walk/이벤트에도 영향을 주므로 직전월도 함께 재계산한다.
   const yearMonth = getEffectiveStartYearMonthSeoul();
   if (!/^\d{4}-\d{2}$/.test(yearMonth)) {
     return NextResponse.json({ error: '적용 시작월 계산 실패' }, { status: 500 });
   }
-  let settlement: { recalculated: boolean; updated_count?: number; skipped_reason?: string } = { recalculated: false };
+  const monthsToRecalc = [yearMonth];
+  const prevYm = previousYearMonth(yearMonth);
+  if (prevYm) monthsToRecalc.push(prevYm);
 
-  // 확정된 정산이면 강제로 덮어쓰지 않는다(안전).
-  const { data: finalized } = await db
-    .from('monthly_settlements')
-    .select('id')
-    .eq('year_month', yearMonth)
-    .eq('is_finalized', true)
-    .limit(1);
-  if (finalized && finalized.length > 0) {
-    settlement = { recalculated: false, skipped_reason: `${yearMonth} 정산이 확정되어 재계산을 건너뛰었습니다.` };
-  } else {
+  const settlementByMonth: Array<{
+    year_month: string;
+    recalculated: boolean;
+    updated_count?: number;
+    skipped_reason?: string;
+  }> = [];
+
+  for (const ym of monthsToRecalc) {
+    const { data: finalized } = await db
+      .from('monthly_settlements')
+      .select('id')
+      .eq('year_month', ym)
+      .eq('is_finalized', true)
+      .limit(1);
+    if (finalized && finalized.length > 0) {
+      settlementByMonth.push({
+        year_month: ym,
+        recalculated: false,
+        skipped_reason: `${ym} 정산이 확정되어 재계산을 건너뛰었습니다.`,
+      });
+      continue;
+    }
     try {
-      const result = await calculateMonthlySettlement({ yearMonth, db });
-      settlement = { recalculated: true, updated_count: result.updated_count };
+      const result = await calculateMonthlySettlement({ yearMonth: ym, db });
+      settlementByMonth.push({
+        year_month: ym,
+        recalculated: true,
+        updated_count: result.updated_count,
+      });
     } catch (e) {
-      // 조직 변경은 성공했지만 재계산만 실패할 수 있음 → 클라이언트에서 메시지 표시
-      settlement = { recalculated: false, skipped_reason: e instanceof Error ? e.message : String(e) };
+      settlementByMonth.push({
+        year_month: ym,
+        recalculated: false,
+        skipped_reason: e instanceof Error ? e.message : String(e),
+      });
     }
   }
 
-  return NextResponse.json({ success: true, year_month: yearMonth, settlement });
+  const primary = settlementByMonth.find((s) => s.year_month === yearMonth) ?? settlementByMonth[0];
+  return NextResponse.json({
+    success: true,
+    year_month: yearMonth,
+    settlement: primary,
+    settlements: settlementByMonth,
+  });
 }
