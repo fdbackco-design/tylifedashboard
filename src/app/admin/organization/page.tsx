@@ -21,6 +21,7 @@ import {
   flattenOrgTreeNodes,
   stripOrgTreeNodesForDisplay,
 } from '@/lib/organization/org-tree-display';
+import { ORG_CUSTOMER_NODE_SPLIT_BY_SALES_PARENT_IDS } from '@/lib/organization/org-customer-node-split';
 import { getContractDisplayProductName } from '@/lib/utils/contract-display-product';
 import type { ContractItem } from '@/components/org-tree/OrgTreeNode';
 import type { OrganizationMember } from '@/lib/types';
@@ -30,14 +31,6 @@ import AdminOrgTreeWithMetrics from './AdminOrgTreeWithMetrics';
 
 export const metadata: Metadata = { title: '조직도' };
 export const dynamic = 'force-dynamic';
-
-/**
- * 고객 노드에 계약을 이중 부착할 때, 담당자별로 나눠 보이게 할 고객.
- * (동일 고객·다른 담당자 계약이 한 parent 노드에 몰리는 케이스 한정)
- */
-const ORG_CUSTOMER_NODE_SPLIT_BY_SALES_PARENT_IDS: ReadonlySet<string> = new Set([
-  'f21273ec-f980-4ac0-b16c-bf6ae4e7a606', // 정성훈
-]);
 
 function formatWon(value: number): string {
   return `${Math.round(value).toLocaleString('ko-KR')}원`;
