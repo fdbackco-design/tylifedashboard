@@ -2,7 +2,7 @@
  * 담당자 변경 신청 공통 유틸.
  */
 
-export const MANAGER_CHANGE_BRANCH_NAME = 'Ty Life Partners';
+export const MANAGER_CHANGE_BRANCH_NAME = 'Feed Life';
 
 export function formatPhoneDisplay(digits: string): string {
   const d = digits.replace(/\D/g, '');

@@ -7,7 +7,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { sendAdminPushNotification } from '@/lib/push/admin-notify';
 import { loadSubscriptionsForSend, sendWebPushToSubscriptions } from '@/lib/push/send';
 
-const BRANCH_NAME = 'Ty Life Partners';
+const BRANCH_NAME = 'Feed Life';
 const ADMIN_URL = '/admin/manager-change';
 const MEMBER_URL = '/organization/manager-change';
 
