@@ -220,6 +220,21 @@ export function digitsOnlyPhone(phone: string | null | undefined): string {
 }
 
 /**
+ * 명세서 목록/엑셀 포함 여부: 선택월 지급 수당(개인수당+오버라이드+보너스)이 1원 이상일 때만.
+ * 구좌만 있고 금액이 0원이면 링크·엑셀에서 제외한다.
+ */
+export function hasStatementPayoutAmount(args: {
+  personalCommission: number;
+  overrideAmount: number;
+  bonusAmount: number;
+}): boolean {
+  const pc = Number(args.personalCommission) || 0;
+  const ov = Number(args.overrideAmount) || 0;
+  const bn = Number(args.bonusAmount) || 0;
+  return pc + ov + bn > 0;
+}
+
+/**
  * 명세서 관리 페이지/엑셀에서 표시 자체를 차단하는 멤버 룰.
  *
  * 운영팀 요청으로 추가된 노출 차단 룰이며, 정산 계산 자체에는 영향을 주지 않는다.

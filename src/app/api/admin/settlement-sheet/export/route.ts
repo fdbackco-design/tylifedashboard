@@ -18,7 +18,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isAdminAuthed } from '@/lib/admin-auth';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import {
-  getSettlementWindowForYearMonth,
   getSettlementWindowDisplayForYearMonth,
   normalizeYearMonthLabel,
 } from '@/lib/settlement/settlement-window';
@@ -26,15 +25,11 @@ import {
   digitsOnlyPhone,
   formatYearMonthKo,
   formatYmdDot,
+  hasStatementPayoutAmount,
   isSuppressedStatementSheetMember,
   resolveLoginCodesForMembers,
   resolveStatementPhonesByMemberId,
 } from '@/lib/settlement/statement-sheet';
-import {
-  loadStatementDownlineSharedData,
-  computeStatementDownlineUnitsWithSharedContext,
-  loadGlobalStatementWindowContractPool,
-} from '@/lib/organization/statement-downline-units';
 import type { RankType } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -162,57 +157,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // A열 전화번호: org.phone 이 비어도 계정 발급(user_profiles) 전화로 채움.
   const phoneByMemberId = await resolveStatementPhonesByMemberId(db, memberList, loginCodeByMemberId);
 
-  // 산하 실적 구좌 — admin/settlement_sheet 페이지와 동일한 방식으로 일괄 계산.
-  const { start_date, end_date } = getSettlementWindowForYearMonth(yearMonth);
-  const downlineUnitsByMemberId: Record<string, number> = {};
-  {
-    const sharedDownline = await loadStatementDownlineSharedData(db);
-    const window = { start_date, end_date };
-    const preloadedGlobalPool = await loadGlobalStatementWindowContractPool(db, sharedDownline, window);
-    const BATCH = 48;
-    for (let i = 0; i < memberIds.length; i += BATCH) {
-      const slice = memberIds.slice(i, i + BATCH);
-      const direct = slice.map((mid) => {
-        const row = settlementRows.find((r) => r.member_id === mid);
-        return Math.max(0, Math.floor(Number(row?.direct_unit_count ?? 0) || 0));
-      });
-      const results = await Promise.all(
-        slice.map((mid, j) =>
-          computeStatementDownlineUnitsWithSharedContext(
-            db,
-            sharedDownline,
-            mid,
-            window,
-            direct[j],
-            memberById.get(mid)?.leader_rank_effective_at ?? null,
-            { preloadedGlobalPool },
-          ),
-        ),
-      );
-      slice.forEach((mid, j) => {
-        const res = results[j];
-        downlineUnitsByMemberId[mid] = typeof res === 'number' ? res : res.downline_units;
-      });
-    }
-  }
-
   const rows = settlementRows
     .map((sr) => {
       const m = memberById.get(sr.member_id);
       if (!m) return null;
       const ov = overrideByMemberId.get(sr.member_id) ?? null;
-      const personalUnit = ov?.personal_unit_count ?? Number(sr.direct_unit_count ?? 0);
-      const downlineUnit = ov?.downline_unit_count ?? (downlineUnitsByMemberId[sr.member_id] ?? 0);
       const personalCommission = ov?.personal_commission ?? Number(sr.base_commission ?? 0);
       const overrideAmount = ov?.override_amount ?? Number(sr.rollup_commission ?? 0);
       const bonusAmount = ov?.bonus_amount ?? Number(sr.incentive_amount ?? 0);
-      // 표시값이 모두 0 이면 export 에서도 제외 (페이지와 동일 기준).
+      // 선택월 수당(개인+오버라이드+보너스)이 0원이면 export 제외 (페이지와 동일).
       if (
-        personalUnit === 0 &&
-        downlineUnit === 0 &&
-        personalCommission === 0 &&
-        overrideAmount === 0 &&
-        bonusAmount === 0
+        !hasStatementPayoutAmount({
+          personalCommission,
+          overrideAmount,
+          bonusAmount,
+        })
       ) {
         return null;
       }
