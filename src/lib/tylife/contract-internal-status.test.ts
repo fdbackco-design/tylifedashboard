@@ -8,15 +8,23 @@ import {
 import type { ContractInsert } from '../types/contract';
 
 describe('force-cancelled contract codes', () => {
-  it('TY127/TY128/TY009/TY010은 강제 취소 allowlist에 포함', () => {
+  it('TY127/TY128/TY050/TY051/TY009/TY010은 강제 취소 allowlist에 포함', () => {
     assert.equal(isForceCancelledContractCode('TY12720260716'), true);
     assert.equal(isForceCancelledContractCode('TY12820260716'), true);
+    assert.equal(isForceCancelledContractCode('TY05020260718'), true);
+    assert.equal(isForceCancelledContractCode('TY05120260718'), true);
     assert.equal(isForceCancelledContractCode('TY00920260719'), true);
     assert.equal(isForceCancelledContractCode('TY01020260719'), true);
   });
 
   it('TY 원본이 가입이어도 내부 status는 취소', () => {
-    for (const contractCode of ['TY12820260716', 'TY00920260719', 'TY01020260719'] as const) {
+    for (const contractCode of [
+      'TY12820260716',
+      'TY05020260718',
+      'TY05120260718',
+      'TY00920260719',
+      'TY01020260719',
+    ] as const) {
       const status = resolveInternalContractStatus({
         tySourceStatus: '가입',
         isCancelled: false,
@@ -31,7 +39,13 @@ describe('force-cancelled contract codes', () => {
   });
 
   it('mergeExistingContractFields도 is_cancelled를 true로 고정', () => {
-    for (const contract_code of ['TY12720260716', 'TY00920260719', 'TY01020260719'] as const) {
+    for (const contract_code of [
+      'TY12720260716',
+      'TY05020260718',
+      'TY05120260718',
+      'TY00920260719',
+      'TY01020260719',
+    ] as const) {
       const incoming = {
         contract_code,
         status: '가입',
