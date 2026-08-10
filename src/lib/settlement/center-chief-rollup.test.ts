@@ -82,6 +82,43 @@ describe('center chief rollup', () => {
     // 승급 전 구간은 센터장도 리더 상한 − 하위와 동일 차액
     assert.equal(leaderRate - salesRate, 100_000);
   });
+
+  it('동일 해피콜일: 송장시각이 승급계약보다 앞서면 created_at이 늦어도 pre', () => {
+    const thWithMeta: CenterChiefPromotionThreshold = {
+      threshold_leader_member_id: 'leader-5',
+      threshold_join_date: '2026-07-28',
+      threshold_contract_id: 'ty243',
+      threshold_invoice_registered_at: '2026-08-04T01:46:25.985Z',
+      threshold_created_at: '2026-07-27T14:09:15.721Z',
+    };
+    // TY244: created_at은 승급계약보다 늦지만 송장 등록이 더 빠름 → 리더 walk와 같이 pre
+    assert.equal(
+      isContractAtOrAfterCenterChiefPostRollup(
+        {
+          id: 'ty244',
+          join_date: '2026-07-27',
+          happy_call_at: '2026-07-28T00:00:00Z',
+          invoice_registered_at: '2026-08-04T01:46:24.754Z',
+          created_at: '2026-07-27T14:19:16.070Z',
+        },
+        thWithMeta,
+      ),
+      false,
+    );
+    assert.equal(
+      isContractAtOrAfterCenterChiefPostRollup(
+        {
+          id: 'ty245',
+          join_date: '2026-07-27',
+          happy_call_at: '2026-07-28T00:00:00Z',
+          invoice_registered_at: '2026-08-04T01:46:24.800Z',
+          created_at: '2026-07-27T14:19:16.586Z',
+        },
+        thWithMeta,
+      ),
+      false,
+    );
+  });
 });
 
 describe('center chief direct commission boundary', () => {

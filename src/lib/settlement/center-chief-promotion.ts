@@ -6,6 +6,7 @@ import {
 } from '@/lib/settlement/settlement-org-tree';
 import {
   CENTER_CHIEF_PROMOTION_MIN_LEADERS,
+  compareContractToPromotionThresholdOrder,
   contractJoinOrderYmd,
   isCustomerVirtualOrgMember,
   type PromotionOrderContractRef,
@@ -160,34 +161,22 @@ export function centerChiefPostRollupStartsYmd(threshold: CenterChiefPromotionTh
 }
 
 /**
- * 계약 vs 센터장 승급 계약 순서 비교.
+ * 계약 vs 센터장 승급 계약(5번째 리더 승급 계약) 순서 비교.
  * - &lt;0: 승급 계약보다 앞 (pre)
  * - 0: 승급 계약 자체 (pre)
  * - &gt;0: 승급 계약 다음 (post)
  *
- * 순서: 해피콜 YMD → created_at → id.
- * (invoice_registered_at은 타 멤버 승급계약과 비교 시 sync 배치 시각이 섞여 순서가 뒤집힐 수 있어 쓰지 않는다.)
+ * 리더 승급 walk와 동일: 해피콜 YMD → invoice_registered_at → created_at → id.
+ * (created_at만 쓰면 동일 해피콜 배치에서 송장 순과 어긋나 post 단가가 잘못 붙을 수 있다.)
  */
 export function compareContractToCenterChiefThreshold(
   contract: PromotionOrderContractRef,
   threshold: CenterChiefPromotionThreshold,
 ): number {
-  const aj = contractJoinOrderYmd(contract);
-  const tj = String(threshold.threshold_join_date).slice(0, 10);
-  if (aj !== tj) return aj.localeCompare(tj);
-
-  const ca = normalizeCreatedAt(contract.created_at);
-  const cb = normalizeCreatedAt(threshold.threshold_created_at);
-  if (ca !== cb) {
-    if (!ca) return 1;
-    if (!cb) return -1;
-    return ca.localeCompare(cb);
-  }
-
-  const tid = threshold.threshold_contract_id ? String(threshold.threshold_contract_id) : '';
-  if (!tid) return 0;
-  if (contract.id === tid) return 0;
-  return contract.id.localeCompare(tid);
+  return compareContractToPromotionThresholdOrder(
+    contract,
+    centerChiefThresholdToPromotionRef(threshold),
+  );
 }
 
 /**
