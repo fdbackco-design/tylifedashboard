@@ -143,6 +143,25 @@ function compareSameOrderDayOrder(contract: PromotionOrderContractRef, th: Sales
 }
 
 /**
+ * 계약 vs 승급 threshold 순서 비교.
+ * - &lt;0: 승급 계약보다 앞
+ * - 0: 승급 계약 자체
+ * - &gt;0: 승급 계약 다음
+ *
+ * 순서: 해피콜 YMD → invoice_registered_at → created_at → id
+ * (센터장/본부장 post 경계도 리더 승급 walk와 동일 순서를 쓰도록 공유)
+ */
+export function compareContractToPromotionThresholdOrder(
+  contract: PromotionOrderContractRef,
+  threshold: SalesMemberPromotionThreshold,
+): number {
+  const aj = contractJoinOrderYmd(contract);
+  const tj = String(threshold.threshold_join_date).slice(0, 10);
+  if (aj !== tj) return aj.localeCompare(tj);
+  return compareSameOrderDayOrder(contract, threshold);
+}
+
+/**
  * 계약 c가 승격 계약 이후(동일 순서일이면 id가 승격 계약 id 이상)인지.
  * 이때부터 직급 단가를 리더(40만)로 본다.
  * 순서일은 해피콜 완료일 우선.
