@@ -27,7 +27,7 @@ import {
   computeStatementDownlineUnitsWithSharedContext,
   loadGlobalStatementWindowContractPool,
 } from '@/lib/organization/statement-downline-units';
-import { isSuppressedStatementSheetMember, resolveLoginCodesForMembers } from '@/lib/settlement/statement-sheet';
+import { isSuppressedStatementSheetMember, resolveLoginCodesForMembers, resolveStatementPhonesByMemberId } from '@/lib/settlement/statement-sheet';
 import type { RankType } from '@/lib/types';
 import SettlementSheetAdminClient, {
   type SheetRowVM,
@@ -98,6 +98,10 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
     memberIds.length > 0
       ? await resolveLoginCodesForMembers(db, members)
       : { loginCodeByMemberId: new Map<string, string>(), ambiguousMemberIds: new Set<string>() };
+  const phoneByMemberId =
+    memberIds.length > 0
+      ? await resolveStatementPhonesByMemberId(db, members, loginCodeByMemberId)
+      : new Map<string, string>();
 
   const { data: overrideRows } = await db
     .from('settlement_statement_overrides')
@@ -183,7 +187,7 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
         memberId: member.id,
         name: (member.name ?? '').replace(/^\[고객\]\s*/, '') || '—',
         rank: member.rank,
-        phone: member.phone ?? '',
+        phone: phoneByMemberId.get(member.id) || member.phone || '',
         // TY 전산코드(공유 URL/명세서 인증) = 영업자 로그인 ID = user_profiles.login_code
         tyCode: loginCodeByMemberId.get(member.id) ?? '',
         base: {
