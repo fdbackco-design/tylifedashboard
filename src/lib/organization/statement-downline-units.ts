@@ -79,8 +79,8 @@ export async function loadStatementDownlineSharedData(db: SupabaseClient): Promi
     }
   }
 
-  const { remapMemberId, resolveContractOriginForSubtree, hqIds, membersFiltered } =
-    buildOrgContractSalesRemap(membersRaw, customerBirthDateById);
+  const baseRemap = buildOrgContractSalesRemap(membersRaw, customerBirthDateById);
+  const { remapMemberId, hqIds, membersFiltered } = baseRemap;
   const hqSalesMemberIds = [...hqIds];
 
   const edgesRemapped = edgesRaw.map((e) => ({
@@ -103,6 +103,11 @@ export async function loadStatementDownlineSharedData(db: SupabaseClient): Promi
       e.parent_id && memberIdSetFiltered.has(e.parent_id) ? e.parent_id : null;
     edgeByChild.set(e.child_id, parent_id);
   }
+  const { resolveContractOriginForSubtree } = buildOrgContractSalesRemap(
+    membersRaw,
+    customerBirthDateById,
+    { parentByChildId: edgeByChild },
+  );
   const treeRows = treeRowsBase.map((r) => ({
     ...r,
     parent_id: r.rank === '본사' ? null : edgeByChild.get(r.id) ?? null,

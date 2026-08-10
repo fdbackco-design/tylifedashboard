@@ -4,6 +4,7 @@ import {
   normalizeCustomerIdentityBirthDate,
   normalizeCustomerIdentityName,
 } from '@/lib/organization/customer-identity';
+import { ORG_CUSTOMER_NODE_SPLIT_BY_SALES_PARENT_IDS } from '@/lib/organization/org-customer-node-split';
 
 /** 조직도 계약 담당자 치환용 최소 멤버 필드 */
 export type OrgMemberForContractRemap = {
@@ -28,6 +29,15 @@ export type ContractSalesRemapInput = {
   customer_birth_date?: string | null;
 };
 
+export type OrgContractSalesRemapOptions = {
+  /**
+   * 조직 edge parent map (child → parent).
+   * `ORG_CUSTOMER_NODE_SPLIT_BY_SALES_PARENT_IDS` 고객은 parent와 담당자가 같을 때만
+   * 고객 노드로 귀속하고, 아니면 실제 담당자에 둔다.
+   */
+  parentByChildId?: ReadonlyMap<string, string | null>;
+};
+
 /**
  * /admin/organization 과 동일: customer 노드 병합 + 본사(HQ) 직계약 중 가입 인정 계약을
  * 고객(조직원) 노드로 귀속해 산하 계약처럼 집계한다.
@@ -35,6 +45,7 @@ export type ContractSalesRemapInput = {
 export function buildOrgContractSalesRemap(
   membersRaw: OrgMemberForContractRemap[],
   customerBirthDateById: ReadonlyMap<string, string | null> = new Map(),
+  options: OrgContractSalesRemapOptions = {},
 ): {
   remapMemberId: (id: string) => string;
   resolveContractSalesMemberId: (c: ContractSalesRemapInput) => string;
@@ -49,6 +60,7 @@ export function buildOrgContractSalesRemap(
   hqIds: Set<string>;
   membersFiltered: OrgMemberForContractRemap[];
 } {
+  const parentByChildId = options.parentByChildId;
   const normName = normalizeCustomerIdentityName;
   const customerIdForMember = (m: OrgMemberForContractRemap): string | null => {
     if (m.source_customer_id) return m.source_customer_id;
@@ -198,6 +210,16 @@ export function buildOrgContractSalesRemap(
           c.customer_birth_date,
         )
       ) {
+        // 정성훈/홍진운 등: 담당자별로 나눠 보이게 할 고객은
+        // 현재 parent와 동일 담당자 계약만 고객 노드로, 나머지는 실제 담당자에 둔다.
+        if (ORG_CUSTOMER_NODE_SPLIT_BY_SALES_PARENT_IDS.has(c.customer_id)) {
+          const salesId = remapMemberId(c.sales_member_id);
+          if (parentByChildId) {
+            const customerParentId = parentByChildId.get(merged) ?? null;
+            if (customerParentId === salesId) return merged;
+          }
+          return salesId;
+        }
         return merged;
       }
       // 불일치면 아래 일반 담당자 귀속 로직으로 진행(예: 김미옥 계약 → 담당자 한진호).

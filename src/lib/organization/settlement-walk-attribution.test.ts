@@ -190,4 +190,66 @@ describe('settlement walk org attribution', () => {
     });
     assert.equal(julyUnderSong, jungMemberId);
   });
+
+  it('홍진운 split: 정철희 담당 계약만 정철희에, 임태순 담당은 임태순 산하 고객노드에', () => {
+    const hongCustomerId = '35f23c0b-bde8-4166-83ff-19eb7e027bb7';
+    const imId = 'im-taesoon';
+    const jungId = 'jung-cheolhee';
+    const hongMemberId = 'hong-jinwoon-node';
+    const splitCtx = buildOrgStructuralTreeContext({
+      membersRaw: [
+        { id: hqId, name: '안성준', rank: '본사', phone: null, external_id: null, source_customer_id: null },
+        { id: imId, name: '임태순', rank: '센터장', phone: null, external_id: null, source_customer_id: null },
+        { id: jungId, name: '정철희', rank: '영업사원', phone: null, external_id: null, source_customer_id: null },
+        {
+          id: hongMemberId,
+          name: '홍진운',
+          rank: '영업사원',
+          phone: '01011112222',
+          external_id: `customer:${hongCustomerId}`,
+          source_customer_id: hongCustomerId,
+        },
+      ],
+      edgesRaw: [
+        { parent_id: hqId, child_id: imId },
+        { parent_id: hqId, child_id: jungId },
+        { parent_id: imId, child_id: hongMemberId },
+      ],
+      customerBirthDateById: new Map([[hongCustomerId, '1975-05-05']]),
+    });
+
+    const underJung = splitCtx.resolveSettlementWalkSalesMemberId({
+      sales_member_id: jungId,
+      settlement_sales_member_id: null,
+      customer_id: hongCustomerId,
+      status: '가입',
+      customer_name: '홍진운',
+      customer_phone: '01011112222',
+      customer_birth_date: '1975-05-05',
+    });
+    assert.equal(underJung, jungId);
+
+    const underImCustomerNode = splitCtx.resolveSettlementWalkSalesMemberId({
+      sales_member_id: imId,
+      settlement_sales_member_id: null,
+      customer_id: hongCustomerId,
+      status: '가입',
+      customer_name: '홍진운',
+      customer_phone: '01011112222',
+      customer_birth_date: '1975-05-05',
+    });
+    assert.equal(underImCustomerNode, hongMemberId);
+
+    assert.equal(
+      splitCtx.resolveContractSalesMemberId({
+        sales_member_id: jungId,
+        customer_id: hongCustomerId,
+        status: '가입',
+        customer_name: '홍진운',
+        customer_phone: '01011112222',
+        customer_birth_date: '1975-05-05',
+      }),
+      jungId,
+    );
+  });
 });

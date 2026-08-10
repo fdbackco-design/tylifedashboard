@@ -6,4 +6,5 @@
  */
 export const ORG_CUSTOMER_NODE_SPLIT_BY_SALES_PARENT_IDS: ReadonlySet<string> = new Set([
   'f21273ec-f980-4ac0-b16c-bf6ae4e7a606', // 정성훈
+  '35f23c0b-bde8-4166-83ff-19eb7e027bb7', // 홍진운 (임태순/정철희 담당 분리)
 ]);
