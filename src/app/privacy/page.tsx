@@ -39,16 +39,16 @@ export default function PrivacyPage() {
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">개인정보처리방침</h1>
           <p className="text-sm text-gray-700 mt-4 leading-relaxed">
-            <span className="font-semibold">TY Life Dashboard</span>는 「개인정보 보호법」 등 관련 법령에 따라 이용자의 개인정보를 보호하고,
+            <span className="font-semibold">Feed Life</span>는 「개인정보 보호법」 등 관련 법령에 따라 이용자의 개인정보를 보호하고,
             개인정보와 관련한 고충을 신속하고 원활하게 처리할 수 있도록 다음과 같이 개인정보처리방침을 수립·공개합니다.
           </p>
           <p className="text-sm text-gray-700 mt-3 leading-relaxed">
-            본 개인정보처리방침은 <span className="font-semibold">TY Life Dashboard 웹사이트 및 모바일 앱 서비스</span>에 적용됩니다.
+            본 개인정보처리방침은 <span className="font-semibold">Feed Life 웹사이트 및 모바일 앱 서비스</span>에 적용됩니다.
           </p>
 
           <SectionTitle>제1조 개인정보의 처리 목적</SectionTitle>
           <p className="text-sm text-gray-700 leading-relaxed mb-3">
-            TY Life Dashboard는 다음의 목적을 위해 개인정보를 처리합니다. 처리한 개인정보는 아래 목적 이외의 용도로는 이용하지 않으며,
+            Feed Life는 다음의 목적을 위해 개인정보를 처리합니다. 처리한 개인정보는 아래 목적 이외의 용도로는 이용하지 않으며,
             이용 목적이 변경되는 경우 관련 법령에 따라 별도의 동의를 받는 등 필요한 조치를 이행합니다.
           </p>
           <Table>
@@ -88,7 +88,7 @@ export default function PrivacyPage() {
 
           <SectionTitle>제2조 처리하는 개인정보 항목</SectionTitle>
           <p className="text-sm text-gray-700 leading-relaxed mb-3">
-            TY Life Dashboard는 서비스 제공을 위해 필요한 범위에서 다음과 같은 개인정보를 처리할 수 있습니다.
+            Feed Life는 서비스 제공을 위해 필요한 범위에서 다음과 같은 개인정보를 처리할 수 있습니다.
           </p>
           <Table>
             <thead>
@@ -130,7 +130,7 @@ export default function PrivacyPage() {
 
           <SectionTitle>제3조 개인정보의 처리 및 보유 기간</SectionTitle>
           <p className="text-sm text-gray-700 leading-relaxed mb-3">
-            TY Life Dashboard는 법령에 따른 개인정보 보유·이용 기간 또는 정보주체로부터 개인정보 수집 시 동의받은 보유·이용 기간 내에서 개인정보를 처리·보유합니다.
+            Feed Life는 법령에 따른 개인정보 보유·이용 기간 또는 정보주체로부터 개인정보 수집 시 동의받은 보유·이용 기간 내에서 개인정보를 처리·보유합니다.
           </p>
           <Table>
             <thead>
@@ -164,7 +164,7 @@ export default function PrivacyPage() {
 
           <SectionTitle>제4조 개인정보의 제3자 제공</SectionTitle>
           <p className="text-sm text-gray-700 leading-relaxed mb-3">
-            TY Life Dashboard는 원칙적으로 정보주체의 개인정보를 제1조의 처리 목적 범위 내에서만 처리하며, 정보주체의 동의가 있거나 법령에 특별한 규정이 있는 경우를 제외하고 개인정보를 제3자에게 제공하지 않습니다.
+            Feed Life는 원칙적으로 정보주체의 개인정보를 제1조의 처리 목적 범위 내에서만 처리하며, 정보주체의 동의가 있거나 법령에 특별한 규정이 있는 경우를 제외하고 개인정보를 제3자에게 제공하지 않습니다.
           </p>
           <p className="text-sm text-gray-700 leading-relaxed mb-3">
             다만 다음의 경우에는 관련 법령에 따라 개인정보를 제공할 수 있습니다.
@@ -194,7 +194,7 @@ export default function PrivacyPage() {
 
           <SectionTitle>제5조 개인정보 처리업무의 위탁</SectionTitle>
           <p className="text-sm text-gray-700 leading-relaxed mb-3">
-            TY Life Dashboard는 원활한 서비스 제공을 위해 일부 개인정보 처리업무를 외부 서비스에 위탁할 수 있습니다.
+            Feed Life는 원활한 서비스 제공을 위해 일부 개인정보 처리업무를 외부 서비스에 위탁할 수 있습니다.
           </p>
           <Table>
             <thead>
@@ -228,7 +228,7 @@ export default function PrivacyPage() {
 
           <SectionTitle>제6조 개인정보의 국외 이전</SectionTitle>
           <p className="text-sm text-gray-700 leading-relaxed mb-3">
-            TY Life Dashboard는 서비스 운영 과정에서 해외에 위치한 클라우드 서비스 제공업체를 이용할 수 있으며, 이 과정에서 개인정보가 국외에 저장 또는 처리될 수 있습니다.
+            Feed Life는 서비스 운영 과정에서 해외에 위치한 클라우드 서비스 제공업체를 이용할 수 있으며, 이 과정에서 개인정보가 국외에 저장 또는 처리될 수 있습니다.
           </p>
           <Table>
             <thead>
@@ -266,7 +266,7 @@ export default function PrivacyPage() {
 
           <SectionTitle>제7조 개인정보의 파기 절차 및 방법</SectionTitle>
           <p className="text-sm text-gray-700 leading-relaxed mb-3">
-            TY Life Dashboard는 개인정보 보유기간의 경과, 처리 목적 달성 등 개인정보가 불필요하게 되었을 때에는 지체 없이 해당 개인정보를 파기합니다.
+            Feed Life는 개인정보 보유기간의 경과, 처리 목적 달성 등 개인정보가 불필요하게 되었을 때에는 지체 없이 해당 개인정보를 파기합니다.
           </p>
           <Table>
             <thead>
@@ -292,7 +292,7 @@ export default function PrivacyPage() {
 
           <SectionTitle>제8조 정보주체의 권리와 행사 방법</SectionTitle>
           <p className="text-sm text-gray-700 leading-relaxed mb-3">
-            정보주체는 TY Life Dashboard에 대해 언제든지 다음의 권리를 행사할 수 있습니다.
+            정보주체는 Feed Life에 대해 언제든지 다음의 권리를 행사할 수 있습니다.
           </p>
           <Table>
             <thead>
@@ -321,7 +321,7 @@ export default function PrivacyPage() {
             </tbody>
           </Table>
           <p className="text-sm text-gray-700 mt-3 leading-relaxed">
-            권리 행사는 개인정보 보호책임자 또는 담당 부서에 서면, 이메일 등으로 요청할 수 있으며, TY Life Dashboard는 관련 법령에 따라 지체 없이 조치합니다.
+            권리 행사는 개인정보 보호책임자 또는 담당 부서에 서면, 이메일 등으로 요청할 수 있으며, Feed Life는 관련 법령에 따라 지체 없이 조치합니다.
           </p>
           <p className="text-sm text-gray-700 mt-2 leading-relaxed">
             다만, 다른 법령에서 보존 의무를 정하고 있거나 계약·정산·분쟁 대응을 위해 필요한 경우에는 일부 권리 행사가 제한될 수 있습니다.
@@ -329,7 +329,7 @@ export default function PrivacyPage() {
 
           <SectionTitle>제9조 개인정보의 안전성 확보조치</SectionTitle>
           <p className="text-sm text-gray-700 leading-relaxed mb-3">
-            TY Life Dashboard는 개인정보의 안전성 확보를 위해 다음과 같은 조치를 취합니다.
+            Feed Life는 개인정보의 안전성 확보를 위해 다음과 같은 조치를 취합니다.
           </p>
           <Table>
             <thead>
@@ -356,7 +356,7 @@ export default function PrivacyPage() {
 
           <SectionTitle>제10조 쿠키 및 자동 수집 장치의 이용</SectionTitle>
           <p className="text-sm text-gray-700 leading-relaxed">
-            TY Life Dashboard는 로그인 상태 유지, 서비스 이용 편의 제공, 보안 관리 등을 위해 쿠키 또는 유사한 기술을 사용할 수 있습니다.
+            Feed Life는 로그인 상태 유지, 서비스 이용 편의 제공, 보안 관리 등을 위해 쿠키 또는 유사한 기술을 사용할 수 있습니다.
           </p>
           <p className="text-sm text-gray-700 leading-relaxed mt-2">
             이용자는 브라우저 설정을 통해 쿠키 저장을 거부하거나 삭제할 수 있습니다. 다만 쿠키 저장을 거부할 경우 로그인 유지 등 일부 서비스 이용에 제한이 있을 수 있습니다.
@@ -364,7 +364,7 @@ export default function PrivacyPage() {
 
           <SectionTitle>제11조 14세 미만 아동의 개인정보 처리</SectionTitle>
           <p className="text-sm text-gray-700 leading-relaxed">
-            TY Life Dashboard는 원칙적으로 14세 미만 아동을 대상으로 서비스를 제공하지 않습니다.
+            Feed Life는 원칙적으로 14세 미만 아동을 대상으로 서비스를 제공하지 않습니다.
           </p>
           <p className="text-sm text-gray-700 leading-relaxed mt-2">
             만약 14세 미만 아동의 개인정보를 처리해야 하는 경우에는 법정대리인의 동의를 받는 등 관련 법령에서 정한 절차를 준수합니다.
@@ -372,7 +372,7 @@ export default function PrivacyPage() {
 
           <SectionTitle>제12조 개인정보 보호책임자 및 문의처</SectionTitle>
           <p className="text-sm text-gray-700 leading-relaxed mb-3">
-            TY Life Dashboard는 개인정보 처리와 관련한 문의, 불만 처리, 피해 구제 등을 위해 아래와 같이 개인정보 보호책임자 및 담당 부서를 지정합니다.
+            Feed Life는 개인정보 처리와 관련한 문의, 불만 처리, 피해 구제 등을 위해 아래와 같이 개인정보 보호책임자 및 담당 부서를 지정합니다.
           </p>
           <Table>
             <thead>
