@@ -216,6 +216,18 @@ export async function calculateMonthlySettlement(params: {
     }
   }
   const eligibleIds = eligibleContractRows.map((r) => String(r.id));
+  // 관리자 수동 이월(deferred_reason=manual)은 대상월에 ELIGIBLE로 잡혀도 플래그를 유지한다.
+  // (지우면 이후 원래 월 재계산 시 해피콜 윈도우로 다시 잡혀 이중 정산될 수 있음)
+  const manualDeferredEligibleIdSet = new Set(
+    eligibleContractRows
+      .filter(
+        (r) =>
+          Boolean(r.settlement_deferred) &&
+          String(r.deferred_reason ?? '') === 'manual',
+      )
+      .map((r) => String(r.id)),
+  );
+  const clearDeferEligibleIds = eligibleIds.filter((id) => !manualDeferredEligibleIdSet.has(id));
   if (eligibleIds.length > 0) {
     try {
       for (const idChunk of chunkIds(eligibleIds, DB_ID_CHUNK_SIZE)) {
@@ -223,15 +235,26 @@ export async function calculateMonthlySettlement(params: {
           .from('contracts')
           .update({
             settlement_status: 'ELIGIBLE_CONFIRMED',
+          })
+          .in('id', idChunk);
+        if (eliErr && debug) {
+          // eslint-disable-next-line no-console
+          console.warn('[settlement-debug] eligible update error', eliErr);
+        }
+      }
+      for (const idChunk of chunkIds(clearDeferEligibleIds, DB_ID_CHUNK_SIZE)) {
+        const { error: clearErr } = await db
+          .from('contracts')
+          .update({
             settlement_deferred: false,
             deferred_from_month: null,
             deferred_to_month: null,
             deferred_reason: null,
           })
           .in('id', idChunk);
-        if (eliErr && debug) {
+        if (clearErr && debug) {
           // eslint-disable-next-line no-console
-          console.warn('[settlement-debug] eligible update error', eliErr);
+          console.warn('[settlement-debug] clear defer update error', clearErr);
         }
       }
     } catch (e) {
