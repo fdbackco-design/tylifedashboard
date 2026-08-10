@@ -5,7 +5,7 @@ export type TyLifePartnersLogoProps = {
   variant?: 'hero' | 'header';
   className?: string;
   priority?: boolean;
-  /** 지정 시 640px 미만에서만 이 이미지를 쓰고, `sm` 이상에서는 기본 TY Life Partners 로고를 씁니다. */
+  /** 지정 시 640px 미만에서만 이 이미지를 쓰고, `sm` 이상에서는 기본 Feed Life 로고를 씁니다. */
   mobileSrc?: string;
   /** `header`에서 모바일 높이·폭을 줄일 때 */
   density?: 'default' | 'compact';
@@ -32,7 +32,7 @@ export default function TyLifePartnersLogo({
   const desktop = (
     <Image
       src="/ty-life-partners-logo.png"
-      alt="TY Life Partners"
+      alt="Feed Life"
       width={440}
       height={176}
       className={`h-auto w-full object-contain object-left ${mobileSrc ? 'hidden sm:block' : ''}`}
@@ -46,7 +46,7 @@ export default function TyLifePartnersLogo({
         <>
           <Image
             src={mobileSrc}
-            alt="TY Life Partners"
+            alt="Feed Life"
             width={440}
             height={176}
             className={`h-auto w-full object-contain object-left sm:hidden ${density === 'compact' ? 'max-h-[38px]' : ''}`}

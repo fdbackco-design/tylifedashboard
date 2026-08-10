@@ -4,7 +4,7 @@
  * 본 컴포넌트는 표시 전용. 데이터 조회/보안/관리자 보정값 적용/정산 계산은 변경하지 않는다.
  *
  * 디자인 구조:
- *   1. 상단 좌측 TY Life Partners 로고 / 우측 "지급 명세서" 제목
+ *   1. 상단 좌측 Feed Life 로고 / 우측 "지급 명세서" 제목
  *   2. 얇은 구분선
  *   3. 회색 정보 바 (성명 / 직책 / 정산 월 / 정산 기간)
  *   4. 짙은 네이비 강조 카드 (이번 달 실지급액)
@@ -190,7 +190,7 @@ export default function StatementSheetView(props: StatementSheetViewProps) {
       {/* 7. 하단 안내문 */}
       <div className="mt-10 border-t border-slate-200 pt-5 text-center">
         <p className="text-[11px] leading-relaxed text-slate-400 sm:text-xs">
-          본 명세서는 TY Life Partners와의 계약에 근거해 작성되었습니다.
+          본 명세서는 Feed Life와의 계약에 근거해 작성되었습니다.
           <br />
           내역에 대한 문의는 관리팀으로 연락 바랍니다.
         </p>

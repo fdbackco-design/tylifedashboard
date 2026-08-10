@@ -380,7 +380,7 @@ export default function ManagerChangeClient(props: {
             <label className="mb-1 block text-xs font-medium text-slate-700">소속 지사명</label>
             <input
               readOnly
-              value="Ty Life Partners"
+              value="Feed Life"
               className="w-full rounded border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm text-slate-700"
             />
           </div>

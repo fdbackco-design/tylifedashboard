@@ -158,7 +158,7 @@ function SidebarContents(props: {
           >
             <Image
               src="/ty-life-partners-logo.png"
-              alt="TY Life Partners"
+              alt="Feed Life"
               width={440}
               height={176}
               priority
@@ -250,7 +250,7 @@ export function AdminShell(props: {
             >
               <Image
                 src="/logo.png"
-                alt="TY Life Partners"
+                alt="Feed Life"
                 width={200}
                 height={56}
                 priority

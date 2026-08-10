@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS public.manager_change_requests (
   contract_codes          text        NOT NULL,
   item_name               text        NOT NULL,
 
-  branch_name             text        NOT NULL DEFAULT 'Ty Life Partners',
+  branch_name             text        NOT NULL DEFAULT 'Feed Life',
 
   before_manager_name     text        NOT NULL,
   before_manager_phone    text,

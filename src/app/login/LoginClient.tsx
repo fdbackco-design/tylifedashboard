@@ -144,7 +144,7 @@ export default function LoginClient(props: { redirect: string }) {
           <a href="/privacy" className="text-orange-600 hover:underline">
             개인정보처리방침
           </a>
-          <span className="whitespace-nowrap">© TY Life Partners</span>
+          <span className="whitespace-nowrap">© Feed Life</span>
         </div>
       </div>
     </div>

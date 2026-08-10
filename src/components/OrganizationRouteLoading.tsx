@@ -11,7 +11,7 @@ export default function OrganizationRouteLoading() {
     >
       <Image
         src="/logo.png"
-        alt="TY Life Partners"
+        alt="Feed Life"
         width={200}
         height={200}
         priority
