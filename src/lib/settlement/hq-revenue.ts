@@ -16,13 +16,18 @@ export type HqRevenuePeriodDateField = 'join_date' | 'happy_call_at';
 /** TY갤럭시케어 본사 매출 단가 변경 적용 시작일 (당일 포함 770,000원) */
 export const TY_GALAXY_CARE_HQ_PRICE_INCREASE_DATE = '2026-06-26';
 
+/**
+ * 본사 매출 단가(원/구좌).
+ * - TY갤럭시케어: 해피콜 완료일 2026-06-26 이전 715,000 / 이후(7월 정산 포함) 770,000
+ * - TY스페셜라이프케어·TY썬크루즈: 550,000 (7월 정산 기준)
+ */
 export const HQ_REVENUE_UNIT_PRICES = {
   TY갤럭시케어: { beforeIncrease: 715_000, fromIncrease: 770_000 },
   올라이프케어: 605_000,
   TY스페셜라이프케어: 550_000,
   '갤럭시케어 라이트': 500_000,
   TY케어플랜: 0,
-  TY썬크루즈: 0,
+  TY썬크루즈: 550_000,
 } as const;
 
 export type HqProductKind =
@@ -367,7 +372,7 @@ export function runHqRevenueSelfCheck(): { ok: boolean; failures: string[] } {
   assertEq('TY올라이프케어', getHqRevenueUnitPrice({ item_name: 'TY올라이프케어' }, '2026-07-01'), 605_000);
   assertEq('갤럭시케어 라이트', getHqRevenueUnitPrice('갤럭시케어 라이트', '2026-01-01'), 500_000);
   assertEq('TY케어플랜', getHqRevenueUnitPrice('TY케어플랜', '2026-07-01'), 0);
-  assertEq('TY썬크루즈', getHqRevenueUnitPrice({ item_name: 'TY썬크루즈' }, '2026-07-01'), 0);
+  assertEq('TY썬크루즈', getHqRevenueUnitPrice({ item_name: 'TY썬크루즈' }, '2026-07-01'), 550_000);
   assertKind('라이트 우선', resolveHqProductKind('갤럭시케어 라이트'), '갤럭시케어 라이트');
   assertKind('TY갤럭시케어_무', resolveHqProductKindFromContract({ product_type: '무' }), 'TY갤럭시케어');
   assertKind(
@@ -401,7 +406,7 @@ export function runHqRevenueSelfCheck(): { ok: boolean; failures: string[] } {
     0,
   );
   assertEq(
-    'TY썬크루즈 매출 0',
+    'TY썬크루즈 매출 55만/구좌',
     calcContractHqRevenue({
       product_type: 'TY갤럭시케어',
       item_name: 'TY썬크루즈',
@@ -409,7 +414,17 @@ export function runHqRevenueSelfCheck(): { ok: boolean; failures: string[] } {
       happy_call_at: '2026-07-01',
       unit_count: 2,
     }),
-    0,
+    1_100_000,
+  );
+  assertEq(
+    '7월 갤럭시케어 77만',
+    getHqRevenueUnitPrice('TY갤럭시케어', '2026-07-15'),
+    770_000,
+  );
+  assertEq(
+    '7월 스페셜 55만',
+    getHqRevenueUnitPrice('TY스페셜라이프케어', '2026-07-15'),
+    550_000,
   );
 
   const sample = sumHqRevenueForContracts(
