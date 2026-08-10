@@ -620,6 +620,20 @@ export async function calculateMonthlySettlement(params: {
       .update({ rank: '리더' })
       .in('id', rankUpMemberIds)
       .eq('rank', '영업사원');
+    // 같은 실행에서 아래 직접수당 귀속(승급 전→상위 리더) 판정이 옛 직급을 쓰지 않도록 메모리도 갱신.
+    // (미갱신 시 상세는 실제 담당자 합=정상, 현황 리스트 base_commission만 상위에게 붙는 불일치가 난다)
+    for (const mid of rankUpMemberIds) {
+      const m = (membersRaw as OrganizationMember[]).find((x) => x.id === mid);
+      if (m) m.rank = '리더';
+      prevParentByMemberId.set(
+        mid,
+        promotionEventsByMemberId.get(mid)?.previous_parent_id ??
+          prevParentByMemberId.get(mid) ??
+          parentByChildForPromo.get(mid) ??
+          null,
+      );
+      prevLeaderByPromotedMemberId.set(mid, prevParentByMemberId.get(mid) ?? null);
+    }
   }
 
   const joinStatusCandidates: JoinStatusContractCandidate[] = [];
