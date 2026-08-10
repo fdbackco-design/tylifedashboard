@@ -4,7 +4,7 @@ import Image from 'next/image';
 export default function OrganizationRouteLoading() {
   return (
     <div
-      className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-5 bg-gradient-to-b from-orange-200 via-orange-300 to-orange-400 px-6"
+      className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-5 bg-white px-6"
       role="status"
       aria-live="polite"
       aria-busy="true"
