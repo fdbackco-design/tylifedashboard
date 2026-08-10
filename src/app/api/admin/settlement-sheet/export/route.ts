@@ -28,6 +28,7 @@ import {
   formatYmdDot,
   isSuppressedStatementSheetMember,
   resolveLoginCodesForMembers,
+  resolveStatementPhonesByMemberId,
 } from '@/lib/settlement/statement-sheet';
 import {
   loadStatementDownlineSharedData,
@@ -158,6 +159,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // 영업자 로그인 ID(=공유 URL 의 tyCode) 매핑 — primary(member_id) → fallback(customer_id, phone 끝8자리).
   // ambiguous(후보 다수) 케이스는 export 에서는 링크가 비어 행이 제외된다.
   const { loginCodeByMemberId } = await resolveLoginCodesForMembers(db, memberList);
+  // A열 전화번호: org.phone 이 비어도 계정 발급(user_profiles) 전화로 채움.
+  const phoneByMemberId = await resolveStatementPhonesByMemberId(db, memberList, loginCodeByMemberId);
 
   // 산하 실적 구좌 — admin/settlement_sheet 페이지와 동일한 방식으로 일괄 계산.
   const { start_date, end_date } = getSettlementWindowForYearMonth(yearMonth);
@@ -214,12 +217,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         return null;
       }
       const name = (m.name ?? '').replace(/^\[고객\]\s*/, '') || '';
-      const phoneDigits = digitsOnlyPhone(m.phone);
+      const phoneDigits =
+        phoneByMemberId.get(m.id) || digitsOnlyPhone(m.phone);
       const tyCode = (loginCodeByMemberId.get(m.id) ?? '').trim();
       // 공유 링크(login_code) 가 없으면 명세서 공유가 불가능하므로 export 에서 제외.
       if (!tyCode) return null;
       // 운영팀 요청으로 노출 차단된 멤버는 export 에서도 제외.
       if (isSuppressedStatementSheetMember(name, phoneDigits)) return null;
+      // 계정 발급된 영업자는 전화번호가 있어야 함 — 비어 있으면 행 제외(빈 A열 방지).
+      if (!phoneDigits) return null;
       const link = baseUrl
         ? `${baseUrl}/organization/statement/${encodeURIComponent(tyCode)}?year_month=${encodeURIComponent(yearMonth)}`
         : '';

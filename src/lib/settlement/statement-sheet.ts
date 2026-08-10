@@ -369,3 +369,90 @@ export async function resolveLoginCodesForMembers(
 
   return { loginCodeByMemberId, ambiguousMemberIds };
 }
+
+/**
+ * 명세서/엑셀 A열(전화번호)용.
+ * organization_members.phone 이 비어 있어도 계정 발급 시점의 user_profiles 전화로 채운다.
+ *
+ * 우선순위:
+ *   1) organization_members.phone
+ *   2) user_profiles.phone (member_id)
+ *   3) user_profiles.pre_issued_phone (member_id)
+ *   4) login_code 로 찾은 user_profiles.phone / pre_issued_phone
+ *   5) login_code 가 8자리면 `010` + login_code (계정 발급 시 전화 끝8자리 규칙)
+ */
+export async function resolveStatementPhonesByMemberId(
+  db: import('@supabase/supabase-js').SupabaseClient,
+  members: Array<{ id: string; phone: string | null }>,
+  loginCodeByMemberId: Map<string, string>,
+): Promise<Map<string, string>> {
+  const phoneByMemberId = new Map<string, string>();
+  if (members.length === 0) return phoneByMemberId;
+
+  for (const m of members) {
+    const d = digitsOnlyPhone(m.phone);
+    if (d) phoneByMemberId.set(m.id, d);
+  }
+
+  const missingMemberIds = members.filter((m) => !phoneByMemberId.has(m.id)).map((m) => m.id);
+  if (missingMemberIds.length > 0) {
+    const { data: byMember } = await db
+      .from('user_profiles')
+      .select('member_id, phone, pre_issued_phone, is_active, updated_at')
+      .in('member_id', missingMemberIds)
+      .order('is_active', { ascending: false })
+      .order('updated_at', { ascending: false });
+    for (const p of ((byMember ?? []) as Array<{
+      member_id: string | null;
+      phone: string | null;
+      pre_issued_phone: string | null;
+    }>)) {
+      if (!p.member_id || phoneByMemberId.has(p.member_id)) continue;
+      const d = digitsOnlyPhone(p.phone) || digitsOnlyPhone(p.pre_issued_phone);
+      if (d) phoneByMemberId.set(p.member_id, d);
+    }
+  }
+
+  const stillMissing = members.filter((m) => !phoneByMemberId.has(m.id));
+  const loginCodes = [
+    ...new Set(
+      stillMissing
+        .map((m) => (loginCodeByMemberId.get(m.id) ?? '').trim())
+        .filter((c) => /^\d{8}$/.test(c)),
+    ),
+  ];
+  if (loginCodes.length > 0) {
+    const { data: byLogin } = await db
+      .from('user_profiles')
+      .select('login_code, phone, pre_issued_phone, is_active, updated_at')
+      .in('login_code', loginCodes)
+      .order('is_active', { ascending: false })
+      .order('updated_at', { ascending: false });
+    const phoneByLoginCode = new Map<string, string>();
+    for (const p of ((byLogin ?? []) as Array<{
+      login_code: string | null;
+      phone: string | null;
+      pre_issued_phone: string | null;
+    }>)) {
+      const code = (p.login_code ?? '').trim();
+      if (!code || phoneByLoginCode.has(code)) continue;
+      const d = digitsOnlyPhone(p.phone) || digitsOnlyPhone(p.pre_issued_phone);
+      if (d) phoneByLoginCode.set(code, d);
+    }
+    for (const m of stillMissing) {
+      const code = (loginCodeByMemberId.get(m.id) ?? '').trim();
+      if (!code) continue;
+      const fromProfile = phoneByLoginCode.get(code);
+      if (fromProfile) {
+        phoneByMemberId.set(m.id, fromProfile);
+        continue;
+      }
+      // 계정 발급 규칙: login_code = 휴대폰 끝 8자리 → 010 + login_code
+      if (/^\d{8}$/.test(code)) {
+        phoneByMemberId.set(m.id, `010${code}`);
+      }
+    }
+  }
+
+  return phoneByMemberId;
+}
