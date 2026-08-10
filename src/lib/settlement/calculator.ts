@@ -590,8 +590,8 @@ function calcDirectContractsWithLeaderPromotion(
 
     const penalty = commissionPenaltyWonForItemName((c as { item_name?: string }).item_name, c.unit_count);
 
-    // 코드 선발급 특례: 개인 직접판매 수당만 예외 단가 적용.
-    // - 더블업/승급/보너스/오버라이드는 기존 규칙 유지.
+    // 코드 선발급 특례 단가(과거 10만원): PRE_ISSUED_SPECIAL_UNIT_PRICE_ENABLED=false 이면 미적용.
+    // - 상위리더 parent 예외·더블업/승급/보너스는 기존 규칙 유지.
     // - 한도 소진은 "본인 직접판매 실제 구좌" 누계(unit_count)만 사용.
     if (setting && originMemberId == null) {
       const contractSalesMemberId = ((c as any).sales_member_id ?? null) as string | null;

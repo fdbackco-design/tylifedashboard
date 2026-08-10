@@ -139,12 +139,19 @@ export function sumActualDirectUnitsForSpecial(
   return sum;
 }
 
+/**
+ * 코드 선발급 직접수당 특례(구좌당 예외 단가, 예: 10만원) 적용 여부.
+ * false면 상위리더 parent 예외만 유지하고, 개인 수당은 일반 직급 단가로 지급한다.
+ */
+export const PRE_ISSUED_SPECIAL_UNIT_PRICE_ENABLED = false;
+
 export function isSpecialApplicableToContract(params: {
   setting: PreIssuedCodeMemberSetting;
   contractOrderYmd: string;
   memberId: string;
   contractSalesMemberId: string | null;
 }): boolean {
+  if (!PRE_ISSUED_SPECIAL_UNIT_PRICE_ENABLED) return false;
   // 직접판매만: 계약 담당자 = 본인
   if (!params.contractSalesMemberId) return false;
   if (params.contractSalesMemberId !== params.memberId) return false;

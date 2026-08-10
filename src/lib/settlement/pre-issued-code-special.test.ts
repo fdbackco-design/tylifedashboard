@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import {
+  isSpecialApplicableToContract,
+  PRE_ISSUED_SPECIAL_UNIT_PRICE_ENABLED,
   splitDirectContractByPreIssuedSpecial,
   type PreIssuedCodeMemberSetting,
 } from './pre-issued-code-special';
@@ -20,6 +22,19 @@ const setting: PreIssuedCodeMemberSetting = {
 };
 
 describe('pre-issued code special split', () => {
+  it('특례 단가 예외는 비활성(일반 직급 단가 지급)', () => {
+    assert.equal(PRE_ISSUED_SPECIAL_UNIT_PRICE_ENABLED, false);
+    assert.equal(
+      isSpecialApplicableToContract({
+        setting,
+        contractOrderYmd: '2026-07-10',
+        memberId: 'm1',
+        contractSalesMemberId: 'm1',
+      }),
+      false,
+    );
+  });
+
   it('실제 1구좌 판매 → 1구좌 특례 10만원', () => {
     const r = splitDirectContractByPreIssuedSpecial({
       contractUnitCount: 1,
