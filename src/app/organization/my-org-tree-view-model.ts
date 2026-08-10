@@ -14,6 +14,7 @@ import { type ContractItem, collectSubtreeIds, countByStatus } from '@/lib/organ
 import { buildChildrenByParentFromRows } from '@/lib/settlement/settlement-org-tree';
 import { stripOrgTreeNodesForDisplay } from '@/lib/organization/org-tree-display';
 import { buildOrgContractSalesRemap } from '@/lib/organization/org-contract-sales-remap';
+import { ORG_CUSTOMER_NODE_SPLIT_BY_SALES_PARENT_IDS } from '@/lib/organization/org-customer-node-split';
 import { stripCustomerMemberNamePrefix } from '@/lib/dashboard/display-format';
 import {
   isParentOverrideActiveForYearMonth,
@@ -169,13 +170,8 @@ export async function buildMyOrganizationTreeViewModel(
       }
     }
 
-    const {
-      remapMemberId,
-      remapCustomerMemberId,
-      resolveContractOriginForSubtree,
-      hqIds: hqIdsForContracts,
-      membersFiltered,
-    } = buildOrgContractSalesRemap(membersRaw as any, customerBirthDateById);
+    const baseRemap = buildOrgContractSalesRemap(membersRaw as any, customerBirthDateById);
+    const { remapMemberId, hqIds: hqIdsForContracts, membersFiltered } = baseRemap;
     const hqSalesMemberIds = [...hqIdsForContracts];
 
     /** 병합 필터 후에도 스냅샷 행과 동일 객체(leader_rank_effective_at 등 유지) */
@@ -237,6 +233,13 @@ export async function buildMyOrganizationTreeViewModel(
         parentId && memberIdSetFiltered.has(parentId) ? parentId : parentId || null,
       );
     }
+
+    // parent map 반영 후 재구성: 담당자별 분리 고객(홍진운 등) 누적구좌 귀속
+    const { remapCustomerMemberId, resolveContractOriginForSubtree } = buildOrgContractSalesRemap(
+      membersRaw as any,
+      customerBirthDateById,
+      { parentByChildId: edgeByChild },
+    );
 
     const treeRows = treeRowsBase.map((r) => ({
       ...r,
@@ -620,6 +623,11 @@ export async function buildMyOrganizationTreeViewModel(
       );
       const customerKey = customerKeyRaw && subtreeIdSet.has(customerKeyRaw) ? customerKeyRaw : '';
       if (customerKey && customerKey !== key) {
+        // 홍진운 등: 고객 노드에는 현재 parent와 동일 담당자 계약만 표시
+        if (ORG_CUSTOMER_NODE_SPLIT_BY_SALES_PARENT_IDS.has(String((c as any).customer_id ?? ''))) {
+          const customerParentId = edgeByChild.get(customerKey) ?? null;
+          if (customerParentId !== remapMemberId(String((c as any).sales_member_id ?? ''))) continue;
+        }
         if (!contractsByMember[customerKey]) contractsByMember[customerKey] = [];
         contractsByMember[customerKey].push(item);
       }
