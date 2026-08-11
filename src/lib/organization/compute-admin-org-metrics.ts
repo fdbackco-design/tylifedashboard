@@ -30,7 +30,7 @@ export async function computeAdminOrgNodeMetrics(
     db
       .from('contracts')
       .select(
-        'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, customer_id, sales_member_id, is_cancelled, sales_link_status, happy_call_at, happycall_result, source_snapshot_json, created_at, invoice_registered_at, customers(name, phone, birth_date)',
+        'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, customer_id, sales_member_id, is_cancelled, sales_link_status, happy_call_at, happycall_result, source_snapshot_json, created_at, invoice_registered_at, sequence_no, customers(name, phone, birth_date)',
       )
       .not('sales_member_id', 'is', null)
       .order('join_date', { ascending: false })
@@ -98,6 +98,7 @@ export async function computeAdminOrgNodeMetrics(
       created_at: c.created_at ?? null,
       happy_call_at: c.happy_call_at ?? null,
       invoice_registered_at: c.invoice_registered_at ?? null,
+      sequence_no: (c as { sequence_no?: number | null }).sequence_no ?? null,
     }));
 
   const prevLeaderByPromotedMemberId = new Map<string, string | null>();
@@ -120,18 +121,24 @@ export async function computeAdminOrgNodeMetrics(
   ];
   const leaderPromotionThresholdContractMetaById = new Map<
     string,
-    { join_date: string; happy_call_at?: string | null; created_at?: string | null }
+    {
+      join_date: string;
+      happy_call_at?: string | null;
+      sequence_no?: number | null;
+      created_at?: string | null;
+    }
   >();
   if (thresholdPromoContractIds.length > 0) {
     const { data: thContractRows } = await db
       .from('contracts')
-      .select('id, created_at, join_date, happy_call_at')
+      .select('id, created_at, join_date, happy_call_at, sequence_no')
       .in('id', thresholdPromoContractIds);
     for (const row of (thContractRows ?? []) as any[]) {
       if (!row?.id) continue;
       leaderPromotionThresholdContractMetaById.set(String(row.id), {
         join_date: String(row.join_date ?? '').slice(0, 10),
         happy_call_at: (row.happy_call_at ?? null) as string | null,
+        sequence_no: (row.sequence_no ?? null) as number | null,
         created_at: (row.created_at ?? null) as string | null,
       });
     }

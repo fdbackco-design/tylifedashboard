@@ -42,6 +42,7 @@ type EligibleContract = {
   sales_member_id: string | null;
   item_name?: string | null;
   product_type?: string | null;
+  sequence_no?: number | null;
   created_at?: string | null;
   happy_call_at?: string | null;
   invoice_registered_at?: string | null;
@@ -51,6 +52,7 @@ function promotionOrderRef(c: {
   contract_id?: string;
   id?: string;
   join_date: string;
+  sequence_no?: number | null;
   created_at?: string | null;
   happy_call_at?: string | null;
   invoice_registered_at?: string | null;
@@ -59,6 +61,7 @@ function promotionOrderRef(c: {
     id: String(c.contract_id ?? c.id ?? ''),
     join_date: c.join_date.slice(0, 10),
     happy_call_at: c.happy_call_at ?? null,
+    sequence_no: c.sequence_no ?? null,
     invoice_registered_at: c.invoice_registered_at ?? null,
     created_at: c.created_at ?? null,
   };
@@ -331,6 +334,7 @@ export function calculateOrgNodeMetrics(params: {
       join_date: c.join_date.slice(0, 10),
       unit_count: c.unit_count ?? 0,
       sales_member_id: c.sales_member_id as string,
+      sequence_no: c.sequence_no ?? null,
       created_at: c.created_at ?? null,
       happy_call_at: c.happy_call_at ?? null,
       invoice_registered_at: c.invoice_registered_at ?? null,

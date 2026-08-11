@@ -7,6 +7,7 @@ import {
 import {
   CENTER_CHIEF_PROMOTION_MIN_LEADERS,
   compareContractToPromotionThresholdOrder,
+  comparePromotionOrderFields,
   contractJoinOrderYmd,
   isCustomerVirtualOrgMember,
   type PromotionOrderContractRef,
@@ -39,7 +40,13 @@ export type CenterChiefPromotionThreshold = {
   /** 5번째 리더 승격 순서일(해피콜 YMD 우선) */
   threshold_join_date: string;
   threshold_contract_id?: string | null;
+  /** 승격 계약 실제 가입일 (동일 해피콜일 tie-break) */
+  threshold_contract_join_date?: string | null;
+  /** 승격 계약 sequence_no */
+  threshold_sequence_no?: number | null;
+  /** @deprecated 정렬에는 사용하지 않음 */
   threshold_invoice_registered_at?: string | null;
+  /** @deprecated 정렬에는 사용하지 않음 */
   threshold_created_at?: string | null;
 };
 
@@ -52,36 +59,14 @@ export type CenterChiefPromotionEventRecord = {
   created_at: string | null;
 };
 
-function normalizeCreatedAt(s?: string | null): string {
-  if (s == null) return '';
-  return String(s).trim();
-}
-
-function comparePromotionOrderTieBreak(
-  a: { invoice_registered_at?: string | null; created_at?: string | null },
-  b: { invoice_registered_at?: string | null; created_at?: string | null },
-): number {
-  const invA = normalizeCreatedAt(a.invoice_registered_at);
-  const invB = normalizeCreatedAt(b.invoice_registered_at);
-  if (invA !== invB) {
-    if (!invA) return 1;
-    if (!invB) return -1;
-    return invA.localeCompare(invB);
-  }
-  const ca = normalizeCreatedAt(a.created_at);
-  const cb = normalizeCreatedAt(b.created_at);
-  if (ca !== cb) return ca.localeCompare(cb);
-  return 0;
-}
-
 function leaderPromotionSortKey(
   memberId: string,
   leaderPromotionThresholdByMemberId: Map<string, SalesMemberPromotionThreshold | null>,
   leaderRankEffectiveAtByMemberId?: Map<string, string | null>,
 ): {
   date: string;
-  invoice_registered_at: string | null;
-  created_at: string | null;
+  join_date: string | null;
+  sequence_no: number | null;
   contractId: string;
   memberId: string;
 } {
@@ -89,8 +74,8 @@ function leaderPromotionSortKey(
   if (th) {
     return {
       date: th.threshold_join_date,
-      invoice_registered_at: th.threshold_invoice_registered_at ?? null,
-      created_at: th.threshold_created_at ?? null,
+      join_date: th.threshold_contract_join_date ?? null,
+      sequence_no: th.threshold_sequence_no ?? null,
       contractId: th.threshold_contract_id,
       memberId,
     };
@@ -99,16 +84,16 @@ function leaderPromotionSortKey(
   if (at) {
     return {
       date: at.slice(0, 10),
-      invoice_registered_at: null,
-      created_at: at,
+      join_date: at.slice(0, 10),
+      sequence_no: null,
       contractId: '',
       memberId,
     };
   }
   return {
     date: CENTER_CHIEF_THRESHOLD_UNKNOWN_DATE,
-    invoice_registered_at: null,
-    created_at: null,
+    join_date: null,
+    sequence_no: null,
     contractId: '',
     memberId,
   };
@@ -124,9 +109,11 @@ export function compareSubtreeLeaderPromotionOrder(
   const ka = leaderPromotionSortKey(aMemberId, leaderPromotionThresholdByMemberId, leaderRankEffectiveAtByMemberId);
   const kb = leaderPromotionSortKey(bMemberId, leaderPromotionThresholdByMemberId, leaderRankEffectiveAtByMemberId);
   if (ka.date !== kb.date) return ka.date.localeCompare(kb.date);
-  const tie = comparePromotionOrderTieBreak(ka, kb);
+  const tie = comparePromotionOrderFields(
+    { happy_call_at: null, join_date: ka.join_date, sequence_no: ka.sequence_no, id: ka.contractId },
+    { happy_call_at: null, join_date: kb.join_date, sequence_no: kb.sequence_no, id: kb.contractId },
+  );
   if (tie !== 0) return tie;
-  if (ka.contractId !== kb.contractId) return ka.contractId.localeCompare(kb.contractId);
   return ka.memberId.localeCompare(kb.memberId);
 }
 
@@ -136,6 +123,8 @@ export function centerChiefThresholdToPromotionRef(
   return {
     threshold_contract_id: th.threshold_contract_id ?? th.threshold_leader_member_id,
     threshold_join_date: th.threshold_join_date,
+    threshold_contract_join_date: th.threshold_contract_join_date ?? null,
+    threshold_sequence_no: th.threshold_sequence_no ?? null,
     threshold_invoice_registered_at: th.threshold_invoice_registered_at ?? null,
     threshold_created_at: th.threshold_created_at ?? null,
   };
@@ -166,8 +155,8 @@ export function centerChiefPostRollupStartsYmd(threshold: CenterChiefPromotionTh
  * - 0: 승급 계약 자체 (pre)
  * - &gt;0: 승급 계약 다음 (post)
  *
- * 리더 승급 walk와 동일: 해피콜 YMD → invoice_registered_at → created_at → id.
- * (created_at만 쓰면 동일 해피콜 배치에서 송장 순과 어긋나 post 단가가 잘못 붙을 수 있다.)
+ * 리더 승급 walk와 동일: 해피콜 성공일 → 가입일자 → 계약 순번 → id.
+ * (created_at만 쓰면 동일 해피콜 배치에서 가입일·순번과 어긋나 post 단가가 잘못 붙을 수 있다.)
  */
 export function compareContractToCenterChiefThreshold(
   contract: PromotionOrderContractRef,
@@ -259,6 +248,8 @@ export function computeCenterChiefThresholdForMember(
       threshold_leader_member_id: fifthLeaderId,
       threshold_join_date: th.threshold_join_date,
       threshold_contract_id: th.threshold_contract_id,
+      threshold_contract_join_date: th.threshold_contract_join_date ?? null,
+      threshold_sequence_no: th.threshold_sequence_no ?? null,
       threshold_invoice_registered_at: th.threshold_invoice_registered_at ?? null,
       threshold_created_at: th.threshold_created_at ?? null,
     };
@@ -270,6 +261,8 @@ export function computeCenterChiefThresholdForMember(
       threshold_leader_member_id: fifthLeaderId,
       threshold_join_date: at.slice(0, 10),
       threshold_contract_id: null,
+      threshold_contract_join_date: at.slice(0, 10),
+      threshold_sequence_no: null,
       threshold_invoice_registered_at: null,
       threshold_created_at: at,
     };
@@ -329,6 +322,7 @@ export function mergeCenterChiefPromotionEventThresholds(
     {
       join_date: string;
       happy_call_at?: string | null;
+      sequence_no?: number | null;
       invoice_registered_at?: string | null;
       created_at?: string | null;
     }
@@ -341,6 +335,8 @@ export function mergeCenterChiefPromotionEventThresholds(
     const leaderId = String(r.threshold_leader_member_id);
     let cid = r.threshold_contract_id ? String(r.threshold_contract_id) : null;
     let joinDate = String(r.threshold_join_date).slice(0, 10);
+    let contractJoinDate: string | null = null;
+    let sequenceNo: number | null = null;
     let invoiceAt: string | null = null;
     let createdAt: string | null = r.created_at ?? null;
 
@@ -354,6 +350,8 @@ export function mergeCenterChiefPromotionEventThresholds(
         if (isCenterChiefThresholdUnknownDate(joinDate)) {
           joinDate = String(leaderTh.threshold_join_date).slice(0, 10);
         }
+        contractJoinDate = leaderTh.threshold_contract_join_date ?? contractJoinDate;
+        sequenceNo = leaderTh.threshold_sequence_no ?? sequenceNo;
         invoiceAt = leaderTh.threshold_invoice_registered_at ?? invoiceAt;
         createdAt = leaderTh.threshold_created_at ?? createdAt;
       }
@@ -362,6 +360,11 @@ export function mergeCenterChiefPromotionEventThresholds(
     const meta = cid ? thresholdContractMetaById.get(cid) : undefined;
     if (meta) {
       joinDate = contractJoinOrderYmd(meta);
+      contractJoinDate = String(meta.join_date ?? '').slice(0, 10) || contractJoinDate;
+      sequenceNo =
+        meta.sequence_no == null || !Number.isFinite(Number(meta.sequence_no))
+          ? sequenceNo
+          : Number(meta.sequence_no);
       invoiceAt = meta.invoice_registered_at ?? invoiceAt;
       createdAt = meta.created_at ?? createdAt;
     }
@@ -373,6 +376,8 @@ export function mergeCenterChiefPromotionEventThresholds(
       threshold_leader_member_id: leaderId,
       threshold_join_date: joinDate,
       threshold_contract_id: cid,
+      threshold_contract_join_date: contractJoinDate,
+      threshold_sequence_no: sequenceNo,
       threshold_invoice_registered_at: invoiceAt,
       threshold_created_at: createdAt,
     });

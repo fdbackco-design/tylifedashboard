@@ -134,26 +134,33 @@ export async function loadStatementDownlineSharedData(db: SupabaseClient): Promi
 
   const leaderPromotionThresholdContractMetaById = new Map<
     string,
-    { join_date: string; happy_call_at?: string | null; created_at?: string | null }
+    {
+      join_date: string;
+      happy_call_at?: string | null;
+      sequence_no?: number | null;
+      created_at?: string | null;
+    }
   >();
   const uniqThIds = [...new Set(thresholdContractIds)];
   for (const thChunk of chunk(uniqThIds, 200)) {
     if (thChunk.length === 0) continue;
     const { data: thRows } = await db
       .from('contracts')
-      .select('id, created_at, join_date, happy_call_at')
+      .select('id, created_at, join_date, happy_call_at, sequence_no')
       .in('id', thChunk);
     for (const row of (thRows ?? []) as Array<{
       id: string;
       created_at?: string | null;
       join_date?: string | null;
       happy_call_at?: string | null;
+      sequence_no?: number | null;
     }>) {
       if (!row?.id) continue;
       const id = String(row.id);
       const meta = {
         join_date: String(row.join_date ?? '').slice(0, 10),
         happy_call_at: (row.happy_call_at ?? null) as string | null,
+        sequence_no: (row.sequence_no ?? null) as number | null,
         created_at: (row.created_at ?? null) as string | null,
       };
       leaderPromotionThresholdContractMetaById.set(id, meta);
@@ -163,6 +170,8 @@ export async function loadStatementDownlineSharedData(db: SupabaseClient): Promi
           promotionThresholdByMemberId.set(mid, {
             ...th,
             threshold_join_date: orderYmd,
+            threshold_contract_join_date: meta.join_date,
+            threshold_sequence_no: meta.sequence_no,
             threshold_created_at: meta.created_at ?? null,
           });
         }

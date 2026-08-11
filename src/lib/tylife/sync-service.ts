@@ -2004,7 +2004,7 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
           db
             .from('contracts')
             .select(
-              'id, join_date, unit_count, sales_member_id, settlement_sales_member_id, customer_id, sales_link_status, status, is_cancelled, rental_request_no, invoice_no, invoice_registered_at, memo, created_at, happy_call_at, happycall_result, contract_code, product_type, item_name, source_snapshot_json',
+              'id, join_date, unit_count, sales_member_id, settlement_sales_member_id, customer_id, sales_link_status, status, is_cancelled, rental_request_no, invoice_no, invoice_registered_at, memo, created_at, happy_call_at, happycall_result, contract_code, product_type, item_name, source_snapshot_json, sequence_no',
             )
             .eq('is_cancelled', false),
         ]);
@@ -2096,6 +2096,7 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
             join_date: String(row.join_date ?? '').slice(0, 10),
             unit_count: row.unit_count ?? 0,
             sales_member_id: sid,
+            sequence_no: (row.sequence_no ?? null) as number | null,
             created_at: (row.created_at ?? null) as string | null,
             happy_call_at: (row.happy_call_at ?? null) as string | null,
             invoice_registered_at: (row.invoice_registered_at ?? null) as string | null,

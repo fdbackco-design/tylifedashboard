@@ -95,6 +95,7 @@ export async function calculateMonthlySettlement(params: {
         'invoice_registered_at',
         'rental_request_no',
         'item_name',
+        'sequence_no',
         'created_at',
         'customer_id',
         'settlement_deferred',
@@ -487,6 +488,7 @@ export async function calculateMonthlySettlement(params: {
       join_date: String(row.join_date ?? '').slice(0, 10),
       unit_count: row.unit_count ?? 0,
       sales_member_id: sid,
+      sequence_no: (row.sequence_no ?? null) as number | null,
       created_at: (row.created_at ?? null) as string | null,
       happy_call_at: (row.happy_call_at ?? null) as string | null,
       invoice_registered_at: (row.invoice_registered_at ?? null) as string | null,
@@ -684,6 +686,7 @@ export async function calculateMonthlySettlement(params: {
     {
       join_date: string;
       happy_call_at?: string | null;
+      sequence_no?: number | null;
       invoice_registered_at?: string | null;
       created_at?: string | null;
     }
@@ -691,7 +694,7 @@ export async function calculateMonthlySettlement(params: {
   if (thresholdContractIds.length > 0) {
     const { data: thContractRows, error: thCErr } = await db
       .from('contracts')
-      .select('id, created_at, join_date, happy_call_at, invoice_registered_at')
+      .select('id, created_at, join_date, happy_call_at, sequence_no, invoice_registered_at')
       .in('id', thresholdContractIds);
     if (thCErr) throw new Error(`승격 계약(created_at) 조회 실패: ${thCErr.message}`);
     for (const row of (thContractRows ?? []) as any[]) {
@@ -699,6 +702,7 @@ export async function calculateMonthlySettlement(params: {
       thresholdContractMetaById.set(String(row.id), {
         join_date: String(row.join_date ?? '').slice(0, 10),
         happy_call_at: (row.happy_call_at ?? null) as string | null,
+        sequence_no: (row.sequence_no ?? null) as number | null,
         invoice_registered_at: (row.invoice_registered_at ?? null) as string | null,
         created_at: (row.created_at ?? null) as string | null,
       });
@@ -796,7 +800,7 @@ export async function calculateMonthlySettlement(params: {
   if (missingCcContractIds.length > 0) {
     const { data: ccThContractRows, error: ccThCErr } = await db
       .from('contracts')
-      .select('id, created_at, join_date, happy_call_at, invoice_registered_at')
+      .select('id, created_at, join_date, happy_call_at, sequence_no, invoice_registered_at')
       .in('id', missingCcContractIds);
     if (ccThCErr) throw new Error(`센터장 달성 계약(created_at) 조회 실패: ${ccThCErr.message}`);
     for (const row of (ccThContractRows ?? []) as any[]) {
@@ -804,6 +808,7 @@ export async function calculateMonthlySettlement(params: {
       thresholdContractMetaById.set(String(row.id), {
         join_date: String(row.join_date ?? '').slice(0, 10),
         happy_call_at: (row.happy_call_at ?? null) as string | null,
+        sequence_no: (row.sequence_no ?? null) as number | null,
         invoice_registered_at: (row.invoice_registered_at ?? null) as string | null,
         created_at: (row.created_at ?? null) as string | null,
       });
