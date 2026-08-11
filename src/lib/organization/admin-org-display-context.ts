@@ -76,6 +76,7 @@ export function buildAdminOrgDisplayContext(params: {
     treeRows: treeRowsBase,
     remapMemberId,
     resolveContractSalesMemberId,
+    resolveSettlementWalkSalesMemberId,
     remapCustomerMemberId,
     hqIds: hqIdsRaw,
     membersFiltered,
@@ -121,7 +122,8 @@ export function buildAdminOrgDisplayContext(params: {
         id: c.id,
         join_date: String(c.join_date ?? '').slice(0, 10),
         unit_count: c.unit_count ?? 0,
-        sales_member_id: resolveContractSalesMemberId({
+        // 승급 threshold는 월정산 walk와 동일(누적 walk override 포함)
+        sales_member_id: resolveSettlementWalkSalesMemberId({
           sales_member_id: c.sales_member_id,
           customer_id: c.customer_id,
           status: c.status,
