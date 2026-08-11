@@ -48,6 +48,10 @@ export type AdminOrgDisplayContext = {
   hqIdForTree: string | null;
   remapMemberId: (id: string) => string;
   resolveContractSalesMemberId: (c: ContractSalesRemapInput) => string;
+  /** 승급/누적 walk 귀속(계약 단위 override 포함). 정산 담당 변경 없음. */
+  resolveSettlementWalkSalesMemberId: (
+    c: ContractSalesRemapInput & { settlement_sales_member_id?: string | null },
+  ) => string;
   remapCustomerMemberId: (
     customerId: string,
     expectedName?: string | null,
@@ -235,6 +239,7 @@ export function buildAdminOrgDisplayContext(params: {
     hqIdForTree,
     remapMemberId,
     resolveContractSalesMemberId,
+    resolveSettlementWalkSalesMemberId,
     remapCustomerMemberId,
     salesMemberDisplayName,
   };

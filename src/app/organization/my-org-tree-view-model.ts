@@ -655,6 +655,11 @@ export async function buildMyOrganizationTreeViewModel(
       if (!contractsByMember[key]) contractsByMember[key] = [];
       contractsByMember[key].push(item);
 
+      // walk override로 다른 멤버에 누적된 계약은 고객 노드에 중복 표시하지 않는다.
+      if (PROMOTION_WALK_MEMBER_NAME_BY_CONTRACT_CODE[String((c as any).contract_code ?? '').trim()]) {
+        continue;
+      }
+
       const customerKeyRaw = remapCustomerMemberId(
         (c as any).customer_id as string,
         (c as any).customers?.name ?? '',
