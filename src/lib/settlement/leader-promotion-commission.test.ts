@@ -21,6 +21,8 @@ function row(
   units: number,
   order: {
     happy_call_at: string;
+    join_date?: string;
+    sequence_no?: number;
     invoice_registered_at?: string;
     created_at?: string;
     status?: string;
@@ -32,9 +34,10 @@ function row(
     id,
     contract_code: id,
     status: order.status ?? '가입',
-    join_date: order.happy_call_at.slice(0, 10),
+    join_date: (order.join_date ?? order.happy_call_at).slice(0, 10),
     unit_count: units,
     sales_member_id: MEMBER,
+    sequence_no: order.sequence_no ?? null,
     happy_call_at: order.happy_call_at,
     invoice_registered_at: order.invoice_registered_at ?? null,
     created_at: order.created_at ?? `${order.happy_call_at}T00:00:00Z`,
@@ -48,19 +51,47 @@ function walk(rows: AttributedJoinContractRow[]) {
 }
 
 describe('leader promotion commission (walk SSOT)', () => {
-  it('1) 해피콜 완료일 우선 — A(6/19) before B(6/20) despite later invoice', () => {
+  it('1) 해피콜 완료일 우선 — A(6/19) before B(6/20) despite later join/sequence', () => {
     const a = row('A', 1, {
       happy_call_at: '2026-06-19',
-      invoice_registered_at: '2026-06-21T10:00:00Z',
+      join_date: '2026-06-21',
+      sequence_no: 999,
     });
     const b = row('B', 1, {
       happy_call_at: '2026-06-20',
-      invoice_registered_at: '2026-06-20T10:00:00Z',
+      join_date: '2026-06-01',
+      sequence_no: 1,
     });
     assert.ok(comparePromotionAccumulationRows(a, b) < 0);
     const { audit } = walk([b, a]);
     assert.equal(audit[0]?.contractId, 'A');
     assert.equal(audit[1]?.contractId, 'B');
+  });
+
+  it('1b) 동일 해피콜일 → 가입일 → 순번', () => {
+    const earlyJoin = row('early-join', 1, {
+      happy_call_at: '2026-07-27',
+      join_date: '2026-07-23',
+      sequence_no: 200,
+    });
+    const lateJoin = row('late-join', 1, {
+      happy_call_at: '2026-07-27',
+      join_date: '2026-07-26',
+      sequence_no: 50,
+    });
+    assert.ok(comparePromotionAccumulationRows(earlyJoin, lateJoin) < 0);
+
+    const seqLow = row('seq-low', 1, {
+      happy_call_at: '2026-07-27',
+      join_date: '2026-07-26',
+      sequence_no: 56,
+    });
+    const seqHigh = row('seq-high', 1, {
+      happy_call_at: '2026-07-27',
+      join_date: '2026-07-26',
+      sequence_no: 201,
+    });
+    assert.ok(comparePromotionAccumulationRows(seqLow, seqHigh) < 0);
   });
 
   it('2) 준비/대기 + 해피콜 성공/완료 + 송장 → 가입 인정·누적 포함', () => {
@@ -125,16 +156,16 @@ describe('leader promotion commission (walk SSOT)', () => {
       ),
       row('TY053', 1, {
         happy_call_at: '2026-05-22',
-        invoice_registered_at: '2026-05-22T09:00:00Z',
-        created_at: '2026-05-22T09:00:01Z',
+        join_date: '2026-05-22',
+        sequence_no: 53,
       }),
       row('TY352', 1, {
         happy_call_at: '2026-05-22',
-        invoice_registered_at: '2026-05-22T10:00:00Z',
-        created_at: '2026-05-22T10:00:01Z',
+        join_date: '2026-05-22',
+        sequence_no: 352,
       }),
       row('TY015', 1, { happy_call_at: '2026-06-10' }),
-      row('TY016', 1, { happy_call_at: '2026-06-10', invoice_registered_at: '2026-06-10T12:00:01Z' }),
+      row('TY016', 1, { happy_call_at: '2026-06-10', sequence_no: 16 }),
       row('TY281', 1, { happy_call_at: '2026-06-12' }),
       // 산하 walk에만 포함(본인 직접 아님) — 6월 24일 20구좌가 여기로 잡히면 안 됨
       {
@@ -159,9 +190,9 @@ describe('leader promotion commission (walk SSOT)', () => {
       ...Array.from({ length: 11 }, (_, i) =>
         row(`before-${i}`, 1, { happy_call_at: `2026-06-${String(i + 1).padStart(2, '0')}` }),
       ),
-      { ...row(thresholdId, 1, { happy_call_at: '2026-06-25' }), id: thresholdId },
-      row('after-1', 1, { happy_call_at: '2026-06-25', invoice_registered_at: '2026-06-25T12:00:01Z' }),
-      row('after-2', 1, { happy_call_at: '2026-06-25', invoice_registered_at: '2026-06-25T12:00:02Z' }),
+      { ...row(thresholdId, 1, { happy_call_at: '2026-06-25', sequence_no: 1 }), id: thresholdId },
+      row('after-1', 1, { happy_call_at: '2026-06-25', sequence_no: 2 }),
+      row('after-2', 1, { happy_call_at: '2026-06-25', sequence_no: 3 }),
     ];
     const { splitByContractId, audit } = walk(rows);
     assert.equal(audit.filter((a) => a.commissionPerUnit === 400_000).length, 0);

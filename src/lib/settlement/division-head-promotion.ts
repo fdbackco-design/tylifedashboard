@@ -6,6 +6,7 @@ import {
 } from '@/lib/settlement/settlement-org-tree';
 import {
   DIVISION_HEAD_PROMOTION_MIN_CENTER_CHIEFS,
+  comparePromotionOrderFields,
   contractJoinOrderYmd,
   isCustomerVirtualOrgMember,
   type PromotionOrderContractRef,
@@ -23,30 +24,17 @@ export type DivisionHeadPromotionThreshold = {
   /** 3번째 센터장 승격 순서일(해피콜 YMD 우선) */
   threshold_join_date: string;
   threshold_contract_id?: string | null;
+  threshold_contract_join_date?: string | null;
+  threshold_sequence_no?: number | null;
+  /** @deprecated 정렬에는 사용하지 않음 */
   threshold_invoice_registered_at?: string | null;
+  /** @deprecated 정렬에는 사용하지 않음 */
   threshold_created_at?: string | null;
 };
 
 function normalizeCreatedAt(s?: string | null): string {
   if (s == null) return '';
   return String(s).trim();
-}
-
-function comparePromotionOrderTieBreak(
-  a: { invoice_registered_at?: string | null; created_at?: string | null },
-  b: { invoice_registered_at?: string | null; created_at?: string | null },
-): number {
-  const invA = normalizeCreatedAt(a.invoice_registered_at);
-  const invB = normalizeCreatedAt(b.invoice_registered_at);
-  if (invA !== invB) {
-    if (!invA) return 1;
-    if (!invB) return -1;
-    return invA.localeCompare(invB);
-  }
-  const ca = normalizeCreatedAt(a.created_at);
-  const cb = normalizeCreatedAt(b.created_at);
-  if (ca !== cb) return ca.localeCompare(cb);
-  return 0;
 }
 
 /**
@@ -70,16 +58,16 @@ export function effectiveCenterChiefThresholdForOrdering(
 
 function centerChiefSortKey(th: CenterChiefPromotionThreshold): {
   date: string;
-  invoice_registered_at: string | null;
-  created_at: string | null;
+  join_date: string | null;
+  sequence_no: number | null;
   contractId: string;
   leaderId: string;
 } {
   const eff = effectiveCenterChiefThresholdForOrdering(th);
   return {
     date: String(eff.threshold_join_date).slice(0, 10),
-    invoice_registered_at: eff.threshold_invoice_registered_at ?? null,
-    created_at: eff.threshold_created_at ?? null,
+    join_date: eff.threshold_contract_join_date ?? null,
+    sequence_no: eff.threshold_sequence_no ?? null,
     contractId: eff.threshold_contract_id ? String(eff.threshold_contract_id) : '',
     leaderId: eff.threshold_leader_member_id,
   };
@@ -93,9 +81,11 @@ export function compareSubtreeCenterChiefPromotionOrder(
   const ka = centerChiefSortKey(aTh);
   const kb = centerChiefSortKey(bTh);
   if (ka.date !== kb.date) return ka.date.localeCompare(kb.date);
-  const tie = comparePromotionOrderTieBreak(ka, kb);
+  const tie = comparePromotionOrderFields(
+    { happy_call_at: null, join_date: ka.join_date, sequence_no: ka.sequence_no, id: ka.contractId },
+    { happy_call_at: null, join_date: kb.join_date, sequence_no: kb.sequence_no, id: kb.contractId },
+  );
   if (tie !== 0) return tie;
-  if (ka.contractId !== kb.contractId) return ka.contractId.localeCompare(kb.contractId);
   return ka.leaderId.localeCompare(kb.leaderId);
 }
 
@@ -112,6 +102,8 @@ export function isContractAtOrAfterDivisionHeadPostRate(
     threshold_leader_member_id: threshold.threshold_center_chief_member_id,
     threshold_join_date: threshold.threshold_join_date,
     threshold_contract_id: threshold.threshold_contract_id ?? null,
+    threshold_contract_join_date: threshold.threshold_contract_join_date ?? null,
+    threshold_sequence_no: threshold.threshold_sequence_no ?? null,
     threshold_invoice_registered_at: threshold.threshold_invoice_registered_at ?? null,
     threshold_created_at: threshold.threshold_created_at ?? null,
   };
@@ -151,6 +143,8 @@ export function computeDivisionHeadThresholdForMember(
     threshold_center_chief_member_id: third.id,
     threshold_join_date: String(eff.threshold_join_date).slice(0, 10),
     threshold_contract_id: eff.threshold_contract_id ?? null,
+    threshold_contract_join_date: eff.threshold_contract_join_date ?? null,
+    threshold_sequence_no: eff.threshold_sequence_no ?? null,
     threshold_invoice_registered_at: eff.threshold_invoice_registered_at ?? null,
     threshold_created_at: eff.threshold_created_at ?? null,
   };

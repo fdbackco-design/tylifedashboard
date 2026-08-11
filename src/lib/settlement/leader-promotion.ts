@@ -39,6 +39,7 @@ export type AttributedJoinContractRow = {
   sales_member_id: string;
   contract_code?: string | null;
   status?: string | null;
+  sequence_no?: number | null;
   created_at?: string | null;
   invoice_registered_at?: string | null;
   happy_call_at?: string | null;
@@ -54,12 +55,15 @@ export type PromotionOrderContractRef = {
   id: string;
   join_date: string;
   happy_call_at?: string | null;
+  sequence_no?: number | null;
+  /** @deprecated 정렬에는 사용하지 않음. 하위 호환용 */
   invoice_registered_at?: string | null;
+  /** @deprecated 정렬에는 사용하지 않음. 하위 호환용 */
   created_at?: string | null;
 };
 
 /**
- * 산하 가입 계약을 (순서일 → 송장등록시각 → created_at → id) 순으로 쌓을 때,
+ * 산하 가입 계약을 (해피콜 성공일 → 가입일자 → 계약 순번) 순으로 쌓을 때,
  * 누적 구좌가 처음 20 이상이 되는 그 계약(승격 계약).
  * 순서일은 해피콜 완료일(서울 YMD) 우선, 없으면 join_date.
  */
@@ -67,9 +71,13 @@ export type SalesMemberPromotionThreshold = {
   threshold_contract_id: string;
   /** 승격 계약의 순서일(해피콜 완료 YMD 우선, 없으면 join_date). 컬럼명은 레거시 유지 */
   threshold_join_date: string;
-  /** 승격 계약의 invoice_registered_at (동일 순서일 tie-break 1순위) */
+  /** 승격 계약의 실제 가입일 (동일 해피콜일 tie-break 1순위) */
+  threshold_contract_join_date?: string | null;
+  /** 승격 계약의 sequence_no (동일 해피콜·가입일 tie-break 2순위) */
+  threshold_sequence_no?: number | null;
+  /** @deprecated 정렬에는 사용하지 않음. 하위 호환용 */
   threshold_invoice_registered_at?: string | null;
-  /** 승격 계약의 created_at(동일 순서일 tie-break 보조) */
+  /** @deprecated 정렬에는 사용하지 않음. 하위 호환용 */
   threshold_created_at?: string | null;
   /**
    * 승격 계약 내 20구좌 달성에 포함되는 구좌 수(승격 전·승격 계약 본체).
@@ -83,14 +91,14 @@ function normalizeCreatedAt(s?: string | null): string {
   return String(s).trim();
 }
 
-/** 동일 송장 배치 등 ms 차이만 나는 invoice_registered_at 은 초 단위로 묶는다. */
-function invoiceRegisteredAtSecondKey(s?: string | null): string {
-  const inv = normalizeCreatedAt(s);
-  if (!inv) return '';
-  const dot = inv.indexOf('.');
-  if (dot > 0) return inv.slice(0, dot);
-  if (inv.length >= 19) return inv.slice(0, 19);
-  return inv;
+function normalizeJoinDateYmd(s?: string | null): string {
+  return String(s ?? '').slice(0, 10);
+}
+
+function normalizeSequenceNo(n?: number | null): number | null {
+  if (n == null) return null;
+  const v = Number(n);
+  return Number.isFinite(v) ? v : null;
 }
 
 /** 정산 수당·승격 순서 판정용 기준일: 해피콜 완료일(서울 YMD) 우선, 없으면 join_date */
@@ -100,46 +108,94 @@ export function contractJoinOrderYmd(c: {
 }): string {
   const hc = happycallYmdSeoul(c.happy_call_at);
   if (hc) return hc;
-  return String(c.join_date ?? '').slice(0, 10);
-}
-
-/** 동일 순서일 tie-break: invoice_registered_at(초) → created_at → id */
-export function promotionOrderTieBreakTs(c: {
-  invoice_registered_at?: string | null;
-  created_at?: string | null;
-}): string {
-  const invSec = invoiceRegisteredAtSecondKey(c.invoice_registered_at);
-  if (invSec) return invSec;
-  return normalizeCreatedAt(c.created_at);
+  return normalizeJoinDateYmd(c.join_date);
 }
 
 /**
- * 동일 happy_call_at 내 정렬: invoice_registered_at → created_at → (호출부에서 id)
+ * 가입 순서 비교 SSOT.
+ * 1) 해피콜 성공일(서울 YMD, 없으면 뒤로)
+ * 2) 가입일자
+ * 3) 계약 순번(sequence_no, 없으면 뒤로)
+ * 4) id (최후 tie-break)
  */
-function comparePromotionOrderTieBreak(
-  a: { invoice_registered_at?: string | null; created_at?: string | null },
-  b: { invoice_registered_at?: string | null; created_at?: string | null },
+export function comparePromotionOrderFields(
+  a: {
+    happy_call_at?: string | null;
+    join_date?: string | null;
+    sequence_no?: number | null;
+    id?: string | null;
+  },
+  b: {
+    happy_call_at?: string | null;
+    join_date?: string | null;
+    sequence_no?: number | null;
+    id?: string | null;
+  },
 ): number {
-  const invA = normalizeCreatedAt(a.invoice_registered_at);
-  const invB = normalizeCreatedAt(b.invoice_registered_at);
-  if (invA !== invB) {
-    if (!invA) return 1;
-    if (!invB) return -1;
-    return invA.localeCompare(invB);
+  const ha = happycallYmdSeoul(a.happy_call_at) || '';
+  const hb = happycallYmdSeoul(b.happy_call_at) || '';
+  if (ha !== hb) {
+    if (!ha) return 1;
+    if (!hb) return -1;
+    return ha.localeCompare(hb);
   }
-  const ca = normalizeCreatedAt(a.created_at);
-  const cb = normalizeCreatedAt(b.created_at);
-  if (ca !== cb) return ca.localeCompare(cb);
+  const ja = normalizeJoinDateYmd(a.join_date);
+  const jb = normalizeJoinDateYmd(b.join_date);
+  if (ja !== jb) {
+    if (!ja) return 1;
+    if (!jb) return -1;
+    return ja.localeCompare(jb);
+  }
+  const sa = normalizeSequenceNo(a.sequence_no);
+  const sb = normalizeSequenceNo(b.sequence_no);
+  if (sa !== sb) {
+    if (sa == null) return 1;
+    if (sb == null) return -1;
+    return sa - sb;
+  }
+  const ida = String(a.id ?? '');
+  const idb = String(b.id ?? '');
+  if (ida && idb && ida !== idb) return ida.localeCompare(idb);
   return 0;
 }
 
+/** @deprecated 정렬은 comparePromotionOrderFields 사용. 표시용 키만 유지. */
+export function promotionOrderTieBreakTs(c: {
+  join_date?: string | null;
+  sequence_no?: number | null;
+  invoice_registered_at?: string | null;
+  created_at?: string | null;
+}): string {
+  const jd = normalizeJoinDateYmd(c.join_date);
+  const seq = normalizeSequenceNo(c.sequence_no);
+  if (jd || seq != null) {
+    return `${jd}|${seq == null ? '' : String(seq).padStart(12, '0')}`;
+  }
+  return normalizeCreatedAt(c.created_at);
+}
+
 function compareSameOrderDayOrder(contract: PromotionOrderContractRef, th: SalesMemberPromotionThreshold): number {
-  const tie = comparePromotionOrderTieBreak(contract, {
-    invoice_registered_at: th.threshold_invoice_registered_at,
-    created_at: th.threshold_created_at,
-  });
-  if (tie !== 0) return tie;
-  return contract.id.localeCompare(th.threshold_contract_id);
+  // threshold에 가입일/순번 메타가 없으면 해당 키는 동점으로 보고 id로만 가른다(레거시 이벤트 호환).
+  const thJoin =
+    th.threshold_contract_join_date != null && String(th.threshold_contract_join_date).trim() !== ''
+      ? th.threshold_contract_join_date
+      : contract.join_date;
+  const thSeq =
+    th.threshold_sequence_no != null ? th.threshold_sequence_no : (contract.sequence_no ?? null);
+  return comparePromotionOrderFields(
+    {
+      happy_call_at: null,
+      join_date: contract.join_date,
+      sequence_no: contract.sequence_no,
+      id: contract.id,
+    },
+    {
+      happy_call_at: null,
+      join_date: thJoin,
+      sequence_no: thSeq,
+      id: th.threshold_contract_id,
+    },
+  );
 }
 
 /**
@@ -148,7 +204,7 @@ function compareSameOrderDayOrder(contract: PromotionOrderContractRef, th: Sales
  * - 0: 승급 계약 자체
  * - &gt;0: 승급 계약 다음
  *
- * 순서: 해피콜 YMD → invoice_registered_at → created_at → id
+ * 순서: 해피콜 성공일 → 가입일자 → 계약 순번 → id
  * (센터장/본부장 post 경계도 리더 승급 walk와 동일 순서를 쓰도록 공유)
  */
 export function compareContractToPromotionThresholdOrder(
@@ -268,21 +324,12 @@ export function prePromotionUnitsForPreviousLeaderRollup(
   return resolvePromotionUnitSplit(contract, walk).prePromotionUnits;
 }
 
-/** 승격 누적 walk 정렬: happy_call_at → invoice_registered_at → created_at → id */
+/** 승격 누적 walk 정렬: 해피콜 성공일 → 가입일자 → 계약 순번 → id */
 export function comparePromotionAccumulationRows(
   a: AttributedJoinContractRow,
   b: AttributedJoinContractRow,
 ): number {
-  const ha = normalizeCreatedAt(a.happy_call_at);
-  const hb = normalizeCreatedAt(b.happy_call_at);
-  if (ha !== hb) {
-    if (!ha) return 1;
-    if (!hb) return -1;
-    return ha.localeCompare(hb);
-  }
-  const tie = comparePromotionOrderTieBreak(a, b);
-  if (tie !== 0) return tie;
-  return a.id.localeCompare(b.id);
+  return comparePromotionOrderFields(a, b);
 }
 
 function compareAttributedJoinRows(a: AttributedJoinContractRow, b: AttributedJoinContractRow): number {
@@ -1304,6 +1351,7 @@ export function mergeLeaderPromotionEventThresholds(
     {
       join_date: string;
       happy_call_at?: string | null;
+      sequence_no?: number | null;
       invoice_registered_at?: string | null;
       created_at?: string | null;
     }
@@ -1318,6 +1366,8 @@ export function mergeLeaderPromotionEventThresholds(
       threshold_join_date: meta
         ? contractJoinOrderYmd(meta)
         : String(r.threshold_join_date).slice(0, 10),
+      threshold_contract_join_date: meta ? normalizeJoinDateYmd(meta.join_date) : null,
+      threshold_sequence_no: meta ? normalizeSequenceNo(meta.sequence_no) : null,
       threshold_invoice_registered_at: meta?.invoice_registered_at ?? null,
       threshold_created_at: meta?.created_at ?? null,
     });
@@ -1586,8 +1636,9 @@ function computeThresholdForSubtree(
     if (eligibleCum >= minUnits) {
       return {
         threshold_contract_id: c.id,
-        threshold_join_date:
-          normalizeCreatedAt(c.happy_call_at).slice(0, 10) || contractJoinOrderYmd(c),
+        threshold_join_date: contractJoinOrderYmd(c),
+        threshold_contract_join_date: normalizeJoinDateYmd(c.join_date),
+        threshold_sequence_no: normalizeSequenceNo(c.sequence_no),
         threshold_invoice_registered_at: c.invoice_registered_at ?? null,
         threshold_created_at: c.created_at ?? null,
         threshold_pre_promotion_units_on_contract: prePromotionUnitsOnThresholdContract(
@@ -1663,7 +1714,7 @@ export function enrichThresholdPrePromotionUnits(
 
 /**
  * joinAttributed 정렬·누적 walk 기준으로 계약별 승격 전/후 구좌를 산출한다.
- * 수당 SSOT: 산하 전체 가입 계약 + happy_call_at → invoice_registered_at(초) → created_at → id 정렬 + 누적 20구좌.
+ * 수당 SSOT: 산하 전체 가입 계약 + 해피콜 성공일 → 가입일자 → 계약 순번 정렬 + 누적 20구좌.
  */
 export function buildPromotionUnitSplitByContractId(
   memberId: string,

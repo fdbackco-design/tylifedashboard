@@ -27,8 +27,8 @@ describe('center chief rollup', () => {
   it('승급 계약 자체는 pre, 다음 계약부터 CENTER_AFTER', () => {
     const thWithMeta: CenterChiefPromotionThreshold = {
       ...th,
-      threshold_invoice_registered_at: '2026-06-20T10:00:00Z',
-      threshold_created_at: '2026-06-20T10:00:01Z',
+      threshold_contract_join_date: '2026-06-20',
+      threshold_sequence_no: 5,
     };
     assert.equal(
       splitCenterChiefRollupUnits(
@@ -36,8 +36,7 @@ describe('center chief rollup', () => {
           id: 'c-l5',
           join_date: '2026-06-20',
           happy_call_at: '2026-06-20',
-          invoice_registered_at: '2026-06-20T10:00:00Z',
-          created_at: '2026-06-20T10:00:01Z',
+          sequence_no: 5,
           unit_count: 1,
         },
         '센터장',
@@ -51,7 +50,7 @@ describe('center chief rollup', () => {
           id: 'after',
           join_date: '2026-06-20',
           happy_call_at: '2026-06-20',
-          created_at: '2026-06-20T11:00:00Z',
+          sequence_no: 6,
           unit_count: 2,
         },
         '센터장',
@@ -83,23 +82,22 @@ describe('center chief rollup', () => {
     assert.equal(leaderRate - salesRate, 100_000);
   });
 
-  it('동일 해피콜일: 송장시각이 승급계약보다 앞서면 created_at이 늦어도 pre', () => {
+  it('동일 해피콜일: 가입일이 승급계약보다 앞서면 순번이 늦어도 pre', () => {
     const thWithMeta: CenterChiefPromotionThreshold = {
       threshold_leader_member_id: 'leader-5',
       threshold_join_date: '2026-07-28',
       threshold_contract_id: 'ty243',
-      threshold_invoice_registered_at: '2026-08-04T01:46:25.985Z',
-      threshold_created_at: '2026-07-27T14:09:15.721Z',
+      threshold_contract_join_date: '2026-07-27',
+      threshold_sequence_no: 243,
     };
-    // TY244: created_at은 승급계약보다 늦지만 송장 등록이 더 빠름 → 리더 walk와 같이 pre
+    // TY244: 가입일이 같으면 순번이 작을 때 pre
     assert.equal(
       isContractAtOrAfterCenterChiefPostRollup(
         {
           id: 'ty244',
           join_date: '2026-07-27',
           happy_call_at: '2026-07-28T00:00:00Z',
-          invoice_registered_at: '2026-08-04T01:46:24.754Z',
-          created_at: '2026-07-27T14:19:16.070Z',
+          sequence_no: 100,
         },
         thWithMeta,
       ),
@@ -111,8 +109,7 @@ describe('center chief rollup', () => {
           id: 'ty245',
           join_date: '2026-07-27',
           happy_call_at: '2026-07-28T00:00:00Z',
-          invoice_registered_at: '2026-08-04T01:46:24.800Z',
-          created_at: '2026-07-27T14:19:16.586Z',
+          sequence_no: 200,
         },
         thWithMeta,
       ),
@@ -127,8 +124,8 @@ describe('center chief direct commission boundary', () => {
       threshold_leader_member_id: 'leader-5',
       threshold_join_date: '2026-07-27',
       threshold_contract_id: 'c-l5',
-      threshold_invoice_registered_at: '2026-07-27T10:00:00Z',
-      threshold_created_at: '2026-07-27T10:00:01Z',
+      threshold_contract_join_date: '2026-07-27',
+      threshold_sequence_no: 5,
     };
     assert.equal(
       isContractAtOrAfterCenterChiefPostRollup(
@@ -143,8 +140,7 @@ describe('center chief direct commission boundary', () => {
           id: 'c-l5',
           join_date: '2026-07-27',
           happy_call_at: '2026-07-27',
-          invoice_registered_at: '2026-07-27T10:00:00Z',
-          created_at: '2026-07-27T10:00:01Z',
+          sequence_no: 5,
         },
         ccTh,
       ),
@@ -156,7 +152,7 @@ describe('center chief direct commission boundary', () => {
           id: 'after',
           join_date: '2026-07-27',
           happy_call_at: '2026-07-27',
-          created_at: '2026-07-27T11:00:00Z',
+          sequence_no: 6,
         },
         ccTh,
       ),

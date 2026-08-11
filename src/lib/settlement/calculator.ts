@@ -439,6 +439,7 @@ function contractPromotionRef(c: Contract): PromotionOrderContractRef & ProductC
     id: c.id,
     join_date: c.join_date,
     happy_call_at: c.happy_call_at ?? null,
+    sequence_no: (c as { sequence_no?: number | null }).sequence_no ?? null,
     invoice_registered_at: (c as { invoice_registered_at?: string | null }).invoice_registered_at ?? null,
     created_at: (c as { created_at?: string | null }).created_at ?? null,
     item_name: (c as { item_name?: string | null }).item_name ?? null,

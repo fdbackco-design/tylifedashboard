@@ -301,23 +301,30 @@ export async function buildMyOrganizationTreeViewModel(
     ];
     const leaderPromotionThresholdContractMetaById = new Map<
       string,
-      { join_date: string; happy_call_at?: string | null; created_at?: string | null }
+      {
+        join_date: string;
+        happy_call_at?: string | null;
+        sequence_no?: number | null;
+        created_at?: string | null;
+      }
     >();
     if (thPromoContractIds.length > 0) {
       const { data: thRows } = await adminDb
         .from('contracts')
-        .select('id, created_at, join_date, happy_call_at')
+        .select('id, created_at, join_date, happy_call_at, sequence_no')
         .in('id', thPromoContractIds);
       for (const row of (thRows ?? []) as {
         id: string;
         created_at?: string | null;
         join_date?: string | null;
         happy_call_at?: string | null;
+        sequence_no?: number | null;
       }[]) {
         if (row?.id) {
           leaderPromotionThresholdContractMetaById.set(String(row.id), {
             join_date: String(row.join_date ?? '').slice(0, 10),
             happy_call_at: (row.happy_call_at ?? null) as string | null,
+            sequence_no: (row.sequence_no ?? null) as number | null,
             created_at: (row.created_at ?? null) as string | null,
           });
         }
@@ -325,7 +332,7 @@ export async function buildMyOrganizationTreeViewModel(
     }
 
     const contractSelect =
-      'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, customer_id, is_cancelled, sales_link_status, happy_call_at, happycall_result, source_snapshot_json, customers(name, phone, birth_date), created_at';
+      'id, contract_code, join_date, product_type, item_name, rental_request_no, invoice_no, memo, status, unit_count, sales_member_id, customer_id, is_cancelled, sales_link_status, happy_call_at, happycall_result, source_snapshot_json, customers(name, phone, birth_date), created_at, sequence_no';
 
     const contractChunks = chunk(subtreeMemberIds, 500);
     const contractResList = await Promise.all(
@@ -460,6 +467,8 @@ export async function buildMyOrganizationTreeViewModel(
           product_type: ((c as any).product_type ?? null) as string | null,
           sales_member_id: resolved,
           created_at: ((c as any).created_at ?? null) as string | null,
+          sequence_no: ((c as any).sequence_no ?? null) as number | null,
+          happy_call_at: ((c as any).happy_call_at ?? null) as string | null,
         };
       })
       .filter((x): x is NonNullable<typeof x> => x != null);
@@ -620,6 +629,8 @@ export async function buildMyOrganizationTreeViewModel(
           product_type: (c.product_type ?? null) as string | null,
           sales_member_id: resolved,
           created_at: (c.created_at ?? null) as string | null,
+          sequence_no: ((c as any).sequence_no ?? null) as number | null,
+          happy_call_at: ((c as any).happy_call_at ?? null) as string | null,
         };
       })
       .filter((x): x is NonNullable<typeof x> => x != null);

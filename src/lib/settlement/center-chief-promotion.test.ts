@@ -54,8 +54,8 @@ function leaderThreshold(
   return {
     threshold_contract_id: contractId,
     threshold_join_date: date,
-    threshold_invoice_registered_at: `${date}T10:00:00Z`,
-    threshold_created_at: `${date}T10:00:01Z`,
+    threshold_contract_join_date: date,
+    threshold_sequence_no: Number(String(contractId).replace(/\D/g, '')) || null,
   };
 }
 
@@ -105,8 +105,8 @@ describe('center chief promotion', () => {
       threshold_leader_member_id: L5,
       threshold_join_date: '2026-06-20',
       threshold_contract_id: 'c-l5',
-      threshold_invoice_registered_at: '2026-06-20T10:00:00Z',
-      threshold_created_at: '2026-06-20T10:00:01Z',
+      threshold_contract_join_date: '2026-06-20',
+      threshold_sequence_no: 5,
     };
 
     assert.equal(centerChiefPostRollupStartsYmd(ccTh), '2026-06-20');
@@ -121,16 +121,15 @@ describe('center chief promotion', () => {
       id: 'c-l5',
       join_date: '2026-06-20',
       happy_call_at: '2026-06-20',
-      invoice_registered_at: '2026-06-20T10:00:00Z',
-      created_at: '2026-06-20T10:00:01Z',
+      sequence_no: 5,
       unit_count: 1,
     };
     const sameDayAfter = {
       id: 'same-day-after',
       join_date: '2026-06-20',
       happy_call_at: '2026-06-20',
-      // 동일 해피콜일: created_at이 승급 계약보다 뒤면 post
-      created_at: '2026-06-20T11:00:01Z',
+      // 동일 해피콜·가입일: 순번이 승급 계약보다 크면 post
+      sequence_no: 6,
       unit_count: 1,
     };
     const onNextDay = {
