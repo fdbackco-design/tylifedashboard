@@ -24,8 +24,8 @@ def twaManifest = [
     applicationId: 'com.tylife.dashboard',
     hostName: 'tylifedashboard.vercel.app', // The domain being opened in the TWA.
     launchUrl: '/', // The start path for the TWA. Must be relative to the domain.
-    name: 'TY Life Dashboard', // The application name.
-    launcherName: 'TY Life', // The name shown on the Android Launcher.
+    name: 'Feed Life', // The application name (android:label).
+    launcherName: 'Feed Life', // The name shown on the Android Launcher.
     themeColor: '#1E293B', // The color used for the status bar.
     themeColorDark: '#000000', // The color used for the dark status bar.
     navigationColor: '#000000', // The color used for the navigation bar.
@@ -57,7 +57,7 @@ android {
         applicationId "com.tylife.dashboard"
         minSdkVersion 21
         targetSdkVersion 36
-        versionCode 5
+        versionCode 7
         versionName "1.0.1"
 
         // The name for the application
