@@ -5,6 +5,7 @@ import TyLifePartnersLogo from '@/components/TyLifePartnersLogo';
 import YearMonthSelector from '@/components/YearMonthSelector';
 import { createAdminSupabaseClient, createServerSupabaseClient } from '@/lib/supabase/server';
 import { sumDownlineAttributedUnitsInSettlementWindow } from '@/lib/organization/statement-downline-units';
+import { buildStatementSheetData } from '@/lib/settlement/statement-sheet';
 import {
   coalesceYearMonthSearchParam,
   getSettlementWindowForYearMonth,
@@ -194,8 +195,60 @@ export default async function OrganizationStatementPage({
       typeof downlineRes === 'number' ? downlineRes : downlineRes.downline_units;
   }
 
+  // /admin/settlement_sheet 수동 보정(settlement_statement_overrides)을 공유 명세서와 동일하게 반영.
+  // 금액 보정이 없으면 총지급액은 monthly_settlements.total_amount(수동 환수 등 포함)를 유지한다.
+  let displayPersonalUnits = Number(ss.direct_unit_count ?? 0);
+  let displayDownlineUnits = downlineAttributedUnits;
+  let displayPersonalCommission = Number(ss.base_commission ?? 0);
+  let displayOverrideAmount = Number(ss.rollup_commission ?? 0);
+  let displayBonusAmount = Number(ss.incentive_amount ?? 0);
+  let displayGrossTotal = Number(ss.total_amount ?? 0);
+
+  if (!isUnmapped && member && s) {
+    const sheet = await buildStatementSheetData(
+      db,
+      label_year_month,
+      {
+        id: member.id,
+        name: displayName,
+        rank: (member.rank as RankType) || '영업사원',
+        external_id: null,
+        phone: null,
+        leader_rank_effective_at: member.leader_rank_effective_at ?? null,
+      },
+      {
+        precomputedDownlineUnitCount: downlineAttributedUnits,
+        precomputedSettlement: {
+          year_month: s.year_month,
+          member_id: s.member_id,
+          rank: (s.rank as RankType) || '영업사원',
+          direct_unit_count: s.direct_unit_count,
+          base_commission: s.base_commission,
+          rollup_commission: s.rollup_commission,
+          incentive_amount: s.incentive_amount,
+          total_amount: s.total_amount,
+        },
+      },
+    );
+    displayPersonalUnits = sheet.personalUnitCount;
+    displayDownlineUnits = sheet.downlineUnitCount;
+    displayPersonalCommission = sheet.personalCommission;
+    displayOverrideAmount = sheet.overrideAmount;
+    displayBonusAmount = sheet.bonusAmount;
+    const ov = sheet.override;
+    const hasAmountOverride =
+      ov != null &&
+      (ov.personal_commission != null || ov.override_amount != null || ov.bonus_amount != null);
+    displayGrossTotal = hasAmountOverride ? sheet.grossTotal : Number(s.total_amount ?? 0);
+  }
+
+  const displayWithholding = Math.floor(
+    Number.isFinite(displayGrossTotal) && displayGrossTotal > 0 ? displayGrossTotal * 0.033 : 0,
+  );
+  const displayNetPayment = displayGrossTotal - displayWithholding;
+
   const no = `${label_year_month}-${isUnmapped ? 'GUEST' : String(memberId).slice(0, 4)}`;
-  const statementTotalUnits = (ss.direct_unit_count ?? 0) + downlineAttributedUnits;
+  const statementTotalUnits = displayPersonalUnits + displayDownlineUnits;
   const [basisYear, basisMonth] = label_year_month.split('-');
 
   // ── 본인 정산 상세 (직접 정산 계약 목록 + 롤업수당 상세) ──────────────────────
@@ -587,12 +640,14 @@ export default async function OrganizationStatementPage({
           <div className="rounded-lg border border-gray-200 overflow-hidden mb-5">
             <div className="grid grid-cols-2 px-4 py-3 border-b border-gray-100">
               <div className="text-sm text-gray-600">개인 실적 구좌</div>
-              <div className="text-sm text-right font-semibold tabular-nums">{ss.direct_unit_count.toLocaleString('ko-KR')} 구좌</div>
+              <div className="text-sm text-right font-semibold tabular-nums">
+                {displayPersonalUnits.toLocaleString('ko-KR')} 구좌
+              </div>
             </div>
             <div className="grid grid-cols-2 px-4 py-3 border-b border-gray-100">
               <div className="text-sm text-gray-600">산하 실적 구좌</div>
               <div className="text-sm text-right font-semibold tabular-nums">
-                {downlineAttributedUnits.toLocaleString('ko-KR')} 구좌
+                {displayDownlineUnits.toLocaleString('ko-KR')} 구좌
               </div>
             </div>
           </div>
@@ -682,15 +737,15 @@ export default async function OrganizationStatementPage({
           <div className="rounded-lg border border-gray-200 overflow-hidden mb-5">
             <div className="grid grid-cols-2 px-4 py-3 border-b border-gray-100">
               <div className="text-sm text-gray-600">개인 수당</div>
-              <div className="text-sm text-right tabular-nums">{formatWon(ss.base_commission ?? 0)}</div>
+              <div className="text-sm text-right tabular-nums">{formatWon(displayPersonalCommission)}</div>
             </div>
             <div className="grid grid-cols-2 px-4 py-3 border-b border-gray-100">
               <div className="text-sm text-gray-600">오버라이드</div>
-              <div className="text-sm text-right tabular-nums">{formatWon(ss.rollup_commission ?? 0)}</div>
+              <div className="text-sm text-right tabular-nums">{formatWon(displayOverrideAmount)}</div>
             </div>
             <div className="grid grid-cols-2 px-4 py-3">
               <div className="text-sm text-gray-600">보너스</div>
-              <div className="text-sm text-right tabular-nums">{formatWon(ss.incentive_amount ?? 0)}</div>
+              <div className="text-sm text-right tabular-nums">{formatWon(displayBonusAmount)}</div>
             </div>
           </div>
 
@@ -698,7 +753,7 @@ export default async function OrganizationStatementPage({
             <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
               <div className="text-xs text-orange-800 mb-1">총 지급액</div>
               <div className="text-xl font-semibold text-orange-950 tabular-nums">
-                {formatWon(ss.total_amount ?? 0)}
+                {formatWon(displayGrossTotal)}
               </div>
             </div>
             <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
@@ -709,34 +764,25 @@ export default async function OrganizationStatementPage({
             </div>
           </div>
 
-          {(() => {
-            // 화면 표시용 계산만 (정산 계산 로직/금액에 영향 없음).
-            // 원 단위 절사 기준: Math.floor.
-            const totalAmount = Number(ss.total_amount ?? 0);
-            const deductionAmount = Math.floor(totalAmount * 0.033);
-            const netPaymentAmount = totalAmount - deductionAmount;
-            return (
-              <div className="mt-3 space-y-2">
-                <div className="rounded-lg border border-gray-200 overflow-hidden">
-                  <div className="grid grid-cols-2 px-4 py-3">
-                    <div className="text-sm text-gray-600">공제액 (3.3%)</div>
-                    <div className="text-sm text-right tabular-nums text-gray-800">
-                      −{formatWon(deductionAmount)}
-                    </div>
-                  </div>
-                </div>
-                <div className="bg-orange-500 rounded-xl p-5 shadow-sm ring-1 ring-orange-600/10">
-                  <div className="text-xs font-semibold text-orange-50/90 mb-1">실지급액</div>
-                  <div className="text-3xl font-extrabold tracking-tight text-white tabular-nums">
-                    {formatWon(netPaymentAmount)}
-                  </div>
-                  <div className="mt-1 text-[11px] text-orange-50/80">
-                    총 지급액 {formatWon(totalAmount)} − 공제액 {formatWon(deductionAmount)}
-                  </div>
+          <div className="mt-3 space-y-2">
+            <div className="rounded-lg border border-gray-200 overflow-hidden">
+              <div className="grid grid-cols-2 px-4 py-3">
+                <div className="text-sm text-gray-600">공제액 (3.3%)</div>
+                <div className="text-sm text-right tabular-nums text-gray-800">
+                  −{formatWon(displayWithholding)}
                 </div>
               </div>
-            );
-          })()}
+            </div>
+            <div className="bg-orange-500 rounded-xl p-5 shadow-sm ring-1 ring-orange-600/10">
+              <div className="text-xs font-semibold text-orange-50/90 mb-1">실지급액</div>
+              <div className="text-3xl font-extrabold tracking-tight text-white tabular-nums">
+                {formatWon(displayNetPayment)}
+              </div>
+              <div className="mt-1 text-[11px] text-orange-50/80">
+                총 지급액 {formatWon(displayGrossTotal)} − 공제액 {formatWon(displayWithholding)}
+              </div>
+            </div>
+          </div>
 
           <div className="mt-6">
             <Link
