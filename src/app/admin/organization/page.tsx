@@ -22,6 +22,7 @@ import {
   stripOrgTreeNodesForDisplay,
 } from '@/lib/organization/org-tree-display';
 import { ORG_CUSTOMER_NODE_SPLIT_BY_SALES_PARENT_IDS } from '@/lib/organization/org-customer-node-split';
+import { PROMOTION_WALK_MEMBER_NAME_BY_CONTRACT_CODE } from '@/lib/settlement/promotion-walk-attribution-overrides';
 import { getContractDisplayProductName } from '@/lib/utils/contract-display-product';
 import type { ContractItem } from '@/components/org-tree/OrgTreeNode';
 import type { OrganizationMember } from '@/lib/types';
@@ -178,7 +179,7 @@ export default async function OrganizationPage({
     members,
     tree,
     remapMemberId,
-    resolveContractSalesMemberId,
+    resolveSettlementWalkSalesMemberId,
     remapCustomerMemberId,
     salesMemberDisplayName,
   } = buildAdminOrgDisplayContext({
@@ -200,21 +201,21 @@ export default async function OrganizationPage({
   const contractsByMember: Record<string, ContractItem[]> = {};
   for (const c of rawContractRows) {
     const splitBySalesParent = ORG_CUSTOMER_NODE_SPLIT_BY_SALES_PARENT_IDS.has(c.customer_id);
+    const walkKey = resolveSettlementWalkSalesMemberId({
+      sales_member_id: c.sales_member_id,
+      customer_id: c.customer_id,
+      status: c.status,
+      rental_request_no: c.rental_request_no ?? null,
+      invoice_no: c.invoice_no ?? null,
+      memo: c.memo ?? null,
+      customer_phone: c.customers?.phone ?? null,
+      contract_code: c.contract_code,
+      customer_name: c.customers?.name ?? '',
+      customer_birth_date: c.customers?.birth_date ?? null,
+    });
     // 정성훈: 자기구매(고객노드) 귀속을 쓰지 않고 실제 담당자로 표시해 담당자별 분리
-    const key = splitBySalesParent
-      ? remapMemberId(c.sales_member_id)
-      : resolveContractSalesMemberId({
-          sales_member_id: c.sales_member_id,
-          customer_id: c.customer_id,
-          status: c.status,
-          rental_request_no: c.rental_request_no ?? null,
-          invoice_no: c.invoice_no ?? null,
-          memo: c.memo ?? null,
-          customer_phone: c.customers?.phone ?? null,
-          contract_code: c.contract_code,
-          customer_name: c.customers?.name ?? '',
-          customer_birth_date: c.customers?.birth_date ?? null,
-        });
+    // 그 외(누적 walk override 포함): 승급/누적과 동일한 walk 귀속
+    const key = splitBySalesParent ? remapMemberId(c.sales_member_id) : walkKey;
     if (!contractsByMember[key]) contractsByMember[key] = [];
     const contractItem: ContractItem = {
       id: c.id,
@@ -236,6 +237,12 @@ export default async function OrganizationPage({
       sales_member_name: salesMemberDisplayName(c.sales_member_id),
     };
     contractsByMember[key].push(contractItem);
+
+    const hasWalkOverride = Boolean(
+      PROMOTION_WALK_MEMBER_NAME_BY_CONTRACT_CODE[String(c.contract_code ?? '').trim()],
+    );
+    // walk override로 다른 멤버(임혜진 등)에 누적된 계약은 고객 노드(김중권)에 중복 표시하지 않는다.
+    if (hasWalkOverride) continue;
 
     const customerKey = remapCustomerMemberId(
       c.customer_id,
