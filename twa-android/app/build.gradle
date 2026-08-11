@@ -56,7 +56,7 @@ android {
     defaultConfig {
         applicationId "com.tylife.dashboard"
         minSdkVersion 21
-        targetSdkVersion 35
+        targetSdkVersion 36
         versionCode 4
         versionName "1.0.1"
 
