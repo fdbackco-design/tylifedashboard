@@ -11,9 +11,9 @@ export const metadata: Metadata = {
   description: 'TY Life 계약 및 정산 관리 시스템',
   manifest: '/manifest.json',
   icons: {
-    icon: '/icon.jpg',
-    shortcut: '/icon.jpg',
-    apple: '/icon.jpg',
+    icon: [{ url: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' }],
+    shortcut: '/icons/icon-512.png',
+    apple: [{ url: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' }],
   },
   openGraph: {
     title: 'TY Life Dashboard',

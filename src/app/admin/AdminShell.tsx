@@ -157,7 +157,7 @@ function SidebarContents(props: {
             className="block outline-none ring-offset-2 ring-offset-slate-800 focus-visible:ring-2 focus-visible:ring-orange-400/80"
           >
             <Image
-              src="/ty-life-partners-logo.png"
+              src="/logo.png"
               alt="Feed Life"
               width={440}
               height={176}
