@@ -11,7 +11,7 @@ import {
 } from '@/lib/settlement/settlement-window';
 import { sumHqRevenueForContracts } from '@/lib/settlement/hq-revenue';
 import { getHappycallWindowForYearMonth } from '@/lib/settlement/settlement-eligibility-v2';
-import { fetchAllContractsForHqRevenue, fetchContractsForHqRevenueInPeriod } from '@/lib/settlement/fetch-contracts-for-hq-revenue';
+import { fetchAllContractsForHqRevenue } from '@/lib/settlement/fetch-contracts-for-hq-revenue';
 import type { RankType } from '@/lib/types';
 import type { SettlementCalculationDetail } from '@/lib/types/settlement';
 import RecalcButton from './RecalcButton';
@@ -73,7 +73,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const displayWindow = getSettlementWindowDisplayForYearMonth(yearMonth);
   const hcWindow = getHappycallWindowForYearMonth(yearMonth);
 
-  const [allCountRes, eligibleCountRes, periodHqContracts, membersRes, edgesRes, eligibleBaseRes, rulesRes] =
+  const [allCountRes, eligibleCountRes, membersRes, edgesRes, eligibleBaseRes, rulesRes] =
     await Promise.all([
     db
       .from('contracts')
@@ -86,7 +86,6 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       .from('v_contract_settlement_base')
       .select('contract_id', { head: true, count: 'estimated' })
       .eq('year_month', yearMonth),
-    fetchContractsForHqRevenueInPeriod(db, start_date, end_date),
     db
       .from('organization_members')
       .select('id, name, rank, external_id, phone, source_customer_id, leader_rank_effective_at')
@@ -102,6 +101,8 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const allContractsCount = allCountRes.count ?? 0;
   const eligibleContractsCount = eligibleCountRes.count ?? 0;
 
+  // 이번달 매출: settlement_v2_monthly(ELIGIBLE) — join_date 구간만 조회하면
+  // 해피콜 윈도우로 포함되는 계약(예: 7/26~7/28 가입)이 누락되므로 전체 계약에서 집계한다.
   const hqRevenueOpts = {
     periodStart: start_date,
     periodEnd: end_date,
@@ -109,10 +110,6 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     periodEligibility: 'settlement_v2_monthly' as const,
     yearMonth,
   };
-  const { periodHqRevenue: periodSales, periodEligibleUnits: periodJoinUnits } = sumHqRevenueForContracts(
-    periodHqContracts,
-    hqRevenueOpts,
-  );
 
   const membersRaw = (((membersRes.data ?? []) as unknown as any[]) ?? []).map((m) =>
     m.name === '안성준' ? { ...m, rank: '본사' as const } : m,
@@ -596,6 +593,8 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   ]);
 
   const totalSales = totalSalesResult.totalHqRevenue;
+  const periodSales = totalSalesResult.periodHqRevenue;
+  const periodJoinUnits = totalSalesResult.periodEligibleUnits;
   const { selfIncludedInitialByTopId, splitOpenInitialByTopId } = prefResult;
   const profit = periodSales - totalAmount;
 
