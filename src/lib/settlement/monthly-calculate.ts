@@ -14,8 +14,7 @@ import {
   isPromotionAccumulationJoinContractRow,
   debugPromotionThresholdPath,
   enrichThresholdPrePromotionUnits,
-  buildPromotionUnitSplitByMemberIds,
-  buildPromotionCommissionWalkForMember,
+  buildPromotionCommissionWalkByMemberIds,
   computeDivisionHeadPromotionMemberIds,
   computeDivisionHeadDemotionMemberIds,
   LEADER_PROMOTION_MIN_UNITS,
@@ -988,25 +987,14 @@ export async function calculateMonthlySettlement(params: {
     treeRows,
   };
 
-  const promotionUnitSplitByMemberId = buildPromotionUnitSplitByMemberIds(
-    promotionCommissionMemberIds,
-    treeRows,
-    joinAttributed,
-    splitBuildOptions,
-  );
-
-  const promotionCommissionAuditByMemberId = new Map(
-    promotionCommissionMemberIds.map((mid) => [
-      mid,
-      buildPromotionCommissionWalkForMember(
-        mid,
-        treeRows,
-        joinAttributed,
-        LEADER_PROMOTION_MIN_UNITS,
-        splitBuildOptions,
-      ).audit,
-    ]),
-  );
+  const { splitByMemberId: promotionUnitSplitByMemberId, auditByMemberId: promotionCommissionAuditByMemberId } =
+    buildPromotionCommissionWalkByMemberIds(
+      promotionCommissionMemberIds,
+      treeRows,
+      joinAttributed,
+      LEADER_PROMOTION_MIN_UNITS,
+      splitBuildOptions,
+    );
 
   const promotionEventWalkMismatchByMemberId = new Map(
     promotionEventWalkMismatches.map((m) => [m.member_id, m]),

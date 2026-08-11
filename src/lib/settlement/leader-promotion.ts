@@ -1738,11 +1738,16 @@ export function buildPromotionCommissionWalkForMember(
   treeRows: OrgTreeRow[],
   joinContractsAttributed: AttributedJoinContractRow[],
   minUnits: number = LEADER_PROMOTION_MIN_UNITS,
-  options?: PromotionUnitSplitBuildOptions,
+  options?: PromotionUnitSplitBuildOptions & {
+    /** 이미 승급 순서로 정렬된 배열이면 재정렬하지 않는다 */
+    preSortedJoinContracts?: AttributedJoinContractRow[];
+  },
 ): { splitByContractId: Map<string, PromotionUnitSplit>; audit: PromotionCommissionSplit[] } {
   const childrenByParent = buildChildrenByParentFromRows(treeRows);
   const subtree = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
-  const sorted = [...joinContractsAttributed].sort(compareAttributedJoinRows);
+  const sorted =
+    options?.preSortedJoinContracts ??
+    [...joinContractsAttributed].sort(compareAttributedJoinRows);
   const resolvedOptions: PromotionUnitSplitBuildOptions = {
     ...options,
     treeRows: options?.treeRows ?? treeRows,
@@ -1783,6 +1788,41 @@ export function buildPromotionUnitSplitByMemberIds(
     out.set(memberId, splitByContractId);
   }
   return out;
+}
+
+/** split + audit 를 한 번의 정렬로 멤버 일괄 생성 */
+export function buildPromotionCommissionWalkByMemberIds(
+  memberIds: Iterable<string>,
+  treeRows: OrgTreeRow[],
+  joinContractsAttributed: AttributedJoinContractRow[],
+  minUnits: number = LEADER_PROMOTION_MIN_UNITS,
+  options?: PromotionUnitSplitBuildOptions,
+): {
+  splitByMemberId: Map<string, Map<string, PromotionUnitSplit>>;
+  auditByMemberId: Map<string, PromotionCommissionSplit[]>;
+} {
+  const resolvedOptions: PromotionUnitSplitBuildOptions = {
+    ...options,
+    treeRows: options?.treeRows ?? treeRows,
+    minUnits: options?.minUnits ?? minUnits,
+  };
+  const childrenByParent = buildChildrenByParentFromRows(treeRows);
+  const sorted = [...joinContractsAttributed].sort(compareAttributedJoinRows);
+  const splitByMemberId = new Map<string, Map<string, PromotionUnitSplit>>();
+  const auditByMemberId = new Map<string, PromotionCommissionSplit[]>();
+  for (const memberId of memberIds) {
+    const subtree = collectSubtreeMemberIdsDownstream(memberId, childrenByParent);
+    const { splitByContractId, audit } = resolvePromotionSplitForMember(
+      memberId,
+      subtree,
+      sorted,
+      resolvedOptions.minUnits ?? minUnits,
+      resolvedOptions,
+    );
+    splitByMemberId.set(memberId, splitByContractId);
+    auditByMemberId.set(memberId, audit);
+  }
+  return { splitByMemberId, auditByMemberId };
 }
 
 /** @deprecated {@link buildPromotionUnitSplitByMemberIds} 사용 */
