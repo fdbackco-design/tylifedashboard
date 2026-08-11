@@ -4,6 +4,10 @@ import {
   type OrgMemberForContractRemap,
 } from '@/lib/organization/org-contract-sales-remap';
 import { ORG_CUSTOMER_NODE_SPLIT_BY_SALES_PARENT_IDS } from '@/lib/organization/org-customer-node-split';
+import {
+  applyPromotionWalkSalesMemberOverride,
+  buildMemberIdByNameMap,
+} from '@/lib/settlement/promotion-walk-attribution-overrides';
 import type { OrgTreeRow } from '@/lib/types';
 
 export type OrgStructuralTreeContext = {
@@ -94,23 +98,33 @@ export function buildOrgStructuralTreeContext(params: {
     depth: 0,
   }));
 
+  const memberIdByName = buildMemberIdByNameMap(membersFiltered);
+
   const resolveSettlementWalkSalesMemberId = (
     c: ContractSalesRemapInput & { settlement_sales_member_id?: string | null },
   ): string => {
     // 정성훈/홍진운 등: 자기구매(고객노드) 일괄 귀속을 쓰지 않고, 조직도와 같이
     // 실제 담당자 기준으로 두고 고객 노드 parent와 담당자가 같을 때만 고객 노드로 붙인다.
     // (HQ settlement override가 있어도 조직 표시/승급 walk는 sales_member_id를 따른다.)
+    let attributed: string;
     if (ORG_CUSTOMER_NODE_SPLIT_BY_SALES_PARENT_IDS.has(c.customer_id)) {
-      return resolveContractSalesMemberId({
+      attributed = resolveContractSalesMemberId({
         ...c,
         sales_member_id: c.sales_member_id,
       });
+    } else {
+      const effective = (c.settlement_sales_member_id ?? c.sales_member_id) as string;
+      attributed = resolveContractSalesMemberId({
+        ...c,
+        sales_member_id: effective,
+      });
     }
 
-    const effective = (c.settlement_sales_member_id ?? c.sales_member_id) as string;
-    return resolveContractSalesMemberId({
-      ...c,
-      sales_member_id: effective,
+    // 계약 단위 누적 walk override (정산 담당·조직 edge 불변)
+    return applyPromotionWalkSalesMemberOverride({
+      contract_code: c.contract_code,
+      attributedMemberId: attributed,
+      memberIdByName,
     });
   };
 

@@ -20,6 +20,11 @@ import {
   isParentOverrideActiveForYearMonth,
   type PreIssuedCodeMemberSetting,
 } from '@/lib/settlement/pre-issued-code-special';
+import {
+  applyPromotionWalkSalesMemberOverride,
+  buildMemberIdByNameMap,
+  PROMOTION_WALK_MEMBER_NAME_BY_CONTRACT_CODE,
+} from '@/lib/settlement/promotion-walk-attribution-overrides';
 
 type OrgMemberRow = {
   id: string;
@@ -240,6 +245,7 @@ export async function buildMyOrganizationTreeViewModel(
       customerBirthDateById,
       { parentByChildId: edgeByChild },
     );
+    const memberIdByName = buildMemberIdByNameMap(membersForTree);
 
     const treeRows = treeRowsBase.map((r) => ({
       ...r,
@@ -425,7 +431,14 @@ export async function buildMyOrganizationTreeViewModel(
       customer_birth_date: (c.customers?.birth_date ?? null) as string | null,
     });
 
-    const originInSubtree = (c: any) => resolveContractOriginForSubtree(contractRemapInput(c), subtreeIdSet);
+    const originInSubtree = (c: any) => {
+      const base = resolveContractOriginForSubtree(contractRemapInput(c), subtreeIdSet);
+      return applyPromotionWalkSalesMemberOverride({
+        contract_code: (c.contract_code ?? null) as string | null,
+        attributedMemberId: base,
+        memberIdByName,
+      });
+    };
 
     const eligibleContractsForMetrics = contractsRaw
       .filter((c) => {
@@ -469,7 +482,7 @@ export async function buildMyOrganizationTreeViewModel(
 
     // 누적 가입 구좌: 월 제한 없이(서브트리 전체) 가입 완료(표시 상태) 합산
     const cumulativeContractsSelect =
-      'id, join_date, unit_count, status, rental_request_no, invoice_no, memo, is_cancelled, sales_member_id, customer_id, item_name, created_at, sales_link_status, happy_call_at, happycall_result, customers(name, phone, birth_date)';
+      'id, contract_code, join_date, unit_count, status, rental_request_no, invoice_no, memo, is_cancelled, sales_member_id, customer_id, item_name, created_at, sales_link_status, happy_call_at, happycall_result, customers(name, phone, birth_date)';
     const cumulativeResList = await Promise.all(
       contractChunks.map((ids) =>
         ids.length === 0
@@ -547,6 +560,33 @@ export async function buildMyOrganizationTreeViewModel(
         }
       }
     }
+
+    // 승급/누적 walk override: 담당자가 서브트리 밖이어도 귀속 대상이 서브트리면 포함
+    {
+      const overrideCodes = Object.entries(PROMOTION_WALK_MEMBER_NAME_BY_CONTRACT_CODE)
+        .filter(([, name]) => {
+          const mid = memberIdByName.get(name);
+          return mid != null && subtreeIdSet.has(mid);
+        })
+        .map(([code]) => code);
+      if (overrideCodes.length > 0) {
+        const seenOv = new Set(cumulativeContractsRaw.map((c: any) => c.id as string));
+        const { data: ovRows } = await adminDb
+          .from('contracts')
+          .select(cumulativeContractsSelect)
+          .in('contract_code', overrideCodes)
+          .not('sales_member_id', 'is', null)
+          .limit(100);
+        for (const row of (ovRows ?? []) as any[]) {
+          if (!row?.id || seenOv.has(row.id)) continue;
+          const eff = originInSubtree(row);
+          if (!subtreeIdSet.has(eff)) continue;
+          seenOv.add(row.id);
+          cumulativeContractsRaw.push(row);
+        }
+      }
+    }
+
     const totalJoinUnits = cumulativeContractsRaw
       .filter((c: any) => subtreeIdSet.has(originInSubtree(c)))
       .filter((c: any) => !c.is_cancelled)
