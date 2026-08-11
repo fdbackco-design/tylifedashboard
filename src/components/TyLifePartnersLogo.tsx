@@ -31,7 +31,7 @@ export default function TyLifePartnersLogo({
 
   const desktop = (
     <Image
-      src="/ty-life-partners-logo.png"
+      src="/logo.png"
       alt="Feed Life"
       width={440}
       height={176}

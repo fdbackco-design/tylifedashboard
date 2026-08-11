@@ -20,7 +20,7 @@
     "alias": "android"
   },
   "appVersionName": "1.0.1",
-  "appVersionCode": 3,
+  "appVersionCode": 4,
   "shortcuts": [],
   "generatorApp": "bubblewrap-cli",
   "webManifestUrl": "https://tylifedashboard.vercel.app/manifest.json",
