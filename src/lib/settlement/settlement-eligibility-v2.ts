@@ -251,31 +251,46 @@ export function computeNextYearMonth(yearMonth: string): string {
  *
  * TY 외부 데이터의 timestamp는 시각 정보가 0시인 경우가 많아 .slice(0,10) 으로 충분하지만,
  * 다른 시각이 들어와도 안전하도록 Intl 변환을 시도한다.
+ *
+ * DateTimeFormat 생성은 비용이 커서 인스턴스를 재사용한다.
+ * (승급 walk 정렬이 멤버 수 × 계약 수만큼 비교를 반복함)
  */
+const SEOUL_YMD_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Seoul',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
 export function happycallYmdSeoul(ts: unknown): string {
   if (ts == null) return '';
   if (typeof ts === 'string') {
     const t = ts.trim();
     if (!t) return '';
     if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+    // 자정 UTC(+00:00/Z) 또는 오프셋 없는 ISO 날짜시각은 서울 달력일과 동일한 경우가 대부분.
+    // Intl 호출을 피하기 위해 흔한 패턴을 빠르게 처리한다.
+    const m = t.match(
+      /^(\d{4}-\d{2}-\d{2})(?:[T\s](\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/,
+    );
+    if (m) {
+      const ymd = m[1]!;
+      const hh = m[2];
+      const mm = m[3];
+      if (hh == null) return ymd;
+      // 오프셋이 없고 시각만 있으면 TY 관례상 이미 로컬(서울) 일자로 본다.
+      if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(t)) return ymd;
+      // UTC 자정(00:00Z) → 서울 동일 일자
+      if ((t.endsWith('Z') || /[+]00:?00$/.test(t)) && hh === '00' && mm === '00') return ymd;
+    }
     const d = new Date(t);
     if (!Number.isNaN(d.getTime())) {
-      return new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'Asia/Seoul',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-      }).format(d);
+      return SEOUL_YMD_FORMATTER.format(d);
     }
     return t.slice(0, 10);
   }
   if (ts instanceof Date) {
-    return new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Seoul',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(ts);
+    return SEOUL_YMD_FORMATTER.format(ts);
   }
   return '';
 }
