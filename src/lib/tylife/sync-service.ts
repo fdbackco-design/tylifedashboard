@@ -2233,9 +2233,17 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
 
         const { data: existingCcEvents } = await db
           .from('center_chief_promotion_events')
-          .select('member_id');
-        const existingCcEventIds = new Set(
-          ((existingCcEvents ?? []) as Array<{ member_id: string }>).map((r) => String(r.member_id)),
+          .select(
+            'member_id, previous_parent_id, threshold_leader_member_id, threshold_join_date, threshold_contract_id',
+          );
+        const existingCcByMemberId = new Map(
+          ((existingCcEvents ?? []) as Array<{
+            member_id: string;
+            previous_parent_id?: string | null;
+            threshold_leader_member_id?: string | null;
+            threshold_join_date?: string | null;
+            threshold_contract_id?: string | null;
+          }>).map((r) => [String(r.member_id), r]),
         );
 
         const centerChiefThresholdByMemberId = computeCenterChiefPromotionThresholds(
@@ -2246,19 +2254,38 @@ export async function runSync(options: SyncOptions = {}): Promise<SyncResult> {
           externalIdByMemberId,
         );
 
-        const ccPromoRows = toCenterChief
-          .filter((id) => !existingCcEventIds.has(id))
+        // 신규 + 기존 이벤트 threshold가 바뀌면 재생성(가입 순서 반영).
+        const ccPromoCandidateIds = new Set<string>([
+          ...toCenterChief,
+          ...existingCcByMemberId.keys(),
+        ]);
+        for (const [id, rank] of rankById) {
+          if (rank === '센터장' || rank === '사업본부장') ccPromoCandidateIds.add(id);
+        }
+        const ccPromoRows = [...ccPromoCandidateIds]
           .map((id) => {
             const th = centerChiefThresholdByMemberId.get(id) ?? null;
             if (!th) return null;
             if (String(th.threshold_join_date).slice(0, 10) === '9999-12-31') return null;
-            return {
+            const existing = existingCcByMemberId.get(id);
+            const row = {
               member_id: id,
-              previous_parent_id: parentByChild.get(id) ?? null,
+              previous_parent_id: (existing?.previous_parent_id ?? parentByChild.get(id) ?? null) as
+                | string
+                | null,
               threshold_leader_member_id: th.threshold_leader_member_id,
               threshold_join_date: th.threshold_join_date,
               threshold_contract_id: th.threshold_contract_id ?? null,
             };
+            if (!existing) return row;
+            if (
+              String(existing.threshold_leader_member_id ?? '') === row.threshold_leader_member_id &&
+              String(existing.threshold_contract_id ?? '') === String(row.threshold_contract_id ?? '') &&
+              String(existing.threshold_join_date ?? '').slice(0, 10) === row.threshold_join_date
+            ) {
+              return null;
+            }
+            return row;
           })
           .filter((row): row is NonNullable<typeof row> => row != null);
 

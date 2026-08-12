@@ -284,7 +284,8 @@ export function computeCenterChiefPromotionThresholds(
 ): Map<string, CenterChiefPromotionThreshold | null> {
   const out = new Map<string, CenterChiefPromotionThreshold | null>();
   for (const [memberId, rank] of rankById) {
-    if (rank !== '리더' && rank !== '센터장') {
+    // 사업본부장도 과거 센터장 경계를 재계산할 수 있게 포함한다(산하 리더 5명 이상일 때).
+    if (rank !== '리더' && rank !== '센터장' && rank !== '사업본부장') {
       out.set(memberId, null);
       continue;
     }
@@ -304,7 +305,9 @@ export function computeCenterChiefPromotionThresholds(
 }
 
 /**
- * `center_chief_promotion_events`에 기록된 5번째 리더·승격일을 threshold 맵 SSOT로 덮어쓴다.
+ * `center_chief_promotion_events`를 threshold 맵에 반영한다.
+ * - live compute에 유효한 경계가 있으면 **덮어쓰지 않는다** (가입 순서 재계산 SSOT).
+ * - live가 없거나 sentinel일 때만 이벤트 값으로 채운다(산하 리더 수 부족 등 역사 보존).
  * - 이벤트에 sentinel(9999)/계약 누락이 있으면 해당 리더의 리더 승급 threshold로 보정한다.
  * - 보정 후에도 sentinel이면 이벤트를 무시하고 live compute 값을 유지한다.
  */
@@ -332,6 +335,10 @@ export function mergeCenterChiefPromotionEventThresholds(
   for (const r of events) {
     if (!r?.member_id || !r.threshold_leader_member_id || !r.threshold_join_date) continue;
     const memberId = String(r.member_id);
+    const live = centerChiefThresholdByMemberId.get(memberId) ?? null;
+    if (live && !isCenterChiefThresholdUnknownDate(live.threshold_join_date)) {
+      continue;
+    }
     const leaderId = String(r.threshold_leader_member_id);
     let cid = r.threshold_contract_id ? String(r.threshold_contract_id) : null;
     let joinDate = String(r.threshold_join_date).slice(0, 10);

@@ -813,6 +813,7 @@ export async function calculateMonthlySettlement(params: {
       });
     }
   }
+  // live가 없을 때만 저장 이벤트로 채움(live 우선 = 새 가입 순서 재생성).
   mergeCenterChiefPromotionEventThresholds(
     centerChiefThresholdByMemberId,
     (ccPromoEvents ?? []) as any[],
@@ -820,63 +821,12 @@ export async function calculateMonthlySettlement(params: {
     promotionThresholdByMemberId,
   );
 
-  // 이벤트에 sentinel/계약 누락이 있으면 리더 승급 threshold로 보정 후 저장
-  const ccEventRepairs: Array<{
-    member_id: string;
-    previous_parent_id: string | null;
-    threshold_leader_member_id: string;
-    threshold_join_date: string;
-    threshold_contract_id: string | null;
-  }> = [];
-  for (const r of (ccPromoEvents ?? []) as any[]) {
-    if (!r?.member_id || !r?.threshold_leader_member_id) continue;
-    const storedJoin = String(r.threshold_join_date ?? '').slice(0, 10);
-    const storedCid = r.threshold_contract_id ? String(r.threshold_contract_id) : null;
-    if (storedCid && !isCenterChiefThresholdUnknownDate(storedJoin)) continue;
-    const fixed = centerChiefThresholdByMemberId.get(String(r.member_id)) ?? null;
-    if (!fixed || isCenterChiefThresholdUnknownDate(fixed.threshold_join_date)) continue;
-    if (
-      fixed.threshold_join_date === storedJoin &&
-      (fixed.threshold_contract_id ?? null) === storedCid
-    ) {
-      continue;
-    }
-    ccEventRepairs.push({
-      member_id: String(r.member_id),
-      previous_parent_id: (r.previous_parent_id ?? null) as string | null,
-      threshold_leader_member_id: fixed.threshold_leader_member_id,
-      threshold_join_date: fixed.threshold_join_date,
-      threshold_contract_id: fixed.threshold_contract_id ?? null,
-    });
-    centerChiefEventsByMemberId.set(String(r.member_id), {
-      member_id: String(r.member_id),
-      previous_parent_id: (r.previous_parent_id ?? null) as string | null,
-      threshold_leader_member_id: fixed.threshold_leader_member_id,
-      threshold_join_date: fixed.threshold_join_date,
-      threshold_contract_id: fixed.threshold_contract_id ?? null,
-      created_at: (r.created_at ?? null) as string | null,
-    });
-  }
-  if (ccEventRepairs.length > 0) {
-    const { error: ccRepairErr } = await db
-      .from('center_chief_promotion_events')
-      .upsert(ccEventRepairs as any, { onConflict: 'member_id' });
-    if (ccRepairErr) {
-      throw new Error(`center_chief_promotion_events 보정 실패: ${ccRepairErr.message}`);
-    }
-  }
-
-  const divisionHeadThresholdByMemberId = computeDivisionHeadPromotionThresholds(
-    treeRows,
-    rankByIdForCenterChief,
-    centerChiefThresholdByMemberId,
-    externalIdByMemberId,
-  );
-
   const parentByChildForCc = new Map<string, string | null>();
   for (const e of edgesRaw) parentByChildForCc.set(e.child_id, e.parent_id ?? null);
 
-  const newCcPromoRows: Array<{
+  // 신규 승급 + 기존 이벤트의 5번째 리더/계약/일자가 바뀌면 재생성(갱신).
+  // previous_parent_id 는 최초 승급 시점 상위이므로 기존 값이 있으면 유지한다.
+  const ccPromoRowsToUpsert: Array<{
     member_id: string;
     previous_parent_id: string | null;
     threshold_leader_member_id: string;
@@ -885,34 +835,45 @@ export async function calculateMonthlySettlement(params: {
   }> = [];
   const newCcMemberIds: string[] = [];
   for (const m of membersRaw as OrganizationMember[]) {
-    if (centerChiefEventsByMemberId.has(m.id)) continue;
-    if (m.rank !== '리더' && m.rank !== '센터장') continue;
+    if (m.rank !== '리더' && m.rank !== '센터장' && m.rank !== '사업본부장') continue;
     const th = centerChiefThresholdByMemberId.get(m.id) ?? null;
     if (!th) continue;
     if (isCenterChiefThresholdUnknownDate(th.threshold_join_date)) continue;
-    newCcPromoRows.push({
+    const existing = centerChiefEventsByMemberId.get(m.id);
+    const row = {
       member_id: m.id,
-      previous_parent_id: parentByChildForCc.get(m.id) ?? null,
+      previous_parent_id: existing?.previous_parent_id ?? parentByChildForCc.get(m.id) ?? null,
       threshold_leader_member_id: th.threshold_leader_member_id,
       threshold_join_date: th.threshold_join_date,
       threshold_contract_id: th.threshold_contract_id ?? null,
-    });
-    newCcMemberIds.push(m.id);
+    };
+    if (!existing) {
+      ccPromoRowsToUpsert.push(row);
+      newCcMemberIds.push(m.id);
+    } else if (
+      existing.threshold_leader_member_id !== row.threshold_leader_member_id ||
+      (existing.threshold_contract_id ?? null) !== row.threshold_contract_id ||
+      existing.threshold_join_date !== row.threshold_join_date
+    ) {
+      ccPromoRowsToUpsert.push(row);
+    } else {
+      continue;
+    }
     centerChiefEventsByMemberId.set(m.id, {
       member_id: m.id,
-      previous_parent_id: parentByChildForCc.get(m.id) ?? null,
-      threshold_leader_member_id: th.threshold_leader_member_id,
-      threshold_join_date: th.threshold_join_date,
-      threshold_contract_id: th.threshold_contract_id ?? null,
-      created_at: null,
+      previous_parent_id: row.previous_parent_id,
+      threshold_leader_member_id: row.threshold_leader_member_id,
+      threshold_join_date: row.threshold_join_date,
+      threshold_contract_id: row.threshold_contract_id,
+      created_at: existing?.created_at ?? null,
     });
   }
-  if (newCcPromoRows.length > 0) {
+  if (ccPromoRowsToUpsert.length > 0) {
     const { error: newCcErr } = await db
       .from('center_chief_promotion_events')
-      .upsert(newCcPromoRows as any, { onConflict: 'member_id' });
+      .upsert(ccPromoRowsToUpsert as any, { onConflict: 'member_id' });
     if (newCcErr) {
-      throw new Error(`walk 기반 center_chief_promotion_events 생성 실패: ${newCcErr.message}`);
+      throw new Error(`walk 기반 center_chief_promotion_events 생성/갱신 실패: ${newCcErr.message}`);
     }
     const toCenterChiefRankUp = newCcMemberIds.filter((id) => {
       if (lockedCenterChiefSet.has(id)) return false;
@@ -932,6 +893,14 @@ export async function calculateMonthlySettlement(params: {
       }
     }
   }
+
+  // 센터장 경계·직급 반영 후 본부장 경계 재계산(산하 센터장 3번째 순서).
+  const divisionHeadThresholdByMemberId = computeDivisionHeadPromotionThresholds(
+    treeRows,
+    rankByIdForCenterChief,
+    centerChiefThresholdByMemberId,
+    externalIdByMemberId,
+  );
 
   // 사업본부장: 산하 센터장 3명 이상이면 센터장 → 사업본부장 (미만이면 강등)
   {

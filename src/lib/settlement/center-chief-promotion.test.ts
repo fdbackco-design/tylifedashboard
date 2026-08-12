@@ -222,4 +222,36 @@ describe('mergeCenterChiefPromotionEventThresholds', () => {
     );
     assert.deepEqual(map.get(CENTER), live);
   });
+
+  it('유효한 live threshold가 있으면 저장 이벤트로 덮어쓰지 않는다', () => {
+    const live: CenterChiefPromotionThreshold = {
+      threshold_leader_member_id: L5,
+      threshold_join_date: '2026-07-27',
+      threshold_contract_id: 'c-live',
+    };
+    const map = new Map<string, CenterChiefPromotionThreshold | null>([[CENTER, live]]);
+    mergeCenterChiefPromotionEventThresholds(
+      map,
+      [
+        {
+          member_id: CENTER,
+          threshold_leader_member_id: L6,
+          threshold_join_date: '2026-07-20',
+          threshold_contract_id: 'c-stored',
+        },
+      ],
+      new Map([
+        [
+          'c-stored',
+          {
+            join_date: '2026-07-15',
+            happy_call_at: '2026-07-20T01:00:00Z',
+            created_at: '2026-07-20T10:00:00Z',
+          },
+        ],
+      ]),
+      new Map(),
+    );
+    assert.deepEqual(map.get(CENTER), live);
+  });
 });
