@@ -39,6 +39,12 @@ const withPWA = withPWAInit({
         handler: 'NetworkOnly',
         method: 'POST',
       },
+      {
+        urlPattern: ({ sameOrigin, url }: { sameOrigin: boolean; url: URL }) =>
+          sameOrigin && url.pathname.startsWith('/api/push'),
+        handler: 'NetworkOnly',
+        method: 'DELETE',
+      },
     ],
   },
 });

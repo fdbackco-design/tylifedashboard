@@ -2,7 +2,9 @@
 
 import {
   getClientPushSubscriptionPayload,
+  getIosPushBlockReason,
   isPushSupported,
+  persistPushSubscription,
   subscribeToWebPush,
   unsubscribeFromWebPush,
 } from '@/lib/push/client';
@@ -46,6 +48,12 @@ export default function PushSubscribeButton({ vapidPublicKey, className = '', co
       setStatus('unsupported');
       return;
     }
+    const iosBlock = getIosPushBlockReason();
+    if (iosBlock) {
+      setStatus('unsupported');
+      setMessage(iosBlock);
+      return;
+    }
     if (Notification.permission === 'denied') {
       setStatus('denied');
       return;
@@ -53,6 +61,8 @@ export default function PushSubscribeButton({ vapidPublicKey, className = '', co
     const existing = await getClientPushSubscriptionPayload();
     if (existing && Notification.permission === 'granted') {
       setStatus('on');
+      // 브라우저에는 구독이 있는데 DB 저장이 실패한 경우 복구
+      void persistPushSubscription(existing).catch(() => undefined);
       return;
     }
     setStatus('off');
@@ -70,17 +80,8 @@ export default function PushSubscribeButton({ vapidPublicKey, className = '', co
     setBusy(true);
     setMessage(null);
     try {
-      if ('serviceWorker' in navigator && !navigator.serviceWorker.controller) {
-        await navigator.serviceWorker.register('/sw.js').catch(() => undefined);
-      }
       const payload = await subscribeToWebPush(vapidPublicKey);
-      const res = await fetch('/api/push/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const json = (await res.json()) as { success?: boolean; error?: string };
-      if (!res.ok || !json.success) throw new Error(json.error ?? '구독 저장 실패');
+      await persistPushSubscription(payload);
       setStatus('on');
       setMessage('알림이 켜졌습니다.');
     } catch (e) {
@@ -145,7 +146,7 @@ export default function PushSubscribeButton({ vapidPublicKey, className = '', co
               : 'border-slate-200 bg-white/90 hover:bg-slate-50'
           }`}
         >
-          {busy ? (
+          {busy || status === 'loading' ? (
             <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-orange-500 border-t-transparent" />
           ) : (
             <BellIcon active={status === 'on'} />
@@ -155,7 +156,15 @@ export default function PushSubscribeButton({ vapidPublicKey, className = '', co
           ) : null}
         </button>
         {message ? (
-          <p className="max-w-[10rem] text-right text-[10px] leading-tight text-slate-500">{message}</p>
+          <p
+            className={`max-w-[12.5rem] text-right text-[10px] leading-tight ${
+              status === 'on' || status === 'unsupported' || message === '알림이 꺼졌습니다.'
+                ? 'text-slate-500'
+                : 'text-red-600'
+            }`}
+          >
+            {message}
+          </p>
         ) : null}
       </div>
     );
@@ -186,7 +195,7 @@ export default function PushSubscribeButton({ vapidPublicKey, className = '', co
             : 'border-slate-200 bg-white hover:bg-slate-50'
         }`}
       >
-        {busy ? (
+        {busy || status === 'loading' ? (
           <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-orange-500 border-t-transparent" />
         ) : (
           <BellIcon active={status === 'on'} />
