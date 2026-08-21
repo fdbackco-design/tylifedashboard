@@ -15,21 +15,21 @@ function parseBody(body: unknown): PushSubscribeBody | null {
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const userId = await getAuthedUserIdFromRequest(req);
+  const { userId, withAuthCookies } = await getAuthedUserIdFromRequest(req);
   if (!userId) {
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    return withAuthCookies(NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 }));
   }
 
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ success: false, error: 'Invalid JSON' }, { status: 400 });
+    return withAuthCookies(NextResponse.json({ success: false, error: 'Invalid JSON' }, { status: 400 }));
   }
 
   const sub = parseBody(body);
   if (!sub) {
-    return NextResponse.json({ success: false, error: 'Invalid subscription' }, { status: 400 });
+    return withAuthCookies(NextResponse.json({ success: false, error: 'Invalid subscription' }, { status: 400 }));
   }
 
   const db = createAdminSupabaseClient();
@@ -42,7 +42,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     .maybeSingle();
 
   if (existing && (existing as { user_id: string }).user_id === userId) {
-    return NextResponse.json({ success: true, data: { id: (existing as { id: string }).id, duplicate: true } });
+    return withAuthCookies(
+      NextResponse.json({ success: true, data: { id: (existing as { id: string }).id, duplicate: true } }),
+    );
   }
 
   const { data, error } = await db
@@ -61,28 +63,30 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     .single();
 
   if (error) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return withAuthCookies(NextResponse.json({ success: false, error: error.message }, { status: 500 }));
   }
 
-  return NextResponse.json({ success: true, data: { id: (data as { id: string }).id, duplicate: false } });
+  return withAuthCookies(
+    NextResponse.json({ success: true, data: { id: (data as { id: string }).id, duplicate: false } }),
+  );
 }
 
 export async function DELETE(req: NextRequest): Promise<NextResponse> {
-  const userId = await getAuthedUserIdFromRequest(req);
+  const { userId, withAuthCookies } = await getAuthedUserIdFromRequest(req);
   if (!userId) {
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    return withAuthCookies(NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 }));
   }
 
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ success: false, error: 'Invalid JSON' }, { status: 400 });
+    return withAuthCookies(NextResponse.json({ success: false, error: 'Invalid JSON' }, { status: 400 }));
   }
 
   const endpoint = String((body as { endpoint?: string })?.endpoint ?? '').trim();
   if (!endpoint) {
-    return NextResponse.json({ success: false, error: 'endpoint가 필요합니다.' }, { status: 400 });
+    return withAuthCookies(NextResponse.json({ success: false, error: 'endpoint가 필요합니다.' }, { status: 400 }));
   }
 
   const db = createAdminSupabaseClient();
@@ -93,8 +97,8 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
     .eq('user_id', userId);
 
   if (error) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return withAuthCookies(NextResponse.json({ success: false, error: error.message }, { status: 500 }));
   }
 
-  return NextResponse.json({ success: true });
+  return withAuthCookies(NextResponse.json({ success: true }));
 }

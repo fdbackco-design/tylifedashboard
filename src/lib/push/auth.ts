@@ -1,7 +1,9 @@
-import { createServerClient } from '@supabase/ssr';
-import type { NextRequest } from 'next/server';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { NextRequest, NextResponse } from 'next/server';
 
-function createRequestSupabaseClient(req: NextRequest) {
+type CookieToSet = { name: string; value: string; options: CookieOptions };
+
+function createRequestSupabaseClient(req: NextRequest, cookiesToSet: CookieToSet[]) {
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -10,18 +12,34 @@ function createRequestSupabaseClient(req: NextRequest) {
         getAll() {
           return req.cookies.getAll();
         },
-        setAll() {},
+        setAll(next: CookieToSet[]) {
+          next.forEach((cookie) => cookiesToSet.push(cookie));
+        },
       },
     },
   );
 }
 
-export async function getAuthedUserIdFromRequest(req: NextRequest): Promise<string | null> {
-  const supabase = createRequestSupabaseClient(req);
+function applyCookies(res: NextResponse, cookiesToSet: CookieToSet[]): NextResponse {
+  cookiesToSet.forEach(({ name, value, options }) => {
+    res.cookies.set(name, value, options);
+  });
+  return res;
+}
+
+export async function getAuthedUserIdFromRequest(req: NextRequest): Promise<{
+  userId: string | null;
+  withAuthCookies: (res: NextResponse) => NextResponse;
+}> {
+  const cookiesToSet: CookieToSet[] = [];
+  const supabase = createRequestSupabaseClient(req, cookiesToSet);
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return null;
+
+  const withAuthCookies = (res: NextResponse) => applyCookies(res, cookiesToSet);
+
+  if (!user) return { userId: null, withAuthCookies };
 
   const { data: profile } = await supabase
     .from('user_profiles')
@@ -29,6 +47,8 @@ export async function getAuthedUserIdFromRequest(req: NextRequest): Promise<stri
     .eq('id', user.id)
     .maybeSingle();
 
-  if (profile && (profile as { is_active?: boolean }).is_active === false) return null;
-  return user.id;
+  if (profile && (profile as { is_active?: boolean }).is_active === false) {
+    return { userId: null, withAuthCookies };
+  }
+  return { userId: user.id, withAuthCookies };
 }
