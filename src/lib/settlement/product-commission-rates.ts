@@ -17,8 +17,8 @@ export type ProductCommissionRef = {
 /** TY썬크루즈 · TY스페셜라이프케어 */
 export const SUN_CRUISE_SPECIAL_COMMISSION_BY_RANK: Partial<Record<RankType, number>> = {
   영업사원: 250_000,
-  리더: 300_000,
-  센터장: 350_000,
+  리더: 320_000,
+  센터장: 370_000,
   사업본부장: 400_000,
 };
 
