@@ -40,22 +40,35 @@ describe('product commission kind', () => {
 });
 
 describe('product commission rates by rank', () => {
-  it('썬크루즈/스페셜: 25/32/37/40만', () => {
+  it('썬크루즈/스페셜 2026-08부터: 25/32/37/40만', () => {
     for (const item_name of ['TY썬크루즈', 'TY스페셜라이프케어'] as const) {
       const ref = { item_name };
-      assert.equal(productCommissionPerUnitForRank('영업사원', ref), 250_000);
-      assert.equal(productCommissionPerUnitForRank('리더', ref), 320_000);
-      assert.equal(productCommissionPerUnitForRank('센터장', ref), 370_000);
-      assert.equal(productCommissionPerUnitForRank('사업본부장', ref), 400_000);
+      assert.equal(productCommissionPerUnitForRank('영업사원', ref, '2026-08'), 250_000);
+      assert.equal(productCommissionPerUnitForRank('리더', ref, '2026-08'), 320_000);
+      assert.equal(productCommissionPerUnitForRank('센터장', ref, '2026-08'), 370_000);
+      assert.equal(productCommissionPerUnitForRank('사업본부장', ref, '2026-08'), 400_000);
+      assert.equal(productCommissionPerUnitForRank('리더', ref, '2026-08-31'), 320_000);
     }
   });
 
-  it('올라이프: 25/35/42/45만', () => {
+  it('썬크루즈/스페셜 2026-07까지: 25/30/35/40만', () => {
+    const ref = { item_name: 'TY썬크루즈' };
+    assert.equal(productCommissionPerUnitForRank('영업사원', ref, '2026-07'), 250_000);
+    assert.equal(productCommissionPerUnitForRank('리더', ref, '2026-07'), 300_000);
+    assert.equal(productCommissionPerUnitForRank('센터장', ref, '2026-07'), 350_000);
+    assert.equal(productCommissionPerUnitForRank('사업본부장', ref, '2026-07'), 400_000);
+    assert.equal(productCommissionPerUnitForRank('리더', ref, '2026-07-31'), 300_000);
+    assert.equal(productCommissionPerUnitForRank('센터장', ref, '2026-06'), 350_000);
+  });
+
+  it('올라이프: 25/35/42/45만 (월 무관)', () => {
     const ref = { item_name: 'TY올라이프케어' };
-    assert.equal(productCommissionPerUnitForRank('영업사원', ref), 250_000);
-    assert.equal(productCommissionPerUnitForRank('리더', ref), 350_000);
-    assert.equal(productCommissionPerUnitForRank('센터장', ref), 420_000);
-    assert.equal(productCommissionPerUnitForRank('사업본부장', ref), 450_000);
+    assert.equal(productCommissionPerUnitForRank('영업사원', ref, '2026-07'), 250_000);
+    assert.equal(productCommissionPerUnitForRank('리더', ref, '2026-07'), 350_000);
+    assert.equal(productCommissionPerUnitForRank('센터장', ref, '2026-07'), 420_000);
+    assert.equal(productCommissionPerUnitForRank('사업본부장', ref, '2026-07'), 450_000);
+    assert.equal(productCommissionPerUnitForRank('리더', ref, '2026-08'), 350_000);
+    assert.equal(productCommissionPerUnitForRank('센터장', ref, '2026-08'), 420_000);
   });
 
   it('TY케어플랜: 전 직급 0원', () => {

@@ -87,7 +87,7 @@ function getCommissionPerUnit(
 ): number {
   // 본사는 수당 대상이 아님
   if (rank === '본사') return 0;
-  const override = productCommissionPerUnitForRank(rank, product ?? null);
+  const override = productCommissionPerUnitForRank(rank, product ?? null, refDate);
   if (override != null) return override;
   const rule = findActiveRule(rules, rank, refDate);
   // settlement_rules를 못 읽거나(초기 데이터 미적용/권한/환경),
