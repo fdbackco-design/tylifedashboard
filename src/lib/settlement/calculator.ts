@@ -136,7 +136,7 @@ function commissionPerUnitForRank(
   product?: ProductCommissionRef | null,
 ): number {
   if (rank === '본사') return 0;
-  const override = productCommissionPerUnitForRank(rank, product ?? null);
+  const override = productCommissionPerUnitForRank(rank, product ?? null, date);
   if (override != null) return override;
   return getActiveRuleOrFallback(rules, rank, date).commission_per_unit;
 }
