@@ -13,7 +13,8 @@ export type ContractStatus =
 export type ProductType =
   | 'TY갤럭시케어'
   | 'TY케어플랜'
-  | '올라이프케어'
+  | 'TY올라이프케어'
+  | '올라이프케어' // 레거시/혼재 허용 (신규 sync 는 TY올라이프케어로 정규화)
   | 'TY스페셜라이프케어'
   | '스페셜라이프케어' // 레거시/혼재 허용 (신규 sync 는 TY스페셜라이프케어로 정규화)
   | '일반가전' // 레거시

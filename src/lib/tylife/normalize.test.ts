@@ -10,6 +10,11 @@ describe('normalizeProductType', () => {
     expect(normalizeProductType('TY케어플랜')).toBe('TY케어플랜');
     expect(normalizeProductType('신규 TY케어플랜 상품')).toBe('TY케어플랜');
   });
+
+  it('TY올라이프케어를 canonical product_type으로 정규화한다', () => {
+    expect(normalizeProductType('TY올라이프케어')).toBe('TY올라이프케어');
+    expect(normalizeProductType('올라이프케어')).toBe('TY올라이프케어');
+  });
 });
 
 describe('normalizeItemNameForProduct', () => {
