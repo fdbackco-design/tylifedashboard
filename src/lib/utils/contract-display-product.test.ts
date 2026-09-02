@@ -23,4 +23,37 @@ describe('getContractDisplayProductName', () => {
       'TY케어플랜',
     );
   });
+
+  it('TY올라이프케어_무는 원본 상품명을 표시한다', () => {
+    assert.equal(
+      getContractDisplayProductName({
+        product_type: '무',
+        source_snapshot_json: { 상품명: 'TY올라이프케어_무' },
+      }),
+      'TY올라이프케어_무',
+    );
+    assert.equal(
+      getContractDisplayProductName({
+        product_type: 'TY올라이프케어_무',
+        source_snapshot_json: { 상품명: 'TY올라이프케어_무' },
+      }),
+      'TY올라이프케어_무',
+    );
+    assert.equal(
+      getContractDisplayProductName({
+        product_type: 'TY올라이프케어',
+      }),
+      'TY올라이프케어',
+    );
+  });
+
+  it('TY갤럭시케어_무는 TY갤럭시케어로 표시한다', () => {
+    assert.equal(
+      getContractDisplayProductName({
+        product_type: '무',
+        source_snapshot_json: { 상품명: 'TY갤럭시케어_무' },
+      }),
+      'TY갤럭시케어',
+    );
+  });
 });

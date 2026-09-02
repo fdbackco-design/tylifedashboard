@@ -36,6 +36,13 @@ describe('TY갤럭시케어 7월 정산 윈도우 특례', () => {
     assert.equal(isTyGalaxyCareNamedProduct({ product_type: '무' }), true);
     assert.equal(isTyGalaxyCareNamedProduct({ product_type: '갤럭시케어 라이트' }), false);
     assert.equal(isTyGalaxyCareNamedProduct({ product_type: 'TY케어플랜' }), false);
+    assert.equal(
+      isTyGalaxyCareNamedProduct({
+        product_type: '무',
+        source_snapshot_json: { 상품명: 'TY올라이프케어_무' },
+      }),
+      false,
+    );
   });
 
   it('가입 + 해피콜 6/26 이상이면 특례 대상', () => {

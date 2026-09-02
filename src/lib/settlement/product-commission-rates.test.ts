@@ -21,6 +21,13 @@ describe('product commission kind', () => {
   it('물품명 TY올라이프케어', () => {
     assert.equal(resolveProductCommissionKind({ item_name: 'TY올라이프케어' }), 'all_life');
     assert.equal(resolveProductCommissionKind({ product_type: '올라이프케어' }), 'all_life');
+    assert.equal(
+      resolveProductCommissionKind({
+        product_type: '무',
+        source_snapshot_json: { 상품명: 'TY올라이프케어_무' },
+      }),
+      'all_life',
+    );
   });
 
   it('갤럭시케어 등은 미적용', () => {

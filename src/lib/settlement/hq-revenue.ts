@@ -90,6 +90,8 @@ export function resolveHqProductKindFromContract(input: HqProductResolveInput): 
   if (texts.some((t) => t.includes('갤럭시케어 라이트'))) return '갤럭시케어 라이트';
   if (texts.some((t) => t.includes('썬크루즈'))) return 'TY썬크루즈';
   if (texts.some((t) => t.includes('케어플랜'))) return 'TY케어플랜';
+  // TY올라이프케어_무 는 product_type=무 로 저장된 경우에도 갤럭시가 아니라 올라이프
+  if (texts.some((t) => t.includes('올라이프케어'))) return '올라이프케어';
   if (texts.some(isTyGalaxyCareProductText)) return 'TY갤럭시케어';
 
   for (const text of texts) {
@@ -375,6 +377,14 @@ export function runHqRevenueSelfCheck(): { ok: boolean; failures: string[] } {
   assertEq('TY썬크루즈', getHqRevenueUnitPrice({ item_name: 'TY썬크루즈' }, '2026-07-01'), 550_000);
   assertKind('라이트 우선', resolveHqProductKind('갤럭시케어 라이트'), '갤럭시케어 라이트');
   assertKind('TY갤럭시케어_무', resolveHqProductKindFromContract({ product_type: '무' }), 'TY갤럭시케어');
+  assertKind(
+    'TY올라이프케어_무',
+    resolveHqProductKindFromContract({
+      product_type: '무',
+      source_snapshot_json: { 상품명: 'TY올라이프케어_무' },
+    }),
+    '올라이프케어',
+  );
   assertKind(
     'TY갤럭시케어_ALL',
     resolveHqProductKindFromContract({

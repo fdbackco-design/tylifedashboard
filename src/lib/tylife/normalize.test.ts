@@ -15,6 +15,15 @@ describe('normalizeProductType', () => {
     expect(normalizeProductType('TY올라이프케어')).toBe('TY올라이프케어');
     expect(normalizeProductType('올라이프케어')).toBe('TY올라이프케어');
   });
+
+  it('TY올라이프케어_무는 갤럭시무가 아니라 TY올라이프케어로 저장한다', () => {
+    expect(normalizeProductType('TY올라이프케어_무')).toBe('TY올라이프케어');
+  });
+
+  it('TY갤럭시케어_무만 product_type 무로 정규화한다', () => {
+    expect(normalizeProductType('TY갤럭시케어_무')).toBe('무');
+    expect(normalizeProductType('무')).toBe('무');
+  });
 });
 
 describe('normalizeItemNameForProduct', () => {

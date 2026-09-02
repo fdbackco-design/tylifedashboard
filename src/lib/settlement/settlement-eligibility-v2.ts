@@ -95,6 +95,7 @@ export function isTyGalaxyCareNamedProduct(c: {
   source_snapshot_json?: Record<string, string | null> | null;
 }): boolean {
   const texts = collectSettlementProductTexts(c);
+  if (texts.some((t) => t.includes('올라이프케어'))) return false;
   if (texts.some((t) => t.includes('갤럭시케어 라이트'))) return false;
   if (texts.some((t) => t.includes('TY갤럭시케어'))) return true;
   return (c.product_type ?? '').trim() === '무';
