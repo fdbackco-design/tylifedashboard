@@ -61,7 +61,9 @@ export function normalizeProductType(raw: string): ProductType {
   const text = raw.trim();
   if (text.includes('갤럭시케어 라이트')) return '갤럭시케어 라이트';
   if (text.includes('TY케어플랜')) return 'TY케어플랜';
-  // TY올라이프케어_무 포함 — generic '_무' 보다 먼저 매칭해야 갤럭시무로 떨어지지 않는다
+  // TY올라이프케어_무 포함 — generic '_무' 보다 먼저 매칭해야 갤럭시무로 떨어지지 않는다.
+  // product_type enum 에 'TY올라이프케어_무' 가 아직 없어 canonical 은 TY올라이프케어.
+  // 화면 상품명은 getContractDisplayProductName 이 원본 'TY올라이프케어_무' 를 유지한다.
   if (text.includes('올라이프케어')) return 'TY올라이프케어';
   // TY 원본 '스페셜라이프케어' / 레거시 '일반가전' → DB enum canonical
   if (text.includes('스페셜라이프케어') || text.includes('일반가전')) {

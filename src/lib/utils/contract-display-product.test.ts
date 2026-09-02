@@ -24,18 +24,24 @@ describe('getContractDisplayProductName', () => {
     );
   });
 
-  it('TY올라이프케어_무는 TY올라이프케어로 표시한다', () => {
+  it('TY올라이프케어_무는 원본 상품명을 표시한다', () => {
     assert.equal(
       getContractDisplayProductName({
         product_type: '무',
         source_snapshot_json: { 상품명: 'TY올라이프케어_무' },
       }),
-      'TY올라이프케어',
+      'TY올라이프케어_무',
+    );
+    assert.equal(
+      getContractDisplayProductName({
+        product_type: 'TY올라이프케어_무',
+        source_snapshot_json: { 상품명: 'TY올라이프케어_무' },
+      }),
+      'TY올라이프케어_무',
     );
     assert.equal(
       getContractDisplayProductName({
         product_type: 'TY올라이프케어',
-        source_snapshot_json: { 상품명: 'TY올라이프케어_무' },
       }),
       'TY올라이프케어',
     );

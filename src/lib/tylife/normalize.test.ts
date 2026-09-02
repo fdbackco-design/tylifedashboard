@@ -16,7 +16,7 @@ describe('normalizeProductType', () => {
     expect(normalizeProductType('올라이프케어')).toBe('TY올라이프케어');
   });
 
-  it('TY올라이프케어_무는 갤럭시무가 아니라 TY올라이프케어로 정규화한다', () => {
+  it('TY올라이프케어_무는 갤럭시무가 아니라 TY올라이프케어로 저장한다', () => {
     expect(normalizeProductType('TY올라이프케어_무')).toBe('TY올라이프케어');
   });
 

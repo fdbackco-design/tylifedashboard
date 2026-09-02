@@ -51,6 +51,11 @@ function collectProductDetectTexts(c: GalaxyCareMuDetectInput): string[] {
     .filter(Boolean);
 }
 
+/** TY올라이프케어_무 (정산은 올라이프케어와 동일, 상품명은 원본 유지) */
+export function isAllLifeCareMuContract(c: GalaxyCareMuDetectInput): boolean {
+  return collectProductDetectTexts(c).some((t) => t.includes('올라이프케어_무'));
+}
+
 /** TY올라이프케어 / TY올라이프케어_무 / 레거시 올라이프케어 */
 export function isAllLifeCareContract(c: GalaxyCareMuDetectInput): boolean {
   return collectProductDetectTexts(c).some((t) => t.includes('올라이프케어'));

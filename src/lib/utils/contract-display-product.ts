@@ -1,4 +1,8 @@
-import { isAllLifeCareContract, isTyGalaxyCareMuContract } from '@/lib/settlement/galaxy-care-mu';
+import {
+  isAllLifeCareContract,
+  isAllLifeCareMuContract,
+  isTyGalaxyCareMuContract,
+} from '@/lib/settlement/galaxy-care-mu';
 
 export type ContractDisplayProductInput = {
   product_type?: string | null;
@@ -9,9 +13,13 @@ export type ContractDisplayProductInput = {
 /**
  * 화면 표시용 상품명.
  * TY갤럭시케어_무 / product_type=무 등은 TY갤럭시케어로 통일한다.
- * TY올라이프케어_무 는 TY올라이프케어로 통일한다.
+ * TY올라이프케어_무 는 원본 상품명을 유지한다.
  */
 export function getContractDisplayProductName(c: ContractDisplayProductInput): string {
+  if (isAllLifeCareMuContract(c)) {
+    return 'TY올라이프케어_무';
+  }
+
   if (isAllLifeCareContract(c)) {
     return 'TY올라이프케어';
   }
