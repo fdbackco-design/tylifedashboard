@@ -60,16 +60,16 @@ export function normalizeStatus(raw: string): ContractStatus {
 export function normalizeProductType(raw: string): ProductType {
   const text = raw.trim();
   if (text.includes('갤럭시케어 라이트')) return '갤럭시케어 라이트';
-  if (text.includes('TY갤럭시케어_무') || text.endsWith('_무')) return '무';
-  if (text.includes('TY갤럭시케어')) return 'TY갤럭시케어';
   if (text.includes('TY케어플랜')) return 'TY케어플랜';
-  // TY 원본 'TY올라이프케어' / 레거시 '올라이프케어' → DB enum canonical
+  // TY올라이프케어_무 포함 — generic '_무' 보다 먼저 매칭해야 갤럭시무로 떨어지지 않는다
   if (text.includes('올라이프케어')) return 'TY올라이프케어';
   // TY 원본 '스페셜라이프케어' / 레거시 '일반가전' → DB enum canonical
   if (text.includes('스페셜라이프케어') || text.includes('일반가전')) {
     return 'TY스페셜라이프케어';
   }
-  if (text === '무') return '무';
+  // TY갤럭시케어_무 만 product_type=무. 다른 상품의 '_무' 접미사는 여기로 보내지 않는다.
+  if (text.includes('TY갤럭시케어_무') || text === '무') return '무';
+  if (text.includes('TY갤럭시케어')) return 'TY갤럭시케어';
   // 레거시: '갤럭시케어' 단독 표기
   if (text.includes('갤럭시케어')) return 'TY갤럭시케어';
 

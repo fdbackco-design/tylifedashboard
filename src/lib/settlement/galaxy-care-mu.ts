@@ -51,13 +51,21 @@ function collectProductDetectTexts(c: GalaxyCareMuDetectInput): string[] {
     .filter(Boolean);
 }
 
+/** TY올라이프케어 / TY올라이프케어_무 / 레거시 올라이프케어 */
+export function isAllLifeCareContract(c: GalaxyCareMuDetectInput): boolean {
+  return collectProductDetectTexts(c).some((t) => t.includes('올라이프케어'));
+}
+
 /** TY갤럭시케어_무: 렌탈·송장 없이 해피콜 완료만으로 가입 인정 */
 export function isTyGalaxyCareMuContract(c: GalaxyCareMuDetectInput): boolean {
+  // TY올라이프케어_무 는 갤럭시무가 아니라 올라이프케어와 동일 취급
+  if (isAllLifeCareContract(c)) return false;
+
   const productType = (c.product_type ?? '').trim();
   if (productType === '무') return true;
 
   const texts = collectProductDetectTexts(c);
-  return texts.some((t) => t.includes('TY갤럭시케어_무') || /_무$/i.test(t));
+  return texts.some((t) => t.includes('TY갤럭시케어_무'));
 }
 
 /** TY케어플랜: 렌탈·송장 없이 해피콜 성공만으로 가입 인정 (가입일=해피콜 성공일) */
