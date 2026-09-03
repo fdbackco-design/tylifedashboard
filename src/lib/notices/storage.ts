@@ -1,7 +1,26 @@
 import { NOTICE_STORAGE_BUCKET } from './constants';
 
-function sanitizeStorageFileName(fileName: string): string {
-  return fileName.replace(/[^\w.\-가-힣]/g, '_').slice(0, 180) || 'file';
+/**
+ * Supabase Storage object key 는 ASCII 만 허용한다.
+ * 한글을 키에 넣으면 `Invalid key` 가 난다.
+ * (macOS 는 파일명이 NFD 분해되어 한글이 `_` 로 바뀌고, Windows NFC 는 한글이 남아 실패한다.)
+ * 화면/다운로드용 원본 파일명은 notice_attachments.file_name 에 별도 저장한다.
+ */
+export function sanitizeStorageFileName(fileName: string): string {
+  const trimmed = fileName.normalize('NFC').trim() || 'file';
+  const lastDot = trimmed.lastIndexOf('.');
+  const hasExt = lastDot > 0 && lastDot < trimmed.length - 1;
+  const extRaw = hasExt ? trimmed.slice(lastDot + 1) : '';
+  const stemRaw = hasExt ? trimmed.slice(0, lastDot) : trimmed;
+  const ext = extRaw.replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toLowerCase();
+  const stem = stemRaw
+    .normalize('NFKD')
+    .replace(/[^\w.-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^[_.]+|[_.]+$/g, '')
+    .slice(0, 80);
+  const base = stem || 'file';
+  return ext ? `${base}.${ext}` : base;
 }
 
 export function noticeInlineStoragePath(noticeId: string, fileName: string): string {
