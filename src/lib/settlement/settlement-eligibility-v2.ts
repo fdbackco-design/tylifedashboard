@@ -18,14 +18,14 @@
  *   2-b) 2026-07 특례: 상품 TY갤럭시케어 + status=가입 + 해피콜일 >= 2026-06-26 이면
  *        해피콜 마감(7/28) 이후여도 7월 정산에 포함(송장 등록일 마감도 스킵).
  *        해당 계약은 다른 정산월에서는 제외해 중복 집계를 막는다.
- *   3) 송장번호(invoice_no) 가 yearMonth 30일 23:59:59 (KST) 까지 존재
+ *   3) 송장번호(invoice_no) 가 해당 정산월의 말일 23:59:59 (KST) 까지 존재
  *      ※ TY갤럭시케어_무 · TY케어플랜 은 송장·렌탈 없이 해피콜 완료만으로 가입·정산 인정
  *         (정산월·가입일 기준은 해피콜 성공일)
- *      - 송장 마감일은 공휴일/주말 보정을 적용하지 않는다. 매월 30일 23:59:59 KST 가 절대 마감선.
+ *      - 송장 마감일은 공휴일/주말 보정을 적용하지 않는다. 해당 월의 마지막 날 23:59:59 KST 가 절대 마감선.
  *        (해피콜 윈도우에는 공휴일/주말 보정이 적용되는 것과 다르다.)
- *      - 30일이 없는 달(2월)은 해당 월의 말일까지(28/29일).
- *      - 2026-05 정산: "현재 시점 송장번호 존재" 로 판단 (5월 30일 시점 송장 등록일 데이터 부재로 인한 예외)
- *      - 2026-06 이후: invoice_registered_at 의 KST 일자 <= yearMonth-30 이어야 충족.
+ *      - 예) 4월 → 4/30, 8월 → 8/31, 2월 → 28/29.
+ *      - 2026-05 정산: "현재 시점 송장번호 존재" 로 판단 (5월 말 시점 송장 등록일 데이터 부재로 인한 예외)
+ *      - 2026-06 이후: invoice_registered_at 의 KST 일자 <= getInvoiceDeadlineYmd(yearMonth) 이어야 충족.
  *        invoice_registered_at 가 NULL 이고 invoice_no 가 존재하면 "자동 기록 이전부터 있던 송장"
  *        으로 간주하여 충족된 것으로 본다(=마감일 이내).
  *
@@ -217,10 +217,9 @@ export function getHappycallWindowForYearMonth(yearMonth: string): {
 }
 
 /**
- * 정산월의 송장번호 마감일 YYYY-MM-DD (=해당 월 30일, 주말/공휴일 보정 없이 절대값) 반환.
+ * 정산월의 송장번호 마감일 YYYY-MM-DD (해당 월의 마지막 날, 주말/공휴일 보정 없이 절대값) 반환.
  *
- * - 매월 30일이 마감(KST 23:59:59).
- * - 30일이 없는 달(2월)은 그 달의 마지막 날(28/29).
+ * - 마감은 그 달의 말일 23:59:59 KST (4월 30일, 8월 31일, 2월 28/29일).
  * - 공휴일/주말 보정은 적용하지 않는다. (해피콜 윈도우와 의도적으로 다름)
  *
  * yearMonth 자체가 invalid 일 경우 빈 문자열 반환.
@@ -233,8 +232,7 @@ export function getInvoiceDeadlineYmd(yearMonth: string): string {
   if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) return '';
   // new Date(year, monthIndex+1, 0) → 그 month 의 마지막 날
   const lastDayOfMonth = new Date(y, m, 0).getDate();
-  const targetDay = Math.min(30, lastDayOfMonth);
-  return `${yearMonth}-${String(targetDay).padStart(2, '0')}`;
+  return `${yearMonth}-${String(lastDayOfMonth).padStart(2, '0')}`;
 }
 
 export function computeNextYearMonth(yearMonth: string): string {
@@ -309,7 +307,7 @@ export type ContractEligibilityInput = {
   source_snapshot_json?: Record<string, string | null> | null;
   invoice_no: string | null;
   /**
-   * 송장번호가 처음 들어온 시점(timestamptz). 정산 v2 에서 yearMonth 30일까지 존재했는지 판정에 사용.
+   * 송장번호가 처음 들어온 시점(timestamptz). 정산 v2 에서 해당 월 말일까지 존재했는지 판정에 사용.
    *
    * - 2026-05 정산: 본 필드와 무관하게 "현재 invoice_no 존재" 로 판단 (특례).
    * - 2026-06 이후: invoice_registered_at YMD <= getInvoiceDeadlineYmd(yearMonth) 이어야 충족.
@@ -410,7 +408,7 @@ export function evaluateContractEligibility(
 
   // 송장번호 검증
   // - 2026-05 정산: 현 시점 invoice_no 존재 여부로 판단 (특례)
-  // - 2026-06 이후: invoice_registered_at 의 ymd <= yearMonth-30(공휴일 보정) 이어야 충족.
+  // - 2026-06 이후: invoice_registered_at 의 ymd <= 해당 월 말일(공휴일 보정 없음) 이어야 충족.
   //   invoice_registered_at IS NULL 이면서 invoice_no 가 존재하면 "자동 기록 이전부터 있던 송장"
   //   으로 간주(=충족된 것으로 처리). 자동 기록 도입 이전 데이터 보호용.
   const hasInvoice = hasJoinSatisfyingInvoiceNo(c.invoice_no, {
@@ -434,7 +432,7 @@ export function evaluateContractEligibility(
     if (regYmd) {
       const deadline = getInvoiceDeadlineYmd(yearMonth);
       if (deadline && regYmd > deadline) {
-        // 송장번호는 있지만 yearMonth 30일 이후에 등록된 케이스 → 다음 정산월로 이월
+        // 송장번호는 있지만 해당 월 말일 이후에 등록된 케이스 → 다음 정산월로 이월
         return {
           result: 'DEFERRED',
           reason: `invoice_registered_after_deadline:${regYmd}`,
