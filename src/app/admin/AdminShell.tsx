@@ -129,7 +129,7 @@ function CloseIcon(props: { className?: string }) {
 function SidebarContents(props: {
   navItems: NavItem[];
   onNavigate?: () => void;
-  /** 데스크톱 사이드바: TY Life 텍스트 대신 파트너 로고 */
+  /** 데스크톱 사이드바: 텍스트 대신 파트너 로고 */
   brandAsLogo?: boolean;
   /** 푸시 구독 토글에 사용할 VAPID public key (서버에서 layout 으로 전달) */
   vapidPublicKey?: string;
@@ -166,7 +166,7 @@ function SidebarContents(props: {
             />
           </Link>
         ) : (
-          <h1 className="text-lg font-bold text-white">TY Life</h1>
+          <h1 className="text-lg font-bold text-white">Feed life</h1>
         )}
         <p className="text-xs text-slate-400 mt-0.5">계약·정산 관리</p>
       </div>
