@@ -9,12 +9,15 @@ import { hasValidInvoiceNo } from '@/lib/utils/invoice-no';
 export const SUMMER_FESTIVAL_NAME = '썸머 페스티벌(파타야)';
 
 export const SUMMER_FESTIVAL_START_YMD = '2026-06-26';
-export const SUMMER_FESTIVAL_END_YMD = '2026-08-25';
+export const SUMMER_FESTIVAL_END_YMD = '2026-09-23';
 
 export const SUMMER_FESTIVAL_DOUBLE_WINDOW_END_YMD = '2026-07-25';
 
-const SUMMER_FESTIVAL_START_MS = Date.parse('2026-06-26T00:00:00+09:00');
-const SUMMER_FESTIVAL_END_MS = Date.parse('2026-08-25T23:59:59+09:00');
+export const SUMMER_FESTIVAL_START_ISO = '2026-06-26T00:00:00+09:00';
+export const SUMMER_FESTIVAL_END_ISO = '2026-09-23T23:59:59+09:00';
+
+const SUMMER_FESTIVAL_START_MS = Date.parse(SUMMER_FESTIVAL_START_ISO);
+const SUMMER_FESTIVAL_END_MS = Date.parse(SUMMER_FESTIVAL_END_ISO);
 
 const SUMMER_FESTIVAL_DOUBLE_START_MS = Date.parse('2026-06-26T00:00:00+09:00');
 const SUMMER_FESTIVAL_DOUBLE_END_MS = Date.parse('2026-07-25T23:59:59+09:00');
@@ -108,7 +111,7 @@ export function evaluateSummerFestivalEligibility(
   return { eligible: false, exclusion_reason: 'STATUS_NOT_ELIGIBLE' };
 }
 
-/** 2026-06-26 00:00:00 이상, 2026-08-25 23:59:59 이하 */
+/** 2026-06-26 00:00:00 이상, 2026-09-23 23:59:59 이하 (해피콜 완료일 기준) */
 export function isSummerFestivalWindow(happyCallAt: unknown): boolean {
   if (happyCallAt == null) return false;
   const ymd = happycallYmdSeoul(happyCallAt);
@@ -123,7 +126,7 @@ export function isSummerFestivalWindow(happyCallAt: unknown): boolean {
   return true;
 }
 
-/** 2026-06-26~2026-07-25 => ×2, 2026-07-26~2026-08-25 => ×1 */
+/** 2026-06-26~2026-07-25 => ×2, 2026-07-26~2026-09-23 => ×1 */
 export function summerFestivalPeriodMultiplier(happyCallAt: unknown): SummerFestivalPeriodMultiplier {
   if (!isSummerFestivalWindow(happyCallAt)) return 1;
   const ymd = happycallYmdSeoul(happyCallAt);

@@ -2,8 +2,10 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import {
+  SUMMER_FESTIVAL_END_ISO,
   SUMMER_FESTIVAL_END_YMD,
   SUMMER_FESTIVAL_NAME,
+  SUMMER_FESTIVAL_START_ISO,
   SUMMER_FESTIVAL_START_YMD,
   buildSummerFestivalContractAuditRow,
   summerFestivalStatus,
@@ -48,8 +50,8 @@ export default async function SummerFestivalPage({ searchParams }: PageProps) {
         .select(
           'id,contract_code,sales_member_id,customer_id,unit_count,status,is_cancelled,sales_link_status,happy_call_at,happycall_result,invoice_no,product_type,item_name,source_snapshot_json,customers(name)',
         )
-        .gte('happy_call_at', '2026-06-26T00:00:00+09:00')
-        .lte('happy_call_at', '2026-08-25T23:59:59+09:00')
+        .gte('happy_call_at', SUMMER_FESTIVAL_START_ISO)
+        .lte('happy_call_at', SUMMER_FESTIVAL_END_ISO)
         .order('happy_call_at', { ascending: false })
         .limit(20000),
       memberId

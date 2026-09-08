@@ -54,12 +54,19 @@ describe('summer festival eligibility basics', () => {
     assert.equal(r.exclusion_reason, 'OUTSIDE_WINDOW');
   });
 
-  it('해피콜 완료일이 8/26이면 제외', () => {
+  it('해피콜 완료일이 9/24이면 제외', () => {
     const r = buildSummerFestivalContractAuditRow(
-      contract({ id: 'c1', happy_call_at: '2026-08-26T00:00:00+09:00' }),
+      contract({ id: 'c1', happy_call_at: '2026-09-24T00:00:00+09:00' }),
     );
     assert.equal(r.eligible, false);
     assert.equal(r.exclusion_reason, 'OUTSIDE_WINDOW');
+  });
+
+  it('해피콜 완료일이 9/23이면 포함', () => {
+    const r = buildSummerFestivalContractAuditRow(
+      contract({ id: 'c1', happy_call_at: '2026-09-23T23:59:59+09:00' }),
+    );
+    assert.equal(r.eligible, true);
   });
 
   it('해피콜 미완료/실패(준비/대기)면 제외', () => {
@@ -104,11 +111,12 @@ describe('direct sale attribution separation', () => {
 });
 
 describe('product weights and period multipliers', () => {
-  it('기간 배수(경계 포함): 6/26~7/25 ×2, 7/26~8/25 ×1', () => {
+  it('기간 배수(경계 포함): 6/26~7/25 ×2, 7/26~9/23 ×1', () => {
     assert.equal(summerFestivalPeriodMultiplier('2026-06-26T00:00:00+09:00'), 2);
     assert.equal(summerFestivalPeriodMultiplier('2026-07-25T23:59:59+09:00'), 2);
     assert.equal(summerFestivalPeriodMultiplier('2026-07-26T00:00:00+09:00'), 1);
     assert.equal(summerFestivalPeriodMultiplier('2026-08-25T23:59:59+09:00'), 1);
+    assert.equal(summerFestivalPeriodMultiplier('2026-09-23T23:59:59+09:00'), 1);
     assert.equal(summerFestivalPeriodMultiplier('2026-07-10T12:00:00+09:00'), 2);
     assert.equal(summerFestivalPeriodMultiplier('2026-08-05T12:00:00+09:00'), 1);
   });
