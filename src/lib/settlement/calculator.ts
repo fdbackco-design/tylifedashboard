@@ -37,7 +37,7 @@ import {
   calculateDivisionHeadSubtreeBonus,
   subtreeSettlementUnitsForDivisionHeadBonus,
 } from './division-head-bonus';
-import { getSettlementManualAdjustment } from './manual-adjustment';
+import { resolveManualAdjustmentWon } from './manual-adjustment';
 import type { PreIssuedCodeMemberSetting } from './pre-issued-code-special';
 import {
   computeNormalUnitPriceForRank,
@@ -351,6 +351,11 @@ export interface LeaderSettlementOpts {
    * 재계산 시에도 유지된다.
    */
   incentiveAmountOverrideByMemberId?: Map<string, number>;
+  /**
+   * 멤버별 수동 환수금 (settlement_statement_overrides.clawback_amount).
+   * 맵에 있으면 DB 값(0 포함)을 사용하고, 없으면 코드 고정 예외 환수를 쓴다.
+   */
+  clawbackAmountByMemberId?: Map<string, number>;
   /** 멤버 id → 조직 트리 노드(승격 후 HQ 직속 등 이전 리더 롤업 보강용) */
   orgNodeByMemberId?: Map<string, OrgTreeNode>;
   /**
@@ -1276,7 +1281,10 @@ export function calculateMemberSettlement(
   }
 
   // 수동 가감(환수·예외) — member+월 고정. 재계산에도 유지.
-  const manualAdj = getSettlementManualAdjustment(member.id, yearMonth);
+  const dbClawback = leaderOpts?.clawbackAmountByMemberId?.has(member.id)
+    ? leaderOpts.clawbackAmountByMemberId.get(member.id) ?? 0
+    : null;
+  const manualAdj = resolveManualAdjustmentWon(member.id, yearMonth, dbClawback);
   const manualAdjustment = manualAdj?.amount_won ?? 0;
   if (manualAdjustment !== 0) {
     totalAmount += manualAdjustment;

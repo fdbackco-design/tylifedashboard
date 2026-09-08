@@ -28,6 +28,8 @@ import {
   loadGlobalStatementWindowContractPool,
 } from '@/lib/organization/statement-downline-units';
 import { isSuppressedStatementSheetMember, resolveLoginCodesForMembers, resolveStatementPhonesByMemberId, hasStatementPayoutAmount } from '@/lib/settlement/statement-sheet';
+import { resolveClawbackWon } from '@/lib/settlement/manual-adjustment';
+import { isMissingClawbackColumnError } from '@/lib/settlement/fetch-clawbacks';
 import type { RankType } from '@/lib/types';
 import SettlementSheetAdminClient, {
   type SheetRowVM,
@@ -103,10 +105,20 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
       ? await resolveStatementPhonesByMemberId(db, members, loginCodeByMemberId)
       : new Map<string, string>();
 
-  const { data: overrideRows } = await db
+  const overrideSelectWithClawback =
+    'id, year_month, member_id, personal_unit_count, downline_unit_count, personal_commission, override_amount, bonus_amount, clawback_amount, memo, updated_at';
+  let { data: overrideRows, error: overrideErr } = await db
     .from('settlement_statement_overrides')
-    .select('id, year_month, member_id, personal_unit_count, downline_unit_count, personal_commission, override_amount, bonus_amount, memo, updated_at')
+    .select(overrideSelectWithClawback)
     .eq('year_month', label_year_month);
+  if (overrideErr && isMissingClawbackColumnError(overrideErr.message)) {
+    const fallback = await db
+      .from('settlement_statement_overrides')
+      .select('id, year_month, member_id, personal_unit_count, downline_unit_count, personal_commission, override_amount, bonus_amount, memo, updated_at')
+      .eq('year_month', label_year_month);
+    overrideRows = (fallback.data ?? []).map((r) => ({ ...r, clawback_amount: null }));
+    overrideErr = null;
+  }
   const overrideByMemberId = new Map<
     string,
     {
@@ -116,6 +128,7 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
       personal_commission: number | null;
       override_amount: number | null;
       bonus_amount: number | null;
+      clawback_amount: number | null;
       memo: string | null;
     }
   >();
@@ -127,6 +140,7 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
     personal_commission: number | null;
     override_amount: number | null;
     bonus_amount: number | null;
+    clawback_amount: number | null;
     memo: string | null;
   }>) {
     overrideByMemberId.set(r.member_id, {
@@ -136,6 +150,7 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
       personal_commission: r.personal_commission,
       override_amount: r.override_amount,
       bonus_amount: r.bonus_amount,
+      clawback_amount: r.clawback_amount,
       memo: r.memo,
     });
   }
@@ -196,6 +211,7 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
           personalCommission: baseBase,
           overrideAmount: rollupBase,
           bonusAmount: incentiveBase,
+          clawbackAmount: resolveClawbackWon(r.member_id, label_year_month, null),
         },
         override: ov
           ? {
@@ -205,6 +221,7 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
               personalCommission: ov.personal_commission,
               overrideAmount: ov.override_amount,
               bonusAmount: ov.bonus_amount,
+              clawbackAmount: ov.clawback_amount,
               memo: ov.memo ?? '',
             }
           : null,

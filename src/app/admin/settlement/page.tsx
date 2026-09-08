@@ -23,6 +23,8 @@ import {
   type AttributedJoinContractRow,
 } from '@/lib/settlement/leader-promotion';
 import { computeStatementDownlineUnitsByMemberIds } from '@/lib/organization/statement-downline-units';
+import { resolveClawbackWon } from '@/lib/settlement/manual-adjustment';
+import { fetchClawbackAmountByMemberId } from '@/lib/settlement/fetch-clawbacks';
 
 export const metadata: Metadata = { title: '정산 현황' };
 export const dynamic = 'force-dynamic';
@@ -598,6 +600,16 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const { selfIncludedInitialByTopId, splitOpenInitialByTopId } = prefResult;
   const profit = periodSales - totalAmount;
 
+  const dbClawbackByMemberId = await fetchClawbackAmountByMemberId(db, yearMonth);
+  const clawbackByMemberId: Record<string, number> = {};
+  for (const mid of Object.keys(memberAggById)) {
+    clawbackByMemberId[mid] = resolveClawbackWon(
+      mid,
+      yearMonth,
+      dbClawbackByMemberId.has(mid) ? (dbClawbackByMemberId.get(mid) as number | null) : null,
+    );
+  }
+
   const yearsForPicker = (() => {
     const base = parseInt(todayYearMonth.slice(0, 4), 10);
     const out: number[] = [];
@@ -706,6 +718,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
         childrenByParent={childrenByParent}
         memberAggById={memberAggById}
         topLineIdByMemberId={topLineIdByMemberId}
+        clawbackByMemberId={clawbackByMemberId}
         rows={displayLineRows.map<SettlementLineRow>((r) => ({
           topLineId: r.topLineId,
           topDisplayName: r.topDisplayName,

@@ -30,6 +30,7 @@ export interface StatementSheetViewProps {
   personalCommission: number;
   overrideAmount: number;
   bonusAmount: number;
+  clawbackAmount: number;
   grossTotal: number;
   withholdingTax: number;
   netPayment: number;
@@ -68,6 +69,8 @@ export default function StatementSheetView(props: StatementSheetViewProps) {
     personalCommission,
     overrideAmount,
     bonusAmount,
+    clawbackAmount,
+    grossTotal,
     withholdingTax,
     netPayment,
   } = props;
@@ -165,6 +168,18 @@ export default function StatementSheetView(props: StatementSheetViewProps) {
               <tr className="border-t border-slate-200">
                 <td className="px-4 py-3">성과 장려금</td>
                 <td className="px-4 py-3 text-right tabular-nums">{formatWon(bonusAmount)}</td>
+                <td className="px-4 py-3 text-right text-slate-400" />
+              </tr>
+              <tr className="border-t border-slate-200 text-rose-700">
+                <td className="px-4 py-3 font-medium">환수금</td>
+                <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                  {clawbackAmount > 0 ? `- ${formatWon(clawbackAmount)}` : formatWon(0)}
+                </td>
+                <td className="px-4 py-3 text-right text-[12px] font-medium">차감</td>
+              </tr>
+              <tr className="border-t-2 border-slate-300 font-bold text-slate-900">
+                <td className="px-4 py-3">합계</td>
+                <td className="px-4 py-3 text-right tabular-nums">{formatWon(grossTotal)}</td>
                 <td className="px-4 py-3 text-right text-slate-400" />
               </tr>
               {/* 사업소득세 행: 베이지 배경 + 오렌지/레드 텍스트 */}

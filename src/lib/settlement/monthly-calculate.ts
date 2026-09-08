@@ -44,6 +44,7 @@ import {
   isParentOverrideActiveForYearMonth,
   type PreIssuedCodeMemberSetting,
 } from '@/lib/settlement/pre-issued-code-special';
+import { fetchClawbackAmountByMemberId } from '@/lib/settlement/fetch-clawbacks';
 
 function isSettlementDebugEnabled(): boolean {
   const v = process.env.SETTLEMENT_DEBUG;
@@ -1022,6 +1023,14 @@ export async function calculateMonthlySettlement(params: {
     incentiveAmountOverrideByMemberId.set(mid, Math.round(amt));
   }
 
+  const clawbackAmountByMemberId = new Map<string, number>();
+  const fetchedClawbacks = await fetchClawbackAmountByMemberId(db, yearMonth);
+  for (const [mid, raw] of fetchedClawbacks.entries()) {
+    if (raw == null) continue;
+    const cb = Number(raw);
+    if (Number.isFinite(cb)) clawbackAmountByMemberId.set(mid, Math.max(0, Math.round(cb)));
+  }
+
   const leaderOpts: LeaderSettlementOpts = {
     treeRows,
     promotionThresholdByMemberId,
@@ -1036,6 +1045,7 @@ export async function calculateMonthlySettlement(params: {
     leaderRankEffectiveAtByMemberId,
     groupBonusContracts,
     incentiveAmountOverrideByMemberId,
+    clawbackAmountByMemberId,
     centerChiefThresholdByMemberId,
     divisionHeadThresholdByMemberId,
     preIssuedCodeSettingsByMemberId: preIssuedSettingsByMemberId,
