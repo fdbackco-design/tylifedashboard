@@ -217,18 +217,18 @@ export async function calculateMonthlySettlement(params: {
     }
   }
   const eligibleIds = eligibleContractRows.map((r) => String(r.id));
-  // 관리자 수동 이월(deferred_reason=manual)은 대상월에 ELIGIBLE로 잡혀도 플래그를 유지한다.
-  // (지우면 이후 원래 월 재계산 시 해피콜 윈도우로 다시 잡혀 이중 정산될 수 있음)
-  const manualDeferredEligibleIdSet = new Set(
+  // 관리자 수동 이월 및 송장 미등록 이월은 대상월에 ELIGIBLE로 잡혀도 플래그를 유지한다.
+  // (지우면 이후 재계산 시 해피콜 윈도우로 원래 월/공백 달이 되어 빠지거나 이중 정산될 수 있음)
+  const keepDeferEligibleIdSet = new Set(
     eligibleContractRows
-      .filter(
-        (r) =>
-          Boolean(r.settlement_deferred) &&
-          String(r.deferred_reason ?? '') === 'manual',
-      )
+      .filter((r) => {
+        if (!Boolean(r.settlement_deferred)) return false;
+        const reason = String(r.deferred_reason ?? '');
+        return reason === 'manual' || reason === 'invoice_missing';
+      })
       .map((r) => String(r.id)),
   );
-  const clearDeferEligibleIds = eligibleIds.filter((id) => !manualDeferredEligibleIdSet.has(id));
+  const clearDeferEligibleIds = eligibleIds.filter((id) => !keepDeferEligibleIdSet.has(id));
   if (eligibleIds.length > 0) {
     try {
       for (const idChunk of chunkIds(eligibleIds, DB_ID_CHUNK_SIZE)) {
