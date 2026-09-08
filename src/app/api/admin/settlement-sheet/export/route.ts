@@ -30,6 +30,8 @@ import {
   resolveLoginCodesForMembers,
   resolveStatementPhonesByMemberId,
 } from '@/lib/settlement/statement-sheet';
+import { resolveClawbackWon } from '@/lib/settlement/manual-adjustment';
+import { fetchClawbackAmountByMemberId } from '@/lib/settlement/fetch-clawbacks';
 import type { RankType } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -156,6 +158,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const { loginCodeByMemberId } = await resolveLoginCodesForMembers(db, memberList);
   // A열 전화번호: org.phone 이 비어도 계정 발급(user_profiles) 전화로 채움.
   const phoneByMemberId = await resolveStatementPhonesByMemberId(db, memberList, loginCodeByMemberId);
+  const dbClawbackByMemberId = await fetchClawbackAmountByMemberId(db, yearMonth);
 
   const rows = settlementRows
     .map((sr) => {
@@ -165,12 +168,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const personalCommission = ov?.personal_commission ?? Number(sr.base_commission ?? 0);
       const overrideAmount = ov?.override_amount ?? Number(sr.rollup_commission ?? 0);
       const bonusAmount = ov?.bonus_amount ?? Number(sr.incentive_amount ?? 0);
-      // 선택월 수당(개인+오버라이드+보너스)이 0원이면 export 제외 (페이지와 동일).
+      const clawbackAmount = resolveClawbackWon(
+        sr.member_id,
+        yearMonth,
+        dbClawbackByMemberId.has(sr.member_id)
+          ? (dbClawbackByMemberId.get(sr.member_id) as number | null)
+          : null,
+      );
+      // 환수 차감 후 합계가 0원이면 export 제외. 마이너스 합계는 포함 (페이지와 동일).
       if (
         !hasStatementPayoutAmount({
           personalCommission,
           overrideAmount,
           bonusAmount,
+          clawbackAmount,
         })
       ) {
         return null;

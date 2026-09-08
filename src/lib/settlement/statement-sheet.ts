@@ -244,18 +244,23 @@ export function digitsOnlyPhone(phone: string | null | undefined): string {
 }
 
 /**
- * 명세서 목록/엑셀 포함 여부: 선택월 지급 수당(개인수당+오버라이드+보너스)이 1원 이상일 때만.
- * 구좌만 있고 금액이 0원이면 링크·엑셀에서 제외한다.
+ * 명세서 목록/엑셀 포함 여부: 환수 차감 후 합계가 0원이 아니면 포함한다.
+ * (양수·음수 모두. 구좌만 있고 금액이 0원이면 제외.)
  */
 export function hasStatementPayoutAmount(args: {
   personalCommission: number;
   overrideAmount: number;
   bonusAmount: number;
+  clawbackAmount?: number;
 }): boolean {
-  const pc = Number(args.personalCommission) || 0;
-  const ov = Number(args.overrideAmount) || 0;
-  const bn = Number(args.bonusAmount) || 0;
-  return pc + ov + bn > 0;
+  return (
+    netPayoutAfterClawback(
+      args.personalCommission,
+      args.overrideAmount,
+      args.bonusAmount,
+      args.clawbackAmount ?? 0,
+    ) !== 0
+  );
 }
 
 /**

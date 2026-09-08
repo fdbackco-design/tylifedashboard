@@ -31,4 +31,8 @@ describe('netPayoutAfterClawback', () => {
   it('개인+오버라이드+보너스에서 환수금을 뺀다', () => {
     assert.equal(netPayoutAfterClawback(1_000_000, 200_000, 50_000, 150_000), 1_100_000);
   });
+
+  it('수당 0원에 환수만 있으면 합계는 음수다', () => {
+    assert.equal(netPayoutAfterClawback(0, 0, 0, 300_000), -300_000);
+  });
 });
