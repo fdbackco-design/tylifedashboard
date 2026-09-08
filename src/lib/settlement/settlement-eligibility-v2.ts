@@ -31,7 +31,9 @@
  *
  * 이월 / 제외 결정
  *   - 위 1,2 충족이지만 3 미충족 → 다음 정산월로 이월 (DEFERRED)
- *   - 1 또는 2 불충족 → 제외 (EXCLUDED)
+ *   - 해피콜은 이전 정산월 윈도우인데 그 달 송장 마감을 넘긴 경우, 송장이 충족되는
+ *     첫 정산월에 ELIGIBLE (이월 플래그가 지워져도 동일). 그 사이 달은 DEFERRED.
+ *   - 1 또는 2 불충족(송장 이월 대상이 아님) → 제외 (EXCLUDED)
  *   - 계약 자체 취소(is_cancelled / status '취소' / '해약' / '계약취소') → 제외
  *   - 담당자 미연결(sales_member_id null 또는 sales_link_status != 'linked') → 제외
  *
@@ -245,6 +247,48 @@ export function computeNextYearMonth(yearMonth: string): string {
   return `${String(ny).padStart(4, '0')}-${String(nm).padStart(2, '0')}`;
 }
 
+function shiftYearMonth(yearMonth: string, deltaMonths: number): string {
+  const [ys, ms] = yearMonth.split('-');
+  const y = parseInt(ys, 10);
+  const m = parseInt(ms, 10);
+  if (!Number.isFinite(y) || !Number.isFinite(m)) return yearMonth;
+  const idx = y * 12 + (m - 1) + deltaMonths;
+  const ny = Math.floor(idx / 12);
+  const nm = (idx % 12) + 1;
+  return `${String(ny).padStart(4, '0')}-${String(nm).padStart(2, '0')}`;
+}
+
+/** 해피콜 서울 일자가 속한 정산월. 윈도우가 겹치지 않으므로 최대 한 달. */
+export function findYearMonthForHappycallYmd(hcYmd: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(hcYmd)) return null;
+  const calendarYm = hcYmd.slice(0, 7);
+  for (const ym of [calendarYm, shiftYearMonth(calendarYm, -1), shiftYearMonth(calendarYm, 1)]) {
+    const w = getHappycallWindowForYearMonth(ym);
+    if (hcYmd >= w.start_date && hcYmd <= w.end_date) return ym;
+  }
+  return null;
+}
+
+/**
+ * 해피콜 귀속월 이후, 송장이 월말 마감을 통과하는 첫 정산월.
+ * 송장 없음 → null. 등록일 없는 기존 송장 → 해피콜 귀속월.
+ */
+export function firstYearMonthInvoiceDeadlineMet(args: {
+  happycallYearMonth: string;
+  hasInvoice: boolean;
+  invoiceRegisteredYmd: string;
+}): string | null {
+  if (!args.hasInvoice) return null;
+  if (!args.invoiceRegisteredYmd) return args.happycallYearMonth;
+  let ym = args.happycallYearMonth;
+  for (let i = 0; i < 12; i++) {
+    const deadline = getInvoiceDeadlineYmd(ym);
+    if (deadline && args.invoiceRegisteredYmd <= deadline) return ym;
+    ym = computeNextYearMonth(ym);
+  }
+  return null;
+}
+
 /**
  * happy_call_at(timestamptz | 문자열) → 서울 기준 YYYY-MM-DD.
  *
@@ -397,7 +441,38 @@ export function evaluateContractEligibility(
     const inJulyExceptionWindow =
       julyGalaxyCareException && yearMonth === TY_GALAXY_CARE_JULY_2026_EXCEPTION_YM;
     if (!inNormalWindow && !inJulyExceptionWindow) {
-      return { result: 'EXCLUDED', reason: `happycall_at_out_of_window:${hcYmd}` };
+      if (isInvoiceExempt) {
+        return { result: 'EXCLUDED', reason: `happycall_at_out_of_window:${hcYmd}` };
+      }
+      const homeYm = findYearMonthForHappycallYmd(hcYmd);
+      if (!homeYm || homeYm >= yearMonth) {
+        return { result: 'EXCLUDED', reason: `happycall_at_out_of_window:${hcYmd}` };
+      }
+      const hasInvoiceForCarry = hasJoinSatisfyingInvoiceNo(c.invoice_no, {
+        product_type: c.product_type,
+        item_name: c.item_name,
+        source_snapshot_json: c.source_snapshot_json,
+      });
+      const invoiceRegYmd = happycallYmdSeoul(c.invoice_registered_at);
+      const landYm = firstYearMonthInvoiceDeadlineMet({
+        happycallYearMonth: homeYm,
+        hasInvoice: hasInvoiceForCarry,
+        invoiceRegisteredYmd: invoiceRegYmd,
+      });
+      if (!landYm || landYm > yearMonth) {
+        return {
+          result: 'DEFERRED',
+          reason: hasInvoiceForCarry
+            ? `invoice_registered_after_deadline:${invoiceRegYmd}`
+            : 'invoice_missing',
+          deferred_to_month: computeNextYearMonth(yearMonth),
+          happycall_ymd: hcYmd,
+        };
+      }
+      if (landYm < yearMonth) {
+        return { result: 'EXCLUDED', reason: `invoice_landed_in:${landYm}` };
+      }
+      return { result: 'ELIGIBLE', happycall_ymd: hcYmd };
     }
   }
 
