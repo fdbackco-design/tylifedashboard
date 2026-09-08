@@ -12,6 +12,8 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSettlementWindowForYearMonth, getSettlementWindowDisplayForYearMonth } from './settlement-window';
 import { sumDownlineAttributedUnitsInSettlementWindow } from '@/lib/organization/statement-downline-units';
+import { netPayoutAfterClawback, resolveClawbackWon } from './manual-adjustment';
+import { isMissingClawbackColumnError } from './fetch-clawbacks';
 import type { RankType } from '@/lib/types';
 
 export interface StatementOverrideRow {
@@ -23,6 +25,7 @@ export interface StatementOverrideRow {
   personal_commission: number | null;
   override_amount: number | null;
   bonus_amount: number | null;
+  clawback_amount: number | null;
   memo: string | null;
   updated_at: string;
 }
@@ -52,7 +55,9 @@ export interface StatementSheetData {
   personalCommission: number;
   overrideAmount: number;
   bonusAmount: number;
-  /** = personalCommission + overrideAmount + bonusAmount */
+  /** 수동 환수금(원). 합계에서 차감 */
+  clawbackAmount: number;
+  /** = personalCommission + overrideAmount + bonusAmount - clawbackAmount */
   grossTotal: number;
   /** = floor(grossTotal * 0.033) */
   withholdingTax: number;
@@ -137,11 +142,23 @@ export async function buildStatementSheetData(
   } else {
     const r = await db
       .from('settlement_statement_overrides')
-      .select('id, year_month, member_id, personal_unit_count, downline_unit_count, personal_commission, override_amount, bonus_amount, memo, updated_at')
+      .select('id, year_month, member_id, personal_unit_count, downline_unit_count, personal_commission, override_amount, bonus_amount, clawback_amount, memo, updated_at')
       .eq('year_month', label_year_month)
       .eq('member_id', member.id)
       .maybeSingle();
-    override = (r.data ?? null) as StatementOverrideRow | null;
+    if (r.error && isMissingClawbackColumnError(r.error.message)) {
+      const fallback = await db
+        .from('settlement_statement_overrides')
+        .select('id, year_month, member_id, personal_unit_count, downline_unit_count, personal_commission, override_amount, bonus_amount, memo, updated_at')
+        .eq('year_month', label_year_month)
+        .eq('member_id', member.id)
+        .maybeSingle();
+      override = fallback.data
+        ? ({ ...(fallback.data as Omit<StatementOverrideRow, 'clawback_amount'>), clawback_amount: null } as StatementOverrideRow)
+        : null;
+    } else {
+      override = (r.data ?? null) as StatementOverrideRow | null;
+    }
   }
 
   // 기본값 산출
@@ -168,8 +185,14 @@ export async function buildStatementSheetData(
   const personalCommission = pickOverride(override?.personal_commission, baseBaseCommission);
   const overrideAmount = pickOverride(override?.override_amount, baseRollupCommission);
   const bonusAmount = pickOverride(override?.bonus_amount, baseIncentive);
+  const clawbackAmount = resolveClawbackWon(member.id, label_year_month, override?.clawback_amount);
 
-  const grossTotal = personalCommission + overrideAmount + bonusAmount;
+  const grossTotal = netPayoutAfterClawback(
+    personalCommission,
+    overrideAmount,
+    bonusAmount,
+    clawbackAmount,
+  );
   const withholdingTax = floorNonNegative(grossTotal * TAX_RATE);
   const netPayment = grossTotal - withholdingTax;
 
@@ -185,6 +208,7 @@ export async function buildStatementSheetData(
     personalCommission,
     overrideAmount,
     bonusAmount,
+    clawbackAmount,
     grossTotal,
     withholdingTax,
     netPayment,

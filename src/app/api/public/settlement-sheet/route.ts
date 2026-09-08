@@ -116,6 +116,7 @@ export async function POST(req: Request) {
       personalCommission: data.personalCommission,
       overrideAmount: data.overrideAmount,
       bonusAmount: data.bonusAmount,
+      clawbackAmount: data.clawbackAmount,
       grossTotal: data.grossTotal,
       withholdingTax: data.withholdingTax,
       netPayment: data.netPayment,

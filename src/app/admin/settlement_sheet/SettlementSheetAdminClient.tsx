@@ -25,6 +25,7 @@ export interface SheetRowVM {
     personalCommission: number;
     overrideAmount: number;
     bonusAmount: number;
+    clawbackAmount: number;
   };
   override: {
     id: string;
@@ -33,6 +34,7 @@ export interface SheetRowVM {
     personalCommission: number | null;
     overrideAmount: number | null;
     bonusAmount: number | null;
+    clawbackAmount: number | null;
     memo: string;
   } | null;
 }
@@ -187,7 +189,7 @@ export default function SettlementSheetAdminClient({
       </div>
 
       <div className="overflow-auto rounded-xl border border-slate-200">
-        <table className="min-w-[1000px] w-full text-xs sm:text-sm">
+        <table className="min-w-[1180px] w-full text-xs sm:text-sm">
           <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600">
             <tr className="text-left">
               <th className="px-3 py-2 font-medium">영업자</th>
@@ -198,13 +200,15 @@ export default function SettlementSheetAdminClient({
               <th className="px-3 py-2 text-right font-medium">개인수당</th>
               <th className="px-3 py-2 text-right font-medium">오버라이드</th>
               <th className="px-3 py-2 text-right font-medium">보너스</th>
+              <th className="px-3 py-2 text-right font-medium">환수금</th>
+              <th className="px-3 py-2 text-right font-medium">합계</th>
               <th className="px-3 py-2 text-center font-medium">동작</th>
             </tr>
           </thead>
           <tbody>
             {filteredRows.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-3 py-6 text-center text-slate-500">
+                  <td colSpan={11} className="px-3 py-6 text-center text-slate-500">
                   표시할 영업자가 없습니다.
                 </td>
               </tr>
@@ -213,14 +217,17 @@ export default function SettlementSheetAdminClient({
                 const pu = effectiveValue(r.override?.personalUnitCount, r.base.personalUnitCount);
                 const du = effectiveValue(r.override?.downlineUnitCount, r.base.downlineUnitCount);
                 const pc = effectiveValue(r.override?.personalCommission, r.base.personalCommission);
-                const ov = effectiveValue(r.override?.overrideAmount, r.base.overrideAmount);
+                const ovAmt = effectiveValue(r.override?.overrideAmount, r.base.overrideAmount);
                 const bn = effectiveValue(r.override?.bonusAmount, r.base.bonusAmount);
+                const cb = effectiveValue(r.override?.clawbackAmount, r.base.clawbackAmount);
+                const total = pc + ovAmt + bn - cb;
                 const hasOverride = !!r.override && (
                   r.override.personalUnitCount != null ||
                   r.override.downlineUnitCount != null ||
                   r.override.personalCommission != null ||
                   r.override.overrideAmount != null ||
-                  r.override.bonusAmount != null
+                  r.override.bonusAmount != null ||
+                  r.override.clawbackAmount != null
                 );
                 const sharePath = buildSharePath(r.tyCode, yearMonth);
                 return (
@@ -238,8 +245,10 @@ export default function SettlementSheetAdminClient({
                     <td className="px-3 py-2 text-right tabular-nums text-slate-900">{fmtUnits(pu)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-900">{fmtUnits(du)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-900">{fmtWon(pc)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-900">{fmtWon(ov)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-900">{fmtWon(ovAmt)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-900">{fmtWon(bn)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-rose-800">{fmtWon(cb)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-900">{fmtWon(total)}</td>
                     <td className="px-3 py-2 text-center">
                       <div className="inline-flex items-center gap-1">
                         <button
@@ -360,6 +369,13 @@ function EditOverrideModal({
   const [bonus, setBonus] = useState(
     row.override?.bonusAmount != null ? String(row.override.bonusAmount) : '',
   );
+  const [clawback, setClawback] = useState(
+    row.override?.clawbackAmount != null
+      ? String(row.override.clawbackAmount)
+      : row.base.clawbackAmount
+        ? String(row.base.clawbackAmount)
+        : '',
+  );
   const [memo, setMemo] = useState(row.override?.memo ?? '');
 
   async function save(action: 'upsert' | 'reset') {
@@ -370,12 +386,17 @@ function EditOverrideModal({
       personal_commission: toIntOrNull(personalCommission),
       override_amount: toIntOrNull(overrideAmount),
       bonus_amount: toIntOrNull(bonus),
+      clawback_amount: toIntOrNull(clawback),
     };
     for (const k of Object.keys(fields) as Array<keyof typeof fields>) {
       if (!fields[k].ok) {
         onError(`${k} 값이 정수가 아닙니다.`);
         return;
       }
+    }
+    if (fields.clawback_amount.value != null && fields.clawback_amount.value < 0) {
+      onError('환수금은 0 이상이어야 합니다.');
+      return;
     }
     setBusy(true);
     try {
@@ -389,6 +410,7 @@ function EditOverrideModal({
           personal_commission: fields.personal_commission.value,
           override_amount: fields.override_amount.value,
           bonus_amount: fields.bonus_amount.value,
+          clawback_amount: fields.clawback_amount.value ?? 0,
           memo: memo.trim() || null,
         }),
       });
@@ -467,6 +489,14 @@ function EditOverrideModal({
             value={bonus}
             onChange={setBonus}
             placeholder="자동 계산값 사용"
+            disabled={busy}
+          />
+          <FieldRow
+            label="환수금 (원)"
+            base={row.base.clawbackAmount.toLocaleString('ko-KR')}
+            value={clawback}
+            onChange={setClawback}
+            placeholder="0"
             disabled={busy}
           />
           <div>

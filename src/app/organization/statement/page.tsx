@@ -196,12 +196,13 @@ export default async function OrganizationStatementPage({
   }
 
   // /admin/settlement_sheet 수동 보정(settlement_statement_overrides)을 공유 명세서와 동일하게 반영.
-  // 금액 보정이 없으면 총지급액은 monthly_settlements.total_amount(수동 환수 등 포함)를 유지한다.
+  // 총지급액(합계) = 개인수당 + 오버라이드 + 보너스 − 환수금.
   let displayPersonalUnits = Number(ss.direct_unit_count ?? 0);
   let displayDownlineUnits = downlineAttributedUnits;
   let displayPersonalCommission = Number(ss.base_commission ?? 0);
   let displayOverrideAmount = Number(ss.rollup_commission ?? 0);
   let displayBonusAmount = Number(ss.incentive_amount ?? 0);
+  let displayClawbackAmount = 0;
   let displayGrossTotal = Number(ss.total_amount ?? 0);
 
   if (!isUnmapped && member && s) {
@@ -235,11 +236,8 @@ export default async function OrganizationStatementPage({
     displayPersonalCommission = sheet.personalCommission;
     displayOverrideAmount = sheet.overrideAmount;
     displayBonusAmount = sheet.bonusAmount;
-    const ov = sheet.override;
-    const hasAmountOverride =
-      ov != null &&
-      (ov.personal_commission != null || ov.override_amount != null || ov.bonus_amount != null);
-    displayGrossTotal = hasAmountOverride ? sheet.grossTotal : Number(s.total_amount ?? 0);
+    displayClawbackAmount = sheet.clawbackAmount;
+    displayGrossTotal = sheet.grossTotal;
   }
 
   const displayWithholding = Math.floor(
@@ -743,9 +741,19 @@ export default async function OrganizationStatementPage({
               <div className="text-sm text-gray-600">오버라이드</div>
               <div className="text-sm text-right tabular-nums">{formatWon(displayOverrideAmount)}</div>
             </div>
-            <div className="grid grid-cols-2 px-4 py-3">
+            <div className="grid grid-cols-2 px-4 py-3 border-b border-gray-100">
               <div className="text-sm text-gray-600">보너스</div>
               <div className="text-sm text-right tabular-nums">{formatWon(displayBonusAmount)}</div>
+            </div>
+            <div className="grid grid-cols-2 px-4 py-3 border-b border-gray-100">
+              <div className="text-sm text-gray-600">환수금</div>
+              <div className="text-sm text-right tabular-nums text-rose-700">
+                {displayClawbackAmount > 0 ? `−${formatWon(displayClawbackAmount)}` : formatWon(0)}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 px-4 py-3">
+              <div className="text-sm font-semibold text-gray-800">합계</div>
+              <div className="text-sm text-right font-semibold tabular-nums">{formatWon(displayGrossTotal)}</div>
             </div>
           </div>
 

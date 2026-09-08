@@ -60,6 +60,8 @@ export default function SettlementLineTableClient(props: {
     }
   >;
   topLineIdByMemberId: Record<string, string>;
+  /** 영업자별 수동 환수금(원). 합계에서 차감되며 입력 가능 */
+  clawbackByMemberId: Record<string, number>;
 }) {
   const [selfIncludedByTopId, setSelfIncludedByTopId] = useState<Record<string, boolean>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -69,6 +71,28 @@ export default function SettlementLineTableClient(props: {
   const [selfPrefSavePendingByTopId, setSelfPrefSavePendingByTopId] = useState<Record<string, boolean>>({});
   const splitSaveInFlightRef = useRef<Set<string>>(new Set());
   const selfPrefSaveInFlightRef = useRef<Set<string>>(new Set());
+  const clawbackSaveInFlightRef = useRef<Set<string>>(new Set());
+  const [clawbackDraftByMemberId, setClawbackDraftByMemberId] = useState<Record<string, number>>({});
+  const [clawbackInputByMemberId, setClawbackInputByMemberId] = useState<Record<string, string>>({});
+  const [clawbackSavePendingByMemberId, setClawbackSavePendingByMemberId] = useState<Record<string, boolean>>({});
+  const [baselineTotalByMemberId, setBaselineTotalByMemberId] = useState<Record<string, number>>({});
+  const [baselineClawbackByMemberId, setBaselineClawbackByMemberId] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    const cb = props.clawbackByMemberId ?? {};
+    const totals: Record<string, number> = {};
+    const inputs: Record<string, string> = {};
+    for (const [id, m] of Object.entries(props.memberAggById ?? {})) {
+      totals[id] = Number(m.total ?? 0);
+    }
+    for (const [id, n] of Object.entries(cb)) {
+      inputs[id] = n ? String(n) : '';
+    }
+    setClawbackDraftByMemberId(cb);
+    setClawbackInputByMemberId(inputs);
+    setBaselineClawbackByMemberId(cb);
+    setBaselineTotalByMemberId(totals);
+  }, [props.yearMonth, props.clawbackByMemberId, props.memberAggById]);
 
   useEffect(() => {
     // 초기값은 DB에서 내려온 맵을 우선 사용 (행이 분리되어도 child id에 대한 설정이 바로 반영될 수 있게)
@@ -95,10 +119,20 @@ export default function SettlementLineTableClient(props: {
       return out;
     };
 
+    const memberNetTotal = (id: string, rawTotal: number) => {
+      const baselineTotal = baselineTotalByMemberId[id] ?? rawTotal;
+      const baselineCb = baselineClawbackByMemberId[id] ?? props.clawbackByMemberId?.[id] ?? 0;
+      const currentCb = clawbackDraftByMemberId[id] ?? baselineCb;
+      return baselineTotal + baselineCb - currentCb;
+    };
+    const memberClawback = (id: string) =>
+      clawbackDraftByMemberId[id] ?? baselineClawbackByMemberId[id] ?? props.clawbackByMemberId?.[id] ?? 0;
+
     const sumAgg = (memberIds: Set<string>) => {
       let rollup = 0;
       let leaderMaint = 0;
       let total = 0;
+      let clawback = 0;
       let directContractCount = 0;
       let directUnitSum = 0;
       for (const id of memberIds) {
@@ -106,17 +140,22 @@ export default function SettlementLineTableClient(props: {
         if (!m) continue;
         rollup += m.rollup ?? 0;
         leaderMaint += m.leaderMaint ?? 0;
-        total += m.total ?? 0;
+        total += memberNetTotal(id, m.total ?? 0);
+        clawback += memberClawback(id);
         directContractCount += m.directContractCount ?? 0;
         directUnitSum += m.directUnitSum ?? 0;
       }
-      return { rollup, leaderMaint, total, directContractCount, directUnitSum };
+      return { rollup, leaderMaint, total, clawback, directContractCount, directUnitSum };
     };
 
     // 산하 분리 보기: 행 재구성(재귀)
     // - split 상태인 노드는 "본인만" + "직계 자식 subtree 행들"로 펼친다.
     // - split 상태가 아니면 해당 노드 subtree를 1행으로 보여준다.
-    type ExpandedRow = SettlementLineRow & { __anchorTopLineId: string; __depth: number };
+    type ExpandedRow = SettlementLineRow & {
+      __anchorTopLineId: string;
+      __depth: number;
+      clawback: number;
+    };
 
     const buildRowForSubtree = (nodeId: string, anchorTopLineId: string, depth: number): ExpandedRow | null => {
       const subtree = collectSubtree(nodeId);
@@ -139,6 +178,7 @@ export default function SettlementLineTableClient(props: {
         directContractCount: agg.directContractCount,
         directUnitSum: agg.directUnitSum,
         ownDirectUnitSum: meta?.directUnitSum ?? 0,
+        clawback: agg.clawback,
         __anchorTopLineId: anchorTopLineId,
         __depth: depth,
       };
@@ -156,10 +196,11 @@ export default function SettlementLineTableClient(props: {
         base: meta.base,
         rollup: meta.rollup,
         leaderMaint: meta.leaderMaint,
-        total: meta.total,
+        total: memberNetTotal(nodeId, meta.total),
         directContractCount: meta.directContractCount,
         directUnitSum: meta.directUnitSum,
         ownDirectUnitSum: meta.directUnitSum,
+        clawback: memberClawback(nodeId),
         __anchorTopLineId: anchorTopLineId,
         __depth: depth,
       };
@@ -225,6 +266,10 @@ export default function SettlementLineTableClient(props: {
     splitOpenByTopId,
     props.childrenByParent,
     props.memberAggById,
+    clawbackDraftByMemberId,
+    baselineTotalByMemberId,
+    baselineClawbackByMemberId,
+    props.clawbackByMemberId,
   ]);
 
   const baseSum = useMemo(() => adjustedRows.reduce((s, r) => s + (r.base ?? 0), 0), [adjustedRows]);
@@ -240,6 +285,66 @@ export default function SettlementLineTableClient(props: {
       adjustedRows.reduce((s, r) => s + (props.statementDownlineUnitsByMemberId[r.topLineId] ?? 0), 0),
     [adjustedRows, props.statementDownlineUnitsByMemberId],
   );
+  const clawbackSum = useMemo(
+    () => adjustedRows.reduce((s, r) => s + (Number((r as { clawback?: number }).clawback ?? 0) || 0), 0),
+    [adjustedRows],
+  );
+
+  const commitClawback = (memberId: string, raw: string) => {
+    const trimmed = raw.trim().replace(/,/g, '');
+    const parsed = trimmed === '' ? 0 : /^\d+$/.test(trimmed) ? parseInt(trimmed, 10) : NaN;
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      setSaveError('환수금은 0 이상 정수여야 합니다.');
+      const revert = clawbackDraftByMemberId[memberId] ?? props.clawbackByMemberId[memberId] ?? 0;
+      setClawbackInputByMemberId((prev) => ({ ...prev, [memberId]: revert ? String(revert) : '' }));
+      return;
+    }
+    const prev = clawbackDraftByMemberId[memberId] ?? props.clawbackByMemberId[memberId] ?? 0;
+    if (parsed === prev) {
+      setClawbackInputByMemberId((p) => ({ ...p, [memberId]: parsed ? String(parsed) : '' }));
+      return;
+    }
+    if (clawbackSaveInFlightRef.current.has(memberId)) return;
+    clawbackSaveInFlightRef.current.add(memberId);
+    setClawbackSavePendingByMemberId((p) => ({ ...p, [memberId]: true }));
+    setSaveError(null);
+    setClawbackDraftByMemberId((p) => ({ ...p, [memberId]: parsed }));
+    setClawbackInputByMemberId((p) => ({ ...p, [memberId]: parsed ? String(parsed) : '' }));
+
+    void fetch('/api/admin/settlement-clawback', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        year_month: props.yearMonth,
+        member_id: memberId,
+        clawback_amount: parsed,
+      }),
+    })
+      .then(async (res) => {
+        const json = (await res.json()) as { ok?: boolean; error?: string; total_amount?: number | null };
+        if (!res.ok || !json?.ok) {
+          throw new Error(json?.error ?? `HTTP ${res.status}`);
+        }
+        setBaselineClawbackByMemberId((p) => ({ ...p, [memberId]: parsed }));
+        setBaselineTotalByMemberId((p) => {
+          const prevTotal = p[memberId] ?? props.memberAggById[memberId]?.total ?? 0;
+          return { ...p, [memberId]: prevTotal + prev - parsed };
+        });
+      })
+      .catch((err) => {
+        setClawbackDraftByMemberId((p) => ({ ...p, [memberId]: prev }));
+        setClawbackInputByMemberId((p) => ({ ...p, [memberId]: prev ? String(prev) : '' }));
+        setSaveError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        clawbackSaveInFlightRef.current.delete(memberId);
+        setClawbackSavePendingByMemberId((p) => {
+          const next = { ...p };
+          delete next[memberId];
+          return next;
+        });
+      });
+  };
 
   const handleSplitToggle = (topId: string, nextVal: boolean) => {
     if (splitSaveInFlightRef.current.has(topId)) return;
@@ -393,6 +498,7 @@ export default function SettlementLineTableClient(props: {
                   '롤업수당',
                   '보너스',
                   '본인계약 인정',
+                  '환수금',
                   '합계',
                 ].map((h) => (
                   <th
@@ -519,6 +625,34 @@ export default function SettlementLineTableClient(props: {
                       )}
                     </label>
                   </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={
+                        clawbackInputByMemberId[r.topLineId] ??
+                        (clawbackDraftByMemberId[r.topLineId]
+                          ? String(clawbackDraftByMemberId[r.topLineId])
+                          : '')
+                      }
+                      disabled={Boolean(clawbackSavePendingByMemberId[r.topLineId])}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setClawbackInputByMemberId((prev) => ({ ...prev, [r.topLineId]: v }));
+                      }}
+                      onBlur={(e) => commitClawback(r.topLineId, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          (e.target as HTMLInputElement).blur();
+                        }
+                      }}
+                      placeholder="0"
+                      className="w-[7.5rem] rounded-md border border-slate-300 bg-white px-2 py-1 text-right text-xs tabular-nums text-slate-900 focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-200 disabled:bg-slate-50"
+                    />
+                    {clawbackSavePendingByMemberId[r.topLineId] ? (
+                      <span className="ml-1 text-[11px] text-gray-500">저장 중…</span>
+                    ) : null}
+                  </td>
                   <td className="px-4 py-3 tabular-nums text-right font-bold text-gray-900">
                     {formatKRW(r.adjustedTotal)}
                   </td>
@@ -547,6 +681,9 @@ export default function SettlementLineTableClient(props: {
                   {formatKRW(leaderMaintSum)}
                 </td>
                 <td />
+                <td className="px-4 py-3 tabular-nums text-right font-semibold text-rose-800">
+                  {formatKRW(clawbackSum)}
+                </td>
                 <td className="px-4 py-3 tabular-nums text-right font-bold text-orange-950">
                   {formatKRW(adjustedTotalAmount)}
                 </td>

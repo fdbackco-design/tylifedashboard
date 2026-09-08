@@ -26,6 +26,7 @@ interface ApiSuccess {
     personalCommission: number;
     overrideAmount: number;
     bonusAmount: number;
+    clawbackAmount: number;
     grossTotal: number;
     withholdingTax: number;
     netPayment: number;
@@ -101,6 +102,7 @@ export default function StatementSheetGateClient({
         personalCommission={data.sheet.personalCommission}
         overrideAmount={data.sheet.overrideAmount}
         bonusAmount={data.sheet.bonusAmount}
+        clawbackAmount={data.sheet.clawbackAmount}
         grossTotal={data.sheet.grossTotal}
         withholdingTax={data.sheet.withholdingTax}
         netPayment={data.sheet.netPayment}
