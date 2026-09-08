@@ -228,12 +228,17 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
       } satisfies SheetRowVM;
     })
     .filter((x): x is SheetRowVM => x !== null)
-    // 선택월 수당(개인+오버라이드+보너스)이 0원이면 표·링크·엑셀에서 제외.
+    // 환수 차감 후 합계가 0원이면 표·링크·엑셀에서 제외. 마이너스 합계는 포함한다.
     .filter((r) =>
       hasStatementPayoutAmount({
         personalCommission: r.override?.personalCommission ?? r.base.personalCommission,
         overrideAmount: r.override?.overrideAmount ?? r.base.overrideAmount,
         bonusAmount: r.override?.bonusAmount ?? r.base.bonusAmount,
+        clawbackAmount: resolveClawbackWon(
+          r.memberId,
+          label_year_month,
+          r.override?.clawbackAmount,
+        ),
       }),
     )
     // 공유 링크(=login_code) 가 없으면 명세서 공유가 불가능하므로 표·엑셀에서 제외한다.
