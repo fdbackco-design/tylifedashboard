@@ -26,9 +26,11 @@ function channel(): string {
  * 퍼시스턴트 컨텍스트 공통 실행 옵션.
  *
  * Cloudflare Turnstile("사람입니다" 위젯)은 Playwright 자동화 브라우저를 봇으로 감지하면
- * 체크를 눌러도 "확인 실패"를 낸다. 자동화 티가 나는 신호를 제거해 사람 로그인이 통과되게 한다.
- *   - `--enable-automation` 기본 플래그 제거 → navigator.webdriver 노출 억제
- *   - `--disable-blink-features=AutomationControlled` → webdriver 플래그 완전 비활성화
+ * 체크를 눌러도 "확인 실패"를 낸다. Playwright 기본 `--enable-automation` 만 빼서
+ * "자동화된 테스트 소프트웨어가 제어 중" 표시와 navigator.webdriver 노출을 줄인다.
+ *
+ * `--disable-blink-features=AutomationControlled` 는 최신 Chrome에서 미지원 플래그로
+ * 경고 표시줄이 뜨고, 그 경고 자체가 로그인/Turnstile을 막으므로 쓰지 않는다.
  */
 export function tyLifeLaunchOptions(headless: boolean) {
   return {
@@ -37,8 +39,34 @@ export function tyLifeLaunchOptions(headless: boolean) {
     chromiumSandbox: true,
     viewport: { width: 1440, height: 960 },
     ignoreDefaultArgs: ['--enable-automation'],
-    args: ['--disable-blink-features=AutomationControlled'],
   };
+}
+
+/** Chrome 미지원 플래그 없이 webdriver 노출만 가린다. 문자열로 넣어 tsx `__name` 주입을 피한다. */
+export async function applyTyLifeStealth(context: BrowserContext): Promise<void> {
+  await context.addInitScript(`
+    try {
+      Object.defineProperty(Navigator.prototype, 'webdriver', {
+        get: function () { return undefined; },
+        configurable: true,
+      });
+    } catch (e) {}
+    try {
+      Object.defineProperty(navigator, 'webdriver', {
+        get: function () { return undefined; },
+        configurable: true,
+      });
+    } catch (e) {}
+  `);
+}
+
+export async function launchTyLifePersistentContext(
+  headless: boolean,
+  userDataDir = profileDir(),
+): Promise<BrowserContext> {
+  const context = await chromium.launchPersistentContext(userDataDir, tyLifeLaunchOptions(headless));
+  await applyTyLifeStealth(context);
+  return context;
 }
 
 /**
@@ -112,10 +140,7 @@ export async function refreshTyLifeCookie(
   const base = requireBaseUrl();
   const interactive = options.interactive ?? false;
 
-  const context = await chromium.launchPersistentContext(
-    profileDir(),
-    tyLifeLaunchOptions(!interactive),
-  );
+  const context = await launchTyLifePersistentContext(!interactive);
 
   try {
     const page = context.pages()[0] ?? (await context.newPage());

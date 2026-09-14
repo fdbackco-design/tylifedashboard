@@ -45,6 +45,16 @@ import {
   type PreIssuedCodeMemberSetting,
 } from '@/lib/settlement/pre-issued-code-special';
 import { fetchClawbackAmountByMemberId } from '@/lib/settlement/fetch-clawbacks';
+import {
+  extractConfirmedPayoutLinesFromDetail,
+  upsertUnfrozenConfirmedPayoutLines,
+} from '@/lib/settlement/confirmed-payout-ledger';
+import {
+  upsertClawbackEntriesFromCancelledContracts,
+  fetchLedgerClawbackAmountByMemberId,
+  syncOverrideClawbacksFromLedger,
+} from '@/lib/settlement/clawback-from-ledger';
+import type { SettlementCalculationDetail } from '@/lib/types/settlement';
 
 function isSettlementDebugEnabled(): boolean {
   const v = process.env.SETTLEMENT_DEBUG;
@@ -1031,6 +1041,35 @@ export async function calculateMonthlySettlement(params: {
     if (Number.isFinite(cb)) clawbackAmountByMemberId.set(mid, Math.max(0, Math.round(cb)));
   }
 
+  // 확정 지급 원장 → 취소 계약 역분개(멱등). 현재 조직도/직급으로 재계산하지 않는다.
+  try {
+    const cancelledRefs = ((allContractRows ?? []) as any[])
+      .map((r) => ({
+        id: String(r.id),
+        contract_code: String(r.contract_code ?? '').trim(),
+        is_cancelled: Boolean(r.is_cancelled),
+        status: (r.status ?? null) as string | null,
+      }))
+      .filter((r) => r.contract_code);
+    await upsertClawbackEntriesFromCancelledContracts(db, {
+      clawbackYearMonth: yearMonth,
+      cancelledContracts: cancelledRefs,
+    });
+    const ledgerClawbacks = await fetchLedgerClawbackAmountByMemberId(db, yearMonth);
+    for (const [mid, amt] of ledgerClawbacks.entries()) {
+      // 원장 환수가 있으면 override 수동값보다 원장을 SSOT로 사용
+      clawbackAmountByMemberId.set(mid, amt);
+    }
+    if (ledgerClawbacks.size > 0) {
+      await syncOverrideClawbacksFromLedger(db, yearMonth, ledgerClawbacks);
+    }
+  } catch (e) {
+    console.warn(
+      '[settlement] clawback ledger sync skipped:',
+      e instanceof Error ? e.message : e,
+    );
+  }
+
   const leaderOpts: LeaderSettlementOpts = {
     treeRows,
     promotionThresholdByMemberId,
@@ -1161,6 +1200,21 @@ export async function calculateMonthlySettlement(params: {
       .from('monthly_settlements')
       .upsert(batch, { onConflict: 'year_month,member_id' });
     if (!uErr) updatedCount += batch.length;
+  }
+
+  // 이번 달 계산 결과를 확정 지급 원장에 반영(이미 frozen 인 계약 라인은 유지).
+  try {
+    const payoutLines = settlementRows.flatMap((row) =>
+      extractConfirmedPayoutLinesFromDetail(
+        row.calculation_detail as SettlementCalculationDetail | null | undefined,
+      ),
+    );
+    await upsertUnfrozenConfirmedPayoutLines(db, payoutLines);
+  } catch (e) {
+    console.warn(
+      '[settlement] confirmed payout ledger upsert skipped:',
+      e instanceof Error ? e.message : e,
+    );
   }
 
   if (debug) {
