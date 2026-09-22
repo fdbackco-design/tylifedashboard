@@ -104,6 +104,24 @@ function digitsFromLoginCode(loginCodeEmail: string | null | undefined): string 
   return null;
 }
 
+function formatPhoneDisplay(phone: string | null | undefined): string {
+  const digits = normalizePhoneDigits(phone ?? '');
+  if (digits.length === 11) return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+  if (digits.length === 10) return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+  return digits || '-';
+}
+
+/** 전화번호 변경 시 화면에 보여줄 새 로그인 ID 미리보기 */
+function previewLoginCodeFromPhone(
+  phone: string,
+  currentLoginCode: string | null | undefined,
+): string | null {
+  const digits = normalizePhoneDigits(phone);
+  if (!/^0\d{9,10}$/.test(digits)) return null;
+  const last8 = digits.slice(-8);
+  return /^fed/i.test(String(currentLoginCode ?? '').trim()) ? `fed${last8}` : last8;
+}
+
 export default function AccountIssueClient() {
   const [query, setQuery] = useState('');
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
@@ -132,6 +150,11 @@ export default function AccountIssueClient() {
   const [changeLoginUserId, setChangeLoginUserId] = useState('');
   const [changeLoginId, setChangeLoginId] = useState('');
   const [isChangingLoginId, setIsChangingLoginId] = useState(false);
+
+  // 발급 계정 전화번호 수정 (login_code·초기 비밀번호 동시 갱신)
+  const [phoneEditTarget, setPhoneEditTarget] = useState<IssuedAccount | null>(null);
+  const [phoneEditValue, setPhoneEditValue] = useState('');
+  const [isChangingPhone, setIsChangingPhone] = useState(false);
 
   // 사전 계정 발급 모달
   const [preIssueOpen, setPreIssueOpen] = useState(false);
@@ -282,6 +305,76 @@ export default function AccountIssueClient() {
       showAlert('warning', '로그인 ID 정정 실패', e instanceof Error ? e.message : String(e));
     } finally {
       setIsChangingLoginId(false);
+    }
+  }
+
+  function openPhoneEdit(account: IssuedAccount) {
+    setPhoneEditTarget(account);
+    setPhoneEditValue(formatPhoneDisplay(account.phone));
+  }
+
+  function closePhoneEdit() {
+    if (isChangingPhone) return;
+    setPhoneEditTarget(null);
+    setPhoneEditValue('');
+  }
+
+  async function submitPhoneEdit() {
+    if (!phoneEditTarget) return;
+    const digits = normalizePhoneDigits(phoneEditValue);
+    if (!/^0\d{9,10}$/.test(digits)) {
+      showAlert('warning', '입력 확인', '휴대폰번호는 010으로 시작하는 10~11자리여야 합니다.');
+      return;
+    }
+    const nextLogin = previewLoginCodeFromPhone(digits, phoneEditTarget.login_code);
+    const isFed = /^fed/i.test(String(phoneEditTarget.login_code ?? '').trim());
+    const passwordHint = isFed ? digits : nextLogin;
+    if (
+      !confirm(
+        `${(phoneEditTarget.display_name ?? '-').replace(/^\[고객\]\s*/, '')} 계정의 전화번호를 ${formatPhoneDisplay(digits)} 로 변경할까요?\n\n` +
+          `로그인 ID: ${phoneEditTarget.login_code} → ${nextLogin}\n` +
+          `초기 비밀번호: ${passwordHint}`,
+      )
+    ) {
+      return;
+    }
+
+    setIsChangingPhone(true);
+    try {
+      const res = await fetch('/api/admin/account-issue/change-phone', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: phoneEditTarget.id, new_phone: digits }),
+      });
+      const json = (await res.json()) as ApiResult<{
+        display_name: string | null;
+        phone: string;
+        previous_login_id: string;
+        login_id: string;
+        email: string;
+        password_hint: string;
+      }>;
+      if (!res.ok || !json.success) {
+        showAlert('warning', '전화번호 수정 실패', json.success ? '수정 실패' : json.error);
+        return;
+      }
+      showAlert(
+        'success',
+        '전화번호 수정 완료',
+        `${json.data.display_name ?? '-'}\n` +
+          `전화번호: ${formatPhoneDisplay(json.data.phone)}\n` +
+          `로그인 ID: ${json.data.login_id}\n` +
+          `초기 비밀번호: ${json.data.password_hint}\n` +
+          `다음 로그인 시 비밀번호 변경을 안내합니다.`,
+      );
+      setPhoneEditTarget(null);
+      setPhoneEditValue('');
+      void loadIssuedAccounts();
+    } catch (e) {
+      showAlert('warning', '전화번호 수정 실패', e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsChangingPhone(false);
     }
   }
 
@@ -826,6 +919,96 @@ export default function AccountIssueClient() {
               >
                 닫기
               </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* 발급 계정 전화번호 수정 모달 */}
+      {phoneEditTarget ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-base font-semibold text-gray-900">전화번호 수정</div>
+              <button
+                type="button"
+                onClick={closePhoneEdit}
+                disabled={isChangingPhone}
+                className="text-gray-400 hover:text-gray-600 text-xl leading-none disabled:opacity-50"
+                aria-label="닫기"
+              >
+                ×
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mb-3">
+              전화번호를 바꾸면 로그인 ID·초기 비밀번호·프로필 전화번호가 함께 갱신됩니다.
+              {(phoneEditTarget.display_name ?? '').trim()
+                ? ` 대상: ${(phoneEditTarget.display_name ?? '').replace(/^\[고객\]\s*/, '')}`
+                : ''}
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">현재 전화번호</label>
+                <div className="mt-1 text-sm text-gray-800 font-mono">
+                  {formatPhoneDisplay(phoneEditTarget.phone)}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">현재 로그인 ID</label>
+                <div className="mt-1 text-sm text-gray-800 font-mono">{phoneEditTarget.login_code}</div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">새 전화번호 *</label>
+                <input
+                  value={phoneEditValue}
+                  onChange={(e) => setPhoneEditValue(e.target.value)}
+                  placeholder="010-1234-5678"
+                  inputMode="tel"
+                  disabled={isChangingPhone}
+                  className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm font-mono"
+                  autoFocus
+                />
+              </div>
+              {previewLoginCodeFromPhone(phoneEditValue, phoneEditTarget.login_code) ? (
+                <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-700 space-y-1">
+                  <div>
+                    새 로그인 ID:{' '}
+                    <span className="font-mono font-semibold">
+                      {previewLoginCodeFromPhone(phoneEditValue, phoneEditTarget.login_code)}
+                    </span>
+                  </div>
+                  <div>
+                    초기 비밀번호:{' '}
+                    <span className="font-mono font-semibold">
+                      {/^fed/i.test(phoneEditTarget.login_code)
+                        ? normalizePhoneDigits(phoneEditValue)
+                        : previewLoginCodeFromPhone(phoneEditValue, phoneEditTarget.login_code)}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-amber-700">010으로 시작하는 10~11자리 휴대폰번호를 입력해 주세요.</p>
+              )}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closePhoneEdit}
+                disabled={isChangingPhone}
+                className="px-3 py-1.5 rounded-md border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                취소
+              </button>
+              <LoadingButton
+                type="button"
+                isLoading={isChangingPhone}
+                loadingText="수정 중…"
+                disabled={!previewLoginCodeFromPhone(phoneEditValue, phoneEditTarget.login_code)}
+                onClick={() => void submitPhoneEdit()}
+                className="px-3 py-1.5 rounded-md bg-slate-800 text-white text-sm font-semibold hover:bg-slate-900 disabled:opacity-50"
+              >
+                변경 적용
+              </LoadingButton>
             </div>
           </div>
         </div>
@@ -1416,7 +1599,7 @@ export default function AccountIssueClient() {
             <table className="w-full text-sm border border-gray-200 rounded-lg">
               <thead className="bg-gray-50">
                 <tr className="text-left text-xs text-gray-600">
-                  {['이름', '연락처', '계정(login_code)', '활성', '생성일'].map((h) => (
+                  {['이름', '연락처', '계정(login_code)', '활성', '생성일', '관리'].map((h) => (
                     <th key={h} className="px-3 py-2 border-b border-gray-200 font-semibold whitespace-nowrap">
                       {h}
                     </th>
@@ -1430,7 +1613,7 @@ export default function AccountIssueClient() {
                       {(a.display_name ?? '-').replace(/^\[고객\]\s*/, '')}
                     </td>
                     <td className="px-3 py-2 border-b border-gray-200 whitespace-nowrap">
-                      {a.phone ?? '-'}
+                      {formatPhoneDisplay(a.phone)}
                     </td>
                     <td className="px-3 py-2 border-b border-gray-200 font-mono text-xs whitespace-nowrap">
                       {a.login_code}
@@ -1442,6 +1625,16 @@ export default function AccountIssueClient() {
                     </td>
                     <td className="px-3 py-2 border-b border-gray-200 whitespace-nowrap text-xs text-gray-600">
                       {a.created_at ? new Date(a.created_at).toLocaleString('ko-KR') : '-'}
+                    </td>
+                    <td className="px-3 py-2 border-b border-gray-200 whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => openPhoneEdit(a)}
+                        disabled={isChangingPhone}
+                        className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        전화번호 수정
+                      </button>
                     </td>
                   </tr>
                 ))}
