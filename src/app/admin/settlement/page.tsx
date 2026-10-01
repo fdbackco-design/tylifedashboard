@@ -75,7 +75,15 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   const displayWindow = getSettlementWindowDisplayForYearMonth(yearMonth);
   const hcWindow = getHappycallWindowForYearMonth(yearMonth);
 
-  const [allCountRes, eligibleCountRes, membersRes, edgesRes, eligibleBaseRes, rulesRes] =
+  const [
+    allCountRes,
+    eligibleCountRes,
+    membersRes,
+    edgesRes,
+    eligibleBaseRes,
+    rulesRes,
+    carePlanOverridesRes,
+  ] =
     await Promise.all([
     db
       .from('contracts')
@@ -98,6 +106,10 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       .select('contract_id, contract_code, join_date, unit_count, status, is_cancelled, sales_member_id')
       .eq('year_month', yearMonth),
     db.from('settlement_rules').select('*'),
+    db
+      .from('settlement_statement_overrides')
+      .select('member_id, care_plan_commission')
+      .eq('year_month', yearMonth),
   ]);
 
   const allContractsCount = allCountRes.count ?? 0;
@@ -325,6 +337,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       base_commission,
       rollup_commission,
       incentive_amount,
+      care_plan_commission,
       total_amount,
       calculation_detail,
       is_finalized,
@@ -347,6 +360,18 @@ export default async function SettlementPage({ searchParams }: PageProps) {
   }
 
   const ZERO_OUT_MEMBER_NAME = '정성은';
+  const carePlanOverrideByMemberId = new Map<string, number>();
+  for (const row of (carePlanOverridesRes.data ?? []) as Array<{
+    member_id: string;
+    care_plan_commission: number | null;
+  }>) {
+    if (row.care_plan_commission != null) {
+      carePlanOverrideByMemberId.set(
+        String(row.member_id),
+        Math.max(0, Number(row.care_plan_commission) || 0),
+      );
+    }
+  }
 
   const isZeroOutMember = (s: any): boolean => {
     const member = s.organization_members as unknown as { name?: string } | null;
@@ -374,6 +399,10 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       // "보너스" = 기존 유지장려금 + 2026-06 그룹 보너스(2구좌당 5만원).
       // 둘의 합은 monthly_settlements.incentive_amount에 그대로 저장돼 있다.
       const leaderMaint = zeroOut ? 0 : Number((s as any).incentive_amount ?? 0);
+      const automaticCarePlan = zeroOut ? 0 : Number((s as any).care_plan_commission ?? 0);
+      const carePlan = zeroOut
+        ? 0
+        : (carePlanOverrideByMemberId.get(String(s.member_id)) ?? automaticCarePlan);
       const total = zeroOut ? 0 : (s.total_amount as number) ?? 0;
       return {
         s,
@@ -383,6 +412,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
         base,
         rollup,
         leaderMaint,
+        carePlan,
         total,
         direct,
         lp,
@@ -406,6 +436,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
           base: 0,
           rollup: 0,
           leaderMaint: 0,
+          carePlan: 0,
           total: 0,
           direct_contract_ids: new Set<string>(),
           direct_unit_sum: 0,
@@ -414,6 +445,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
         prev.base += r.base;
         prev.rollup += r.rollup;
         prev.leaderMaint += r.leaderMaint;
+        prev.carePlan += r.carePlan;
         prev.total += r.total;
 
         for (const cid of r.direct.contractIds) prev.direct_contract_ids.add(cid);
@@ -431,6 +463,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
           base: number;
           rollup: number;
           leaderMaint: number;
+          carePlan: number;
           total: number;
           direct_contract_ids: Set<string>;
           direct_unit_sum: number;
@@ -448,6 +481,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       base: number;
       rollup: number;
       leaderMaint: number;
+      carePlan: number;
       total: number;
       directContractCount: number;
       directUnitSum: number;
@@ -467,6 +501,10 @@ export default async function SettlementPage({ searchParams }: PageProps) {
     const rollup = zeroOut ? 0 : Number(r.rollup_commission ?? 0);
     // "보너스" = 기존 유지장려금 + 2026-06 그룹 보너스. 합산값은 incentive_amount에 그대로 들어 있다.
     const leaderMaint = zeroOut ? 0 : Number(r.incentive_amount ?? 0);
+    const automaticCarePlan = zeroOut ? 0 : Number(r.care_plan_commission ?? 0);
+    const carePlan = zeroOut
+      ? 0
+      : (carePlanOverrideByMemberId.get(memberId) ?? automaticCarePlan);
     const total = zeroOut ? 0 : Number(r.total_amount ?? 0);
     memberAggById[memberId] = {
       memberId,
@@ -475,6 +513,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       base,
       rollup,
       leaderMaint,
+      carePlan,
       total,
       directContractCount: direct.contractIds.size,
       directUnitSum: direct.unitSum,
@@ -502,6 +541,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
       base: 0,
       rollup: 0,
       leaderMaint: 0,
+      carePlan: 0,
       total: 0,
       directContractCount: direct.contractIds.size,
       directUnitSum: direct.unitSum,
@@ -726,6 +766,7 @@ export default async function SettlementPage({ searchParams }: PageProps) {
           base: r.base,
           rollup: r.rollup,
           leaderMaint: r.leaderMaint,
+          carePlan: r.carePlan,
           total: r.total,
           directContractCount: r.direct_contract_ids.size,
           directUnitSum: r.direct_unit_sum,

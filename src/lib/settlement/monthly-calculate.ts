@@ -55,6 +55,7 @@ import {
   syncOverrideClawbacksFromLedger,
 } from '@/lib/settlement/clawback-from-ledger';
 import type { SettlementCalculationDetail } from '@/lib/types/settlement';
+import { calculateCarePlanCommissionsForMonth } from './care-plan-commission';
 
 function isSettlementDebugEnabled(): boolean {
   const v = process.env.SETTLEMENT_DEBUG;
@@ -1158,7 +1159,10 @@ export async function calculateMonthlySettlement(params: {
 
   leaderOpts.orgNodeByMemberId = nodeById;
 
-  const settlementRows: Awaited<ReturnType<typeof calculateMemberSettlement>>[] = [];
+  const carePlan = await calculateCarePlanCommissionsForMonth(db, yearMonth);
+  const settlementRows: Array<
+    Awaited<ReturnType<typeof calculateMemberSettlement>> & { care_plan_commission: number }
+  > = [];
   for (const member of membersRaw as OrganizationMember[]) {
     const orgNode = nodeById.get(member.id) ?? null;
     if (!orgNode) continue;
@@ -1190,7 +1194,27 @@ export async function calculateMonthlySettlement(params: {
       });
     }
 
-    settlementRows.push(settlement);
+    const carePlanCommission = carePlan.amountByMemberId.get(member.id) ?? 0;
+    const carePlanLines = carePlan.linesByMemberId.get(member.id) ?? [];
+    settlementRows.push({
+      ...settlement,
+      care_plan_commission: carePlanCommission,
+      total_amount: settlement.total_amount + carePlanCommission,
+      calculation_detail: {
+        ...settlement.calculation_detail,
+        care_plan_commission_amount: carePlanCommission,
+        care_plan_commission_lines: carePlanLines.map((line) => ({
+          contract_id: line.contract_id,
+          contract_code: line.contract_code,
+          commission_type: line.commission_type,
+          installment_no: line.installment_no,
+          unit_count: line.unit_count,
+          unit_amount_won: line.unit_amount_won,
+          amount_won: line.amount_won,
+          payment_status: line.payment_status,
+        })),
+      },
+    });
   }
 
   let updatedCount = 0;

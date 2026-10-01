@@ -30,6 +30,7 @@ export interface StatementSheetViewProps {
   personalCommission: number;
   overrideAmount: number;
   bonusAmount: number;
+  carePlanCommission: number;
   clawbackAmount: number;
   grossTotal: number;
   withholdingTax: number;
@@ -69,6 +70,7 @@ export default function StatementSheetView(props: StatementSheetViewProps) {
     personalCommission,
     overrideAmount,
     bonusAmount,
+    carePlanCommission,
     clawbackAmount,
     grossTotal,
     withholdingTax,
@@ -169,6 +171,13 @@ export default function StatementSheetView(props: StatementSheetViewProps) {
                 <td className="px-4 py-3">성과 장려금</td>
                 <td className="px-4 py-3 text-right tabular-nums">{formatWon(bonusAmount)}</td>
                 <td className="px-4 py-3 text-right text-slate-400" />
+              </tr>
+              <tr className="border-t border-slate-200">
+                <td className="px-4 py-3">케어플랜 수당</td>
+                <td className="px-4 py-3 text-right tabular-nums">
+                  {formatWon(carePlanCommission)}
+                </td>
+                <td className="px-4 py-3 text-right text-[12px] text-slate-500">모집·유지</td>
               </tr>
               <tr className="border-t border-slate-200 text-rose-700">
                 <td className="px-4 py-3 font-medium">환수금</td>

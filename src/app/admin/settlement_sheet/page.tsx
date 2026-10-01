@@ -63,7 +63,7 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
 
   const { data: settlements } = await db
     .from('monthly_settlements')
-    .select('member_id, rank, direct_unit_count, base_commission, rollup_commission, incentive_amount, total_amount')
+    .select('member_id, rank, direct_unit_count, base_commission, rollup_commission, incentive_amount, care_plan_commission, total_amount')
     .eq('year_month', label_year_month);
   const settlementRows = (settlements ?? []) as Array<{
     member_id: string;
@@ -72,6 +72,7 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
     base_commission: number | null;
     rollup_commission: number | null;
     incentive_amount: number | null;
+    care_plan_commission: number | null;
     total_amount: number | null;
   }>;
   const memberIds = settlementRows.map((r) => r.member_id).filter(Boolean);
@@ -106,7 +107,7 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
       : new Map<string, string>();
 
   const overrideSelectWithClawback =
-    'id, year_month, member_id, personal_unit_count, downline_unit_count, personal_commission, override_amount, bonus_amount, clawback_amount, memo, updated_at';
+    'id, year_month, member_id, personal_unit_count, downline_unit_count, personal_commission, override_amount, bonus_amount, care_plan_commission, clawback_amount, memo, updated_at';
   let { data: overrideRows, error: overrideErr } = await db
     .from('settlement_statement_overrides')
     .select(overrideSelectWithClawback)
@@ -114,7 +115,7 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
   if (overrideErr && isMissingClawbackColumnError(overrideErr.message)) {
     const fallback = await db
       .from('settlement_statement_overrides')
-      .select('id, year_month, member_id, personal_unit_count, downline_unit_count, personal_commission, override_amount, bonus_amount, memo, updated_at')
+      .select('id, year_month, member_id, personal_unit_count, downline_unit_count, personal_commission, override_amount, bonus_amount, care_plan_commission, memo, updated_at')
       .eq('year_month', label_year_month);
     overrideRows = (fallback.data ?? []).map((r) => ({ ...r, clawback_amount: null }));
     overrideErr = null;
@@ -128,6 +129,7 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
       personal_commission: number | null;
       override_amount: number | null;
       bonus_amount: number | null;
+      care_plan_commission: number | null;
       clawback_amount: number | null;
       memo: string | null;
     }
@@ -140,6 +142,7 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
     personal_commission: number | null;
     override_amount: number | null;
     bonus_amount: number | null;
+    care_plan_commission: number | null;
     clawback_amount: number | null;
     memo: string | null;
   }>) {
@@ -150,6 +153,7 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
       personal_commission: r.personal_commission,
       override_amount: r.override_amount,
       bonus_amount: r.bonus_amount,
+      care_plan_commission: r.care_plan_commission,
       clawback_amount: r.clawback_amount,
       memo: r.memo,
     });
@@ -198,6 +202,7 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
       const baseBase = Number(r.base_commission ?? 0);
       const rollupBase = Number(r.rollup_commission ?? 0);
       const incentiveBase = Number(r.incentive_amount ?? 0);
+      const carePlanBase = Number(r.care_plan_commission ?? 0);
       return {
         memberId: member.id,
         name: (member.name ?? '').replace(/^\[고객\]\s*/, '') || '—',
@@ -211,6 +216,7 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
           personalCommission: baseBase,
           overrideAmount: rollupBase,
           bonusAmount: incentiveBase,
+          carePlanCommission: carePlanBase,
           clawbackAmount: resolveClawbackWon(r.member_id, label_year_month, null),
         },
         override: ov
@@ -221,6 +227,7 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
               personalCommission: ov.personal_commission,
               overrideAmount: ov.override_amount,
               bonusAmount: ov.bonus_amount,
+              carePlanCommission: ov.care_plan_commission,
               clawbackAmount: ov.clawback_amount,
               memo: ov.memo ?? '',
             }
@@ -234,6 +241,8 @@ export default async function AdminSettlementSheetPage({ searchParams }: PagePro
         personalCommission: r.override?.personalCommission ?? r.base.personalCommission,
         overrideAmount: r.override?.overrideAmount ?? r.base.overrideAmount,
         bonusAmount: r.override?.bonusAmount ?? r.base.bonusAmount,
+        carePlanCommission:
+          r.override?.carePlanCommission ?? r.base.carePlanCommission,
         clawbackAmount: resolveClawbackWon(
           r.memberId,
           label_year_month,

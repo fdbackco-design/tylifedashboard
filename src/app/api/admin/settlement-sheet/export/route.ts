@@ -83,7 +83,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const db = createAdminSupabaseClient();
   const { data: settlements, error: sErr } = await db
     .from('monthly_settlements')
-    .select('member_id, direct_unit_count, base_commission, rollup_commission, incentive_amount')
+    .select(
+      'member_id, direct_unit_count, base_commission, rollup_commission, incentive_amount, care_plan_commission',
+    )
     .eq('year_month', yearMonth);
   if (sErr) return NextResponse.json({ error: sErr.message }, { status: 500 });
   const settlementRows = (settlements ?? []) as Array<{
@@ -92,6 +94,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     base_commission: number | null;
     rollup_commission: number | null;
     incentive_amount: number | null;
+    care_plan_commission: number | null;
   }>;
   const memberIds = settlementRows.map((r) => r.member_id).filter(Boolean);
   if (memberIds.length === 0) {
@@ -122,7 +125,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // 관리자 보정값 (settlement_statement_overrides) — 표시값 우선
   const { data: overrideRows, error: oErr } = await db
     .from('settlement_statement_overrides')
-    .select('member_id, personal_unit_count, downline_unit_count, personal_commission, override_amount, bonus_amount')
+    .select(
+      'member_id, personal_unit_count, downline_unit_count, personal_commission, override_amount, bonus_amount, care_plan_commission',
+    )
     .eq('year_month', yearMonth)
     .in('member_id', memberIds);
   if (oErr) return NextResponse.json({ error: oErr.message }, { status: 500 });
@@ -134,6 +139,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       personal_commission: number | null;
       override_amount: number | null;
       bonus_amount: number | null;
+      care_plan_commission: number | null;
     }
   >();
   for (const r of ((overrideRows ?? []) as Array<{
@@ -143,6 +149,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     personal_commission: number | null;
     override_amount: number | null;
     bonus_amount: number | null;
+    care_plan_commission: number | null;
   }>)) {
     overrideByMemberId.set(r.member_id, {
       personal_unit_count: r.personal_unit_count,
@@ -150,6 +157,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       personal_commission: r.personal_commission,
       override_amount: r.override_amount,
       bonus_amount: r.bonus_amount,
+      care_plan_commission: r.care_plan_commission,
     });
   }
 
@@ -168,6 +176,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const personalCommission = ov?.personal_commission ?? Number(sr.base_commission ?? 0);
       const overrideAmount = ov?.override_amount ?? Number(sr.rollup_commission ?? 0);
       const bonusAmount = ov?.bonus_amount ?? Number(sr.incentive_amount ?? 0);
+      const carePlanCommission =
+        ov?.care_plan_commission ?? Number(sr.care_plan_commission ?? 0);
       const clawbackAmount = resolveClawbackWon(
         sr.member_id,
         yearMonth,
@@ -181,6 +191,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           personalCommission,
           overrideAmount,
           bonusAmount,
+          carePlanCommission,
           clawbackAmount,
         })
       ) {
