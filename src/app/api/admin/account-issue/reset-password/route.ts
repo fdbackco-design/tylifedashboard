@@ -1,9 +1,9 @@
 /**
  * POST /api/admin/account-issue/reset-password
- * body: { login_id: string }  // 8자리 또는 26984730@tylifedashboard.local
+ * body: { login_id: string }  // 8자리, fed+8자리, 또는 email
  *
- * 비밀번호를 login_code 와 동일한 8자리로 초기화하고 must_change_password=true 설정.
- * 이메일 recover 가 불가능한 @tylifedashboard.local 계정용.
+ * 비밀번호를 휴대폰 010 제외 뒤 8자리로 초기화하고
+ * must_change_password=true 설정. 이메일 recover 가 불가능한 @tylifedashboard.local 계정용.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -44,8 +44,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       login_code: result.login_code,
       display_name: result.display_name,
       email: result.email,
-      /** 초기화된 비밀번호는 login_code 와 동일 (화면에만 안내, 로그 저장 안 함) */
-      password_hint: result.login_code,
+      /** 초기화된 비밀번호 (화면에만 안내, 로그 저장 안 함) */
+      password_hint: result.password_hint,
       must_change_password: true,
     },
   });

@@ -2,6 +2,7 @@
 
 import LoadingButton from '@/components/ui/LoadingButton';
 import SimpleAlertModal from '@/components/ui/SimpleAlertModal';
+import { extractAccountLoginCode } from '@/lib/account-issue/login-code';
 import { useEffect, useMemo, useState } from 'react';
 
 type AlertModalState = {
@@ -204,26 +205,28 @@ export default function AccountIssueClient() {
   const [issuedTotalPages, setIssuedTotalPages] = useState(1);
 
   const normalizedQuery = useMemo(() => query.trim(), [query]);
-  const emailDomain = 'tylifedashboard.local';
 
   function showAlert(variant: AlertModalState['variant'], title: string, message: string) {
     setAlertModal({ variant, title, message });
   }
 
-  async function resetPasswordToLoginCode() {
-    const raw = resetLoginId.trim();
+  async function resetPasswordToLoginCode(loginIdOverride?: string) {
+    const raw = (loginIdOverride ?? resetLoginId).trim();
     if (!raw) {
-      showAlert('warning', '입력 확인', '로그인 ID(8자리)를 입력해 주세요.');
+      showAlert('warning', '입력 확인', '로그인 ID(8자리 또는 fed+8자리)를 입력해 주세요.');
       return;
     }
-    const digits =
-      digitsFromLoginCode(raw.includes('@') ? raw : `${raw}@${emailDomain}`) ??
-      raw.replace(/\D/g, '');
-    if (!/^\d{8}$/.test(digits)) {
-      showAlert('warning', '입력 확인', '로그인 ID는 8자리 숫자여야 합니다. (예: 26984730)');
+    const loginId = extractAccountLoginCode(raw);
+    if (!loginId) {
+      showAlert(
+        'warning',
+        '입력 확인',
+        '로그인 ID는 8자리 숫자 또는 fed+8자리여야 합니다. (예: 26984730 / fed68761290)',
+      );
       return;
     }
-    if (!confirm(`로그인 ID ${digits} 의 비밀번호를 ${digits} 으로 초기화할까요?`)) return;
+    const confirmMessage = `로그인 ID ${loginId} 의 비밀번호를 휴대폰 010 제외 8자리로 초기화할까요?`;
+    if (!confirm(confirmMessage)) return;
 
     setIsResettingPassword(true);
     try {
@@ -231,14 +234,18 @@ export default function AccountIssueClient() {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ login_id: digits }),
+        body: JSON.stringify({ login_id: loginId }),
       });
-      const json = (await res.json()) as ApiResult<{
+      const json = (await res.json().catch(() => null)) as ApiResult<{
         login_code: string;
         display_name: string | null;
         email: string;
         password_hint: string;
-      }>;
+      }> | null;
+      if (!json) {
+        showAlert('warning', '초기화 실패', `서버 응답 ${res.status}`);
+        return;
+      }
       if (!res.ok || !json.success) {
         showAlert('warning', '초기화 실패', json.success ? '초기화 실패' : json.error);
         return;
@@ -1171,7 +1178,7 @@ export default function AccountIssueClient() {
       <div className="bg-white border border-gray-200 rounded-xl p-4">
         <div className="text-sm font-semibold text-gray-700 mb-1">비밀번호 초기화</div>
         <p className="text-xs text-gray-500 mb-3">
-          로그인 ID(8자리)를 입력하면 비밀번호를 동일한 8자리로 초기화합니다.
+          로그인 ID(8자리 또는 fed+8자리)를 입력하면 비밀번호를 휴대폰 010 제외 뒤 8자리로 초기화합니다.
           (@tylifedashboard.local 계정은 이메일 재설정이 불가해 Admin API로 처리합니다.)
         </p>
         <div className="flex gap-2 items-end flex-wrap">
@@ -1180,7 +1187,7 @@ export default function AccountIssueClient() {
             <input
               value={resetLoginId}
               onChange={(e) => setResetLoginId(e.target.value)}
-              placeholder="예: 26984730"
+              placeholder="예: 26984730 / fed68761290"
               onKeyDown={(e) => {
                 if (e.key !== 'Enter') return;
                 e.preventDefault();
@@ -1627,14 +1634,24 @@ export default function AccountIssueClient() {
                       {a.created_at ? new Date(a.created_at).toLocaleString('ko-KR') : '-'}
                     </td>
                     <td className="px-3 py-2 border-b border-gray-200 whitespace-nowrap">
-                      <button
-                        type="button"
-                        onClick={() => openPhoneEdit(a)}
-                        disabled={isChangingPhone}
-                        className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                      >
-                        전화번호 수정
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => openPhoneEdit(a)}
+                          disabled={isChangingPhone || isResettingPassword}
+                          className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          전화번호 수정
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void resetPasswordToLoginCode(a.login_code)}
+                          disabled={isChangingPhone || isResettingPassword}
+                          className="rounded-md border border-rose-200 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                        >
+                          비밀번호 초기화
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

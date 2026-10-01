@@ -1,11 +1,12 @@
 /**
- * 관리자: 기존 계정은 login_code, fed 계정은 등록된 휴대폰 전체 숫자로 비밀번호 초기화.
+ * 관리자: 비밀번호를 휴대폰 010 제외 뒤 8자리로 초기화한다.
  * - @tylifedashboard.local 가짜 메일이라 email recover 불가 → Auth Admin API 사용
  * - 비밀번호 원문은 로그/감사에 저장하지 않음
  */
 
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { extractAccountLoginCode, loginCodeLookupCandidates, passwordFromPhoneLast8 } from './login-code';
 
 const EMAIL_DOMAIN = 'tylifedashboard.local';
 
@@ -16,6 +17,7 @@ export type ResetPasswordResult =
       login_code: string;
       display_name: string | null;
       email: string;
+      password_hint: string;
     }
   | {
       ok: false;
@@ -23,32 +25,22 @@ export type ResetPasswordResult =
       message: string;
     };
 
-/** 8자리 숫자 또는 email local-part 에서 login_code 추출 */
-export function extractLoginCode8(raw: string): string | null {
-  const v = String(raw ?? '').trim();
-  if (!v) return null;
-  const local = v.includes('@') ? v.split('@')[0]! : v;
-  const digits = local.replace(/\D/g, '');
-  if (/^\d{8}$/.test(digits)) return digits;
-  if (/^\d{8}$/.test(local)) return local;
-  return null;
-}
+export { extractAccountLoginCode, loginCodeLookupCandidates } from './login-code';
 
-export function extractAccountLoginCode(raw: string): string | null {
-  const value = String(raw ?? '').trim();
-  if (!value) return null;
-  const local = value.includes('@') ? value.split('@')[0]! : value;
-  if (/^\d{8}$/.test(local)) return local;
-  if (/^fed\d{8}$/i.test(local)) return local.toLowerCase();
-  return null;
-}
+type ProfileRow = {
+  id: string;
+  login_code: string | null;
+  display_name: string | null;
+  phone: string | null;
+  is_active: boolean | null;
+};
 
 export async function resetMemberPasswordToLoginCode(
   adminDb: SupabaseClient,
   loginIdRaw: string,
 ): Promise<ResetPasswordResult> {
-  const loginCode = extractAccountLoginCode(loginIdRaw);
-  if (!loginCode) {
+  const requestedCode = extractAccountLoginCode(loginIdRaw);
+  if (!requestedCode) {
     return {
       ok: false,
       code: 'INVALID_INPUT',
@@ -56,33 +48,40 @@ export async function resetMemberPasswordToLoginCode(
     };
   }
 
-  const { data: profile, error: pErr } = await adminDb
+  const candidates = loginCodeLookupCandidates(requestedCode);
+  const { data: rows, error: pErr } = await adminDb
     .from('user_profiles')
     .select('id, login_code, display_name, phone, is_active')
-    .eq('login_code', loginCode)
-    .maybeSingle();
+    .in('login_code', candidates);
 
   if (pErr) {
     return { ok: false, code: 'NOT_FOUND', message: `계정 조회 실패: ${pErr.message}` };
   }
+
+  const profiles = ((rows ?? []) as ProfileRow[]).filter((row) => row.id);
+  const exact = profiles.find((row) => String(row.login_code ?? '') === requestedCode) ?? null;
+  const profile = exact ?? (profiles.length === 1 ? profiles[0]! : null);
   if (!profile?.id) {
     return {
       ok: false,
       code: 'NOT_FOUND',
-      message: `login_code=${loginCode} 계정을 찾을 수 없습니다.`,
+      message:
+        profiles.length > 1
+          ? `login_code=${requestedCode} 와 fed 계정이 함께 있어 구분할 수 없습니다. 전체 로그인 ID를 입력해 주세요.`
+          : `login_code=${requestedCode} 계정을 찾을 수 없습니다.`,
     };
   }
 
-  const userId = String((profile as { id: string }).id);
-  const displayName = ((profile as { display_name?: string | null }).display_name ?? null) as string | null;
+  const loginCode = String(profile.login_code ?? requestedCode);
+  const userId = String(profile.id);
+  const displayName = profile.display_name ?? null;
   const email = `${loginCode}@${EMAIL_DOMAIN}`;
-  const phonePassword = String((profile as { phone?: string | null }).phone ?? '').replace(/\D/g, '');
-  const resetPassword = loginCode.startsWith('fed') ? phonePassword : loginCode;
-  if (loginCode.startsWith('fed') && !/^\d{10,11}$/.test(resetPassword)) {
+  const resetPassword = passwordFromPhoneLast8(loginCode, profile.phone);
+  if (!resetPassword) {
     return {
       ok: false,
       code: 'INVALID_INPUT',
-      message: 'fed 계정의 등록된 휴대폰번호가 없어 비밀번호를 초기화할 수 없습니다.',
+      message: '비밀번호로 쓸 휴대폰 뒤 8자리를 확인할 수 없습니다.',
     };
   }
 
@@ -124,7 +123,7 @@ export async function resetMemberPasswordToLoginCode(
       metadata: {
         login_code: loginCode,
         // 비밀번호 원문은 기록하지 않음
-        password_policy: loginCode.startsWith('fed') ? 'FULL_PHONE_DIGITS' : 'LOGIN_CODE',
+        password_policy: 'PHONE_LAST8',
       },
     });
   } catch {
@@ -137,5 +136,6 @@ export async function resetMemberPasswordToLoginCode(
     login_code: loginCode,
     display_name: displayName,
     email,
+    password_hint: resetPassword,
   };
 }
