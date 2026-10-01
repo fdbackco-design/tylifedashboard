@@ -3,7 +3,7 @@
  *
  * - 계약 목록만 조회하고 상세 페이지는 절대 조회하지 않는다.
  * - 고객/조직/승급/정산 후처리를 실행하지 않는다.
- * - status / is_cancelled / ty_source_status / 상태이력 / watchlist만 갱신한다.
+ * - status / is_cancelled / ty_source_status / 케어플랜 상품유형 / 상태이력 / watchlist만 갱신한다.
  * - 가입일부터 24개월이 지나거나 해약/취소가 확인되면 watchlist를 종료한다.
  */
 
@@ -178,6 +178,9 @@ export async function runCarePlanStatusSync(options?: {
               status: nextStatus,
               ty_source_status: nextStatus,
               is_cancelled: nextCancelled,
+              // 과거 `일반`으로 저장된 계약과 신규 목록 계약을 canonical 유형으로 보정한다.
+              product_type: 'TY케어플랜',
+              item_name: '',
             })
             .eq('id', contract.id);
           if (updateErr) throw new Error(`케어플랜 계약 상태 갱신 실패: ${updateErr.message}`);
