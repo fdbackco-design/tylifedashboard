@@ -685,7 +685,15 @@ export default async function SettlementPage({ searchParams }: PageProps) {
               </p>
             )}
           </div>
-          <RecalcButton yearMonth={yearMonth} todayYearMonth={todayYearMonth} />
+          <div className="flex flex-col gap-2 sm:items-end">
+            <Link
+              href={`/admin/settlement/reconciliation?year_month=${yearMonth}`}
+              className="inline-flex items-center justify-center rounded-md border border-orange-200 bg-orange-50 px-3 py-1.5 text-[11px] font-semibold text-orange-900 shadow-sm transition hover:bg-orange-100"
+            >
+              본사 정산 검증
+            </Link>
+            <RecalcButton yearMonth={yearMonth} todayYearMonth={todayYearMonth} />
+          </div>
         </div>
       </section>
 
