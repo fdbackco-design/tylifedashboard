@@ -12,6 +12,8 @@ import {
 } from '@/lib/settlement/reconciliation';
 import type { SettlementCalculationDetail } from '@/lib/types/settlement';
 import { getContractDisplayProductName } from '@/lib/utils/contract-display-product';
+import { buildCarePlanAutomaticLine } from '@/lib/settlement/care-plan-commission';
+import { happycallYmdSeoul } from '@/lib/settlement/settlement-eligibility-v2';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -97,7 +99,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const db = createAdminSupabaseClient();
-  const [settlementsRes, clawbacksRes] = await Promise.all([
+  const [settlementsRes, clawbacksRes, carePlanEntriesRes, carePlanContractsRes] = await Promise.all([
     db
       .from('monthly_settlements')
       .select('member_id, base_commission, rollup_commission, care_plan_commission, calculation_detail')
@@ -107,12 +109,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .select('contract_code, contract_id, recipient_member_id, amount_type, amount_won, internal_exempt')
       .eq('clawback_year_month', yearMonth)
       .eq('internal_exempt', false),
+    db
+      .from('care_plan_commission_entries')
+      .select(
+        'contract_id, contract_code, recipient_member_id, commission_type, installment_no, unit_count, amount_won, override_amount_won, payment_status, source',
+      )
+      .eq('earning_year_month', yearMonth)
+      .in('payment_status', ['pending', 'paid']),
+    db
+      .from('contracts')
+      .select(
+        'id, contract_code, unit_count, status, is_cancelled, happy_call_at, happycall_result, product_type, item_name, source_snapshot_json, sales_member_id, settlement_sales_member_id, updated_at, customers(name)',
+      )
+      .eq('product_type', 'TY케어플랜'),
   ]);
   if (settlementsRes.error) {
     return NextResponse.json({ error: settlementsRes.error.message }, { status: 500 });
   }
   if (clawbacksRes.error) {
     return NextResponse.json({ error: clawbacksRes.error.message }, { status: 500 });
+  }
+  if (carePlanEntriesRes.error) {
+    return NextResponse.json({ error: carePlanEntriesRes.error.message }, { status: 500 });
+  }
+  if (carePlanContractsRes.error) {
+    return NextResponse.json({ error: carePlanContractsRes.error.message }, { status: 500 });
   }
 
   const rawLines: RawSystemLine[] = [];
@@ -155,19 +176,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       });
     }
 
-    for (const line of detail.care_plan_commission_lines ?? []) {
-      if (line.payment_status !== 'pending' && line.payment_status !== 'paid') continue;
-      rawLines.push({
-        contractCode: String(line.contract_code ?? '').trim(),
-        contractId: line.contract_id ? String(line.contract_id) : null,
-        recipientMemberId,
-        effectiveOwnerMemberId: recipientMemberId,
-        effectiveOwnerNameHint: '',
-        amount: Math.round(Number(line.amount_won) || 0),
-        payoutType: '케어플랜수당',
-        unitCount: Number(line.unit_count) || 0,
-      });
-    }
   }
 
   for (const line of clawbacksRes.data ?? []) {
@@ -183,12 +191,98 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
+  const carePlanCodesFromLedger = new Set<string>();
+  let excludedGroupedRetroactiveCount = 0;
+  for (const line of carePlanEntriesRes.data ?? []) {
+    const contractCode = String(line.contract_code ?? '').trim();
+    // 계약코드가 없는 과거 묶음 소급 원장은 계약별 대사 근거로 사용할 수 없다.
+    if (!line.contract_id) {
+      excludedGroupedRetroactiveCount++;
+      continue;
+    }
+    const recipientMemberId = String(line.recipient_member_id ?? '').trim();
+    if (!contractCode || !recipientMemberId) continue;
+    carePlanCodesFromLedger.add(contractCode);
+    rawLines.push({
+      contractCode,
+      contractId: String(line.contract_id),
+      recipientMemberId,
+      effectiveOwnerMemberId: recipientMemberId,
+      effectiveOwnerNameHint: '',
+      amount: Math.max(
+        0,
+        Math.round(
+          Number(
+            line.override_amount_won == null
+              ? line.amount_won
+              : line.override_amount_won,
+          ) || 0,
+        ),
+      ),
+      payoutType: '케어플랜수당',
+      unitCount: Number(line.unit_count) || 0,
+    });
+  }
+
+  const carePlanContracts = (carePlanContractsRes.data ?? []) as any[];
+  const carePlanContractIds = carePlanContracts.map((row) => String(row.id)).filter(Boolean);
+  const cancellationYmdByContractId = new Map<string, string>();
+  for (const idChunk of chunks(carePlanContractIds, DB_CHUNK_SIZE)) {
+    const { data, error } = await db
+      .from('contract_status_histories')
+      .select('contract_id, to_status, changed_at')
+      .in('contract_id', idChunk)
+      .in('to_status', ['취소', '해약'])
+      .order('changed_at', { ascending: true });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    for (const history of data ?? []) {
+      const contractId = String(history.contract_id);
+      if (cancellationYmdByContractId.has(contractId)) continue;
+      const ymd = happycallYmdSeoul(history.changed_at);
+      if (ymd) cancellationYmdByContractId.set(contractId, ymd);
+    }
+  }
+
+  // 원장이 없는 과거 월도 새 계산식을 만들지 않고 기존 케어플랜 순수 계산 함수를 그대로 사용한다.
+  for (const contract of carePlanContracts) {
+    const contractCode = String(contract.contract_code ?? '').trim();
+    if (!contractCode || carePlanCodesFromLedger.has(contractCode)) continue;
+    let cancellationYmd = cancellationYmdByContractId.get(String(contract.id)) ?? null;
+    if (
+      !cancellationYmd &&
+      (contract.status === '해약' || contract.status === '취소' || contract.is_cancelled)
+    ) {
+      cancellationYmd = happycallYmdSeoul(contract.updated_at);
+    }
+    const calculated = buildCarePlanAutomaticLine({
+      contract,
+      yearMonth,
+      cancellationYmd,
+    });
+    if (!calculated) continue;
+    rawLines.push({
+      contractCode: calculated.contract_code,
+      contractId: calculated.contract_id,
+      recipientMemberId: calculated.recipient_member_id,
+      effectiveOwnerMemberId: calculated.recipient_member_id,
+      effectiveOwnerNameHint: '',
+      amount: calculated.amount_won,
+      payoutType: '케어플랜수당',
+      unitCount: calculated.unit_count,
+    });
+  }
+  if (excludedGroupedRetroactiveCount > 0) {
+    warnings.push(
+      `계약코드가 없는 과거 묶음 소급 원장 ${excludedGroupedRetroactiveCount}건은 계약별 대사에서 제외했습니다.`,
+    );
+  }
+
   const contractCodes = [
     ...new Set(
       [...excelRows.map((row) => row.contractCode), ...rawLines.map((line) => line.contractCode)].filter(Boolean),
     ),
   ];
-  const contractRows: any[] = [];
+  const contractRows: any[] = [...carePlanContracts];
   for (const codeChunk of chunks(contractCodes, DB_CHUNK_SIZE)) {
     const { data, error } = await db
       .from('contracts')
