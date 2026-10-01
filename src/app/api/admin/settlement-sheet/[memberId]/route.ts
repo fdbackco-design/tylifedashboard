@@ -21,6 +21,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { normalizeYearMonthLabel } from '@/lib/settlement/settlement-window';
 import { patchMonthlySettlementTotalForClawback } from '@/lib/settlement/patch-clawback-total';
 import { CLAWBACK_MIGRATION_ERROR, isMissingClawbackColumnError } from '@/lib/settlement/fetch-clawbacks';
+import { patchMonthlySettlementTotalForCarePlan } from '@/lib/settlement/patch-care-plan-total';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -69,6 +70,7 @@ export async function PUT(
     personal_commission: asNullableInt(body.personal_commission, 'personal_commission'),
     override_amount: asNullableInt(body.override_amount, 'override_amount'),
     bonus_amount: asNullableInt(body.bonus_amount, 'bonus_amount'),
+    care_plan_commission: asNullableInt(body.care_plan_commission, 'care_plan_commission'),
     clawback_amount: asNullableInt(body.clawback_amount, 'clawback_amount'),
   } as const;
   for (const k of Object.keys(fields) as Array<keyof typeof fields>) {
@@ -77,6 +79,10 @@ export async function PUT(
   const clawbackParsed = fields.clawback_amount as { ok: true; value: number | null };
   if (clawbackParsed.value != null && clawbackParsed.value < 0) {
     return NextResponse.json({ error: 'clawback_amount 는 0 이상이어야 합니다' }, { status: 400 });
+  }
+  const carePlanParsed = fields.care_plan_commission as { ok: true; value: number | null };
+  if (carePlanParsed.value != null && carePlanParsed.value < 0) {
+    return NextResponse.json({ error: 'care_plan_commission은 0 이상이어야 합니다' }, { status: 400 });
   }
   const memo = typeof body.memo === 'string' ? body.memo.trim() || null : null;
 
@@ -93,7 +99,7 @@ export async function PUT(
 
   const { data: prevOverride } = await db
     .from('settlement_statement_overrides')
-    .select('clawback_amount')
+    .select('clawback_amount, care_plan_commission')
     .eq('year_month', yearMonth)
     .eq('member_id', memberId)
     .maybeSingle();
@@ -102,6 +108,11 @@ export async function PUT(
       ? Number((prevOverride as { clawback_amount: number | null }).clawback_amount)
       : null;
   const nextDbClawback = (fields.clawback_amount as { value: number | null }).value;
+  const prevDbCarePlan =
+    prevOverride && (prevOverride as { care_plan_commission: number | null }).care_plan_commission != null
+      ? Number((prevOverride as { care_plan_commission: number | null }).care_plan_commission)
+      : null;
+  const nextDbCarePlan = carePlanParsed.value;
 
   const { error } = await db.from('settlement_statement_overrides').upsert(
     {
@@ -112,6 +123,7 @@ export async function PUT(
       personal_commission: (fields.personal_commission as { value: number | null }).value,
       override_amount: (fields.override_amount as { value: number | null }).value,
       bonus_amount: (fields.bonus_amount as { value: number | null }).value,
+      care_plan_commission: nextDbCarePlan,
       clawback_amount: nextDbClawback,
       memo,
     },
@@ -132,6 +144,17 @@ export async function PUT(
     nextDbClawback,
   );
   if (!patched.ok) return NextResponse.json({ error: patched.error }, { status: 500 });
+
+  const carePlanPatched = await patchMonthlySettlementTotalForCarePlan(
+    db,
+    memberId,
+    yearMonth,
+    prevDbCarePlan,
+    nextDbCarePlan,
+  );
+  if (!carePlanPatched.ok) {
+    return NextResponse.json({ error: carePlanPatched.error }, { status: 500 });
+  }
 
   return NextResponse.json({ ok: true });
 }
@@ -158,13 +181,17 @@ export async function DELETE(
   const db = createAdminSupabaseClient();
   const { data: prevOverride } = await db
     .from('settlement_statement_overrides')
-    .select('clawback_amount')
+    .select('clawback_amount, care_plan_commission')
     .eq('year_month', yearMonth)
     .eq('member_id', memberId)
     .maybeSingle();
   const prevDbClawback =
     prevOverride && (prevOverride as { clawback_amount: number | null }).clawback_amount != null
       ? Number((prevOverride as { clawback_amount: number | null }).clawback_amount)
+      : null;
+  const prevDbCarePlan =
+    prevOverride && (prevOverride as { care_plan_commission: number | null }).care_plan_commission != null
+      ? Number((prevOverride as { care_plan_commission: number | null }).care_plan_commission)
       : null;
 
   const { error } = await db
@@ -182,6 +209,17 @@ export async function DELETE(
     null,
   );
   if (!patched.ok) return NextResponse.json({ error: patched.error }, { status: 500 });
+
+  const carePlanPatched = await patchMonthlySettlementTotalForCarePlan(
+    db,
+    memberId,
+    yearMonth,
+    prevDbCarePlan,
+    null,
+  );
+  if (!carePlanPatched.ok) {
+    return NextResponse.json({ error: carePlanPatched.error }, { status: 500 });
+  }
 
   return NextResponse.json({ ok: true });
 }

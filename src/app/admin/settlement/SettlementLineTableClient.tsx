@@ -15,6 +15,7 @@ export type SettlementLineRow = {
   base: number;
   rollup: number;
   leaderMaint: number;
+  carePlan: number;
   total: number;
   directContractCount: number;
   directUnitSum: number;
@@ -54,6 +55,7 @@ export default function SettlementLineTableClient(props: {
       base: number;
       rollup: number;
       leaderMaint: number;
+      carePlan: number;
       total: number;
       directContractCount: number;
       directUnitSum: number;
@@ -72,18 +74,25 @@ export default function SettlementLineTableClient(props: {
   const splitSaveInFlightRef = useRef<Set<string>>(new Set());
   const selfPrefSaveInFlightRef = useRef<Set<string>>(new Set());
   const clawbackSaveInFlightRef = useRef<Set<string>>(new Set());
+  const carePlanSaveInFlightRef = useRef<Set<string>>(new Set());
   const [clawbackDraftByMemberId, setClawbackDraftByMemberId] = useState<Record<string, number>>({});
   const [clawbackInputByMemberId, setClawbackInputByMemberId] = useState<Record<string, string>>({});
   const [clawbackSavePendingByMemberId, setClawbackSavePendingByMemberId] = useState<Record<string, boolean>>({});
   const [baselineTotalByMemberId, setBaselineTotalByMemberId] = useState<Record<string, number>>({});
   const [baselineClawbackByMemberId, setBaselineClawbackByMemberId] = useState<Record<string, number>>({});
+  const [carePlanDraftByMemberId, setCarePlanDraftByMemberId] = useState<Record<string, number>>({});
+  const [carePlanInputByMemberId, setCarePlanInputByMemberId] = useState<Record<string, string>>({});
+  const [carePlanSavePendingByMemberId, setCarePlanSavePendingByMemberId] = useState<Record<string, boolean>>({});
+  const [baselineCarePlanByMemberId, setBaselineCarePlanByMemberId] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const cb = props.clawbackByMemberId ?? {};
     const totals: Record<string, number> = {};
     const inputs: Record<string, string> = {};
+    const carePlan: Record<string, number> = {};
     for (const [id, m] of Object.entries(props.memberAggById ?? {})) {
       totals[id] = Number(m.total ?? 0);
+      carePlan[id] = Number(m.carePlan ?? 0);
     }
     for (const [id, n] of Object.entries(cb)) {
       inputs[id] = n ? String(n) : '';
@@ -92,6 +101,9 @@ export default function SettlementLineTableClient(props: {
     setClawbackInputByMemberId(inputs);
     setBaselineClawbackByMemberId(cb);
     setBaselineTotalByMemberId(totals);
+    setCarePlanDraftByMemberId(carePlan);
+    setBaselineCarePlanByMemberId(carePlan);
+    setCarePlanInputByMemberId({});
   }, [props.yearMonth, props.clawbackByMemberId, props.memberAggById]);
 
   useEffect(() => {
@@ -119,11 +131,18 @@ export default function SettlementLineTableClient(props: {
       return out;
     };
 
+    const memberCarePlan = (id: string) =>
+      carePlanDraftByMemberId[id] ??
+      baselineCarePlanByMemberId[id] ??
+      props.memberAggById[id]?.carePlan ??
+      0;
     const memberNetTotal = (id: string, rawTotal: number) => {
       const baselineTotal = baselineTotalByMemberId[id] ?? rawTotal;
       const baselineCb = baselineClawbackByMemberId[id] ?? props.clawbackByMemberId?.[id] ?? 0;
       const currentCb = clawbackDraftByMemberId[id] ?? baselineCb;
-      return baselineTotal + baselineCb - currentCb;
+      const baselineCarePlan =
+        baselineCarePlanByMemberId[id] ?? props.memberAggById[id]?.carePlan ?? 0;
+      return baselineTotal + baselineCb - currentCb - baselineCarePlan + memberCarePlan(id);
     };
     const memberClawback = (id: string) =>
       clawbackDraftByMemberId[id] ?? baselineClawbackByMemberId[id] ?? props.clawbackByMemberId?.[id] ?? 0;
@@ -131,6 +150,7 @@ export default function SettlementLineTableClient(props: {
     const sumAgg = (memberIds: Set<string>) => {
       let rollup = 0;
       let leaderMaint = 0;
+      let carePlan = 0;
       let total = 0;
       let clawback = 0;
       let directContractCount = 0;
@@ -140,12 +160,13 @@ export default function SettlementLineTableClient(props: {
         if (!m) continue;
         rollup += m.rollup ?? 0;
         leaderMaint += m.leaderMaint ?? 0;
+        carePlan += memberCarePlan(id);
         total += memberNetTotal(id, m.total ?? 0);
         clawback += memberClawback(id);
         directContractCount += m.directContractCount ?? 0;
         directUnitSum += m.directUnitSum ?? 0;
       }
-      return { rollup, leaderMaint, total, clawback, directContractCount, directUnitSum };
+      return { rollup, leaderMaint, carePlan, total, clawback, directContractCount, directUnitSum };
     };
 
     // 산하 분리 보기: 행 재구성(재귀)
@@ -173,6 +194,7 @@ export default function SettlementLineTableClient(props: {
         base: meta?.base ?? 0,
         rollup: agg.rollup,
         leaderMaint: agg.leaderMaint,
+        carePlan: agg.carePlan,
         // total_amount 기준(수동 환수 등 가감 포함). base+rollup+보너스로 재합산하지 않는다.
         total: agg.total,
         directContractCount: agg.directContractCount,
@@ -196,6 +218,7 @@ export default function SettlementLineTableClient(props: {
         base: meta.base,
         rollup: meta.rollup,
         leaderMaint: meta.leaderMaint,
+        carePlan: memberCarePlan(nodeId),
         total: memberNetTotal(nodeId, meta.total),
         directContractCount: meta.directContractCount,
         directUnitSum: meta.directUnitSum,
@@ -267,7 +290,9 @@ export default function SettlementLineTableClient(props: {
     props.childrenByParent,
     props.memberAggById,
     clawbackDraftByMemberId,
+    carePlanDraftByMemberId,
     baselineTotalByMemberId,
+    baselineCarePlanByMemberId,
     baselineClawbackByMemberId,
     props.clawbackByMemberId,
   ]);
@@ -275,6 +300,7 @@ export default function SettlementLineTableClient(props: {
   const baseSum = useMemo(() => adjustedRows.reduce((s, r) => s + (r.base ?? 0), 0), [adjustedRows]);
   const rollupSum = useMemo(() => adjustedRows.reduce((s, r) => s + (r.rollup ?? 0), 0), [adjustedRows]);
   const leaderMaintSum = useMemo(() => adjustedRows.reduce((s, r) => s + (r.leaderMaint ?? 0), 0), [adjustedRows]);
+  const carePlanSum = useMemo(() => adjustedRows.reduce((s, r) => s + (r.carePlan ?? 0), 0), [adjustedRows]);
   const statementDirectColSum = useMemo(
     () =>
       adjustedRows.reduce((s, r) => s + (props.statementDirectUnitsByMemberId[r.topLineId] ?? 0), 0),
@@ -340,6 +366,90 @@ export default function SettlementLineTableClient(props: {
         clawbackSaveInFlightRef.current.delete(memberId);
         setClawbackSavePendingByMemberId((p) => {
           const next = { ...p };
+          delete next[memberId];
+          return next;
+        });
+      });
+  };
+
+  const commitCarePlan = (
+    row: (typeof adjustedRows)[number],
+    raw: string,
+  ) => {
+    const trimmed = raw.trim().replace(/,/g, '');
+    const parsed = trimmed === '' ? Number(row.carePlan ?? 0) : /^\d+$/.test(trimmed) ? parseInt(trimmed, 10) : NaN;
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      setSaveError('케어플랜 수당은 0 이상 정수여야 합니다.');
+      setCarePlanInputByMemberId((prev) => {
+        const next = { ...prev };
+        delete next[row.topLineId];
+        return next;
+      });
+      return;
+    }
+
+    const memberId = row.topLineId;
+    const currentOwn =
+      carePlanDraftByMemberId[memberId] ??
+      baselineCarePlanByMemberId[memberId] ??
+      props.memberAggById[memberId]?.carePlan ??
+      0;
+    const otherMembersAmount = Math.max(0, Number(row.carePlan ?? 0) - currentOwn);
+    const nextOwn = parsed - otherMembersAmount;
+    if (nextOwn < 0) {
+      setSaveError(`산하 케어플랜 수당 ${formatKRW(otherMembersAmount)}보다 작게 설정할 수 없습니다.`);
+      setCarePlanInputByMemberId((prev) => {
+        const next = { ...prev };
+        delete next[memberId];
+        return next;
+      });
+      return;
+    }
+    if (nextOwn === currentOwn || carePlanSaveInFlightRef.current.has(memberId)) {
+      setCarePlanInputByMemberId((prev) => ({ ...prev, [memberId]: String(parsed) }));
+      return;
+    }
+
+    carePlanSaveInFlightRef.current.add(memberId);
+    setCarePlanSavePendingByMemberId((prev) => ({ ...prev, [memberId]: true }));
+    setSaveError(null);
+    setCarePlanDraftByMemberId((prev) => ({ ...prev, [memberId]: nextOwn }));
+    setCarePlanInputByMemberId((prev) => ({ ...prev, [memberId]: String(parsed) }));
+
+    void fetch('/api/admin/settlement-care-plan', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        year_month: props.yearMonth,
+        member_id: memberId,
+        care_plan_commission: nextOwn,
+      }),
+    })
+      .then(async (res) => {
+        const json = (await res.json()) as { ok?: boolean; error?: string };
+        if (!res.ok || !json.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+        setBaselineCarePlanByMemberId((prev) => ({ ...prev, [memberId]: nextOwn }));
+        setBaselineTotalByMemberId((prev) => ({
+          ...prev,
+          [memberId]:
+            (prev[memberId] ?? props.memberAggById[memberId]?.total ?? 0) -
+            currentOwn +
+            nextOwn,
+        }));
+      })
+      .catch((error) => {
+        setCarePlanDraftByMemberId((prev) => ({ ...prev, [memberId]: currentOwn }));
+        setCarePlanInputByMemberId((prev) => {
+          const next = { ...prev };
+          delete next[memberId];
+          return next;
+        });
+        setSaveError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        carePlanSaveInFlightRef.current.delete(memberId);
+        setCarePlanSavePendingByMemberId((prev) => {
+          const next = { ...prev };
           delete next[memberId];
           return next;
         });
@@ -497,6 +607,7 @@ export default function SettlementLineTableClient(props: {
                   '기본수당',
                   '롤업수당',
                   '보너스',
+                  '케어플랜 수당',
                   '본인계약 인정',
                   '환수금',
                   '합계',
@@ -555,6 +666,28 @@ export default function SettlementLineTableClient(props: {
                   <td className="px-4 py-3 tabular-nums text-right text-gray-700">{formatKRW(r.base)}</td>
                   <td className="px-4 py-3 tabular-nums text-right text-gray-700">{formatKRW(r.rollup)}</td>
                   <td className="px-4 py-3 tabular-nums text-right text-violet-700">{formatKRW(r.leaderMaint)}</td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={carePlanInputByMemberId[r.topLineId] ?? String(r.carePlan ?? 0)}
+                      disabled={Boolean(carePlanSavePendingByMemberId[r.topLineId])}
+                      onChange={(e) =>
+                        setCarePlanInputByMemberId((prev) => ({
+                          ...prev,
+                          [r.topLineId]: e.target.value,
+                        }))
+                      }
+                      onBlur={(e) => commitCarePlan(r, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                      }}
+                      className="w-[7.5rem] rounded-md border border-orange-200 bg-orange-50/40 px-2 py-1 text-right text-xs tabular-nums text-orange-950 focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-200 disabled:bg-slate-50"
+                    />
+                    {carePlanSavePendingByMemberId[r.topLineId] ? (
+                      <span className="ml-1 text-[11px] text-gray-500">저장 중…</span>
+                    ) : null}
+                  </td>
                   <td className="px-4 py-3 text-xs text-gray-700 whitespace-nowrap">
                     <label
                       className={`inline-flex items-center gap-2 select-none ${
@@ -679,6 +812,9 @@ export default function SettlementLineTableClient(props: {
                 </td>
                 <td className="px-4 py-3 tabular-nums text-right font-semibold text-violet-700">
                   {formatKRW(leaderMaintSum)}
+                </td>
+                <td className="px-4 py-3 tabular-nums text-right font-semibold text-orange-800">
+                  {formatKRW(carePlanSum)}
                 </td>
                 <td />
                 <td className="px-4 py-3 tabular-nums text-right font-semibold text-rose-800">

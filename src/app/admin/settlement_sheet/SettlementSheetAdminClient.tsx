@@ -25,6 +25,7 @@ export interface SheetRowVM {
     personalCommission: number;
     overrideAmount: number;
     bonusAmount: number;
+    carePlanCommission: number;
     clawbackAmount: number;
   };
   override: {
@@ -34,6 +35,7 @@ export interface SheetRowVM {
     personalCommission: number | null;
     overrideAmount: number | null;
     bonusAmount: number | null;
+    carePlanCommission: number | null;
     clawbackAmount: number | null;
     memo: string;
   } | null;
@@ -200,6 +202,7 @@ export default function SettlementSheetAdminClient({
               <th className="px-3 py-2 text-right font-medium">개인수당</th>
               <th className="px-3 py-2 text-right font-medium">오버라이드</th>
               <th className="px-3 py-2 text-right font-medium">보너스</th>
+              <th className="px-3 py-2 text-right font-medium">케어플랜</th>
               <th className="px-3 py-2 text-right font-medium">환수금</th>
               <th className="px-3 py-2 text-right font-medium">합계</th>
               <th className="px-3 py-2 text-center font-medium">동작</th>
@@ -208,7 +211,7 @@ export default function SettlementSheetAdminClient({
           <tbody>
             {filteredRows.length === 0 ? (
               <tr>
-                  <td colSpan={11} className="px-3 py-6 text-center text-slate-500">
+                  <td colSpan={12} className="px-3 py-6 text-center text-slate-500">
                   표시할 영업자가 없습니다.
                 </td>
               </tr>
@@ -219,14 +222,19 @@ export default function SettlementSheetAdminClient({
                 const pc = effectiveValue(r.override?.personalCommission, r.base.personalCommission);
                 const ovAmt = effectiveValue(r.override?.overrideAmount, r.base.overrideAmount);
                 const bn = effectiveValue(r.override?.bonusAmount, r.base.bonusAmount);
+                const cp = effectiveValue(
+                  r.override?.carePlanCommission,
+                  r.base.carePlanCommission,
+                );
                 const cb = effectiveValue(r.override?.clawbackAmount, r.base.clawbackAmount);
-                const total = pc + ovAmt + bn - cb;
+                const total = pc + ovAmt + bn + cp - cb;
                 const hasOverride = !!r.override && (
                   r.override.personalUnitCount != null ||
                   r.override.downlineUnitCount != null ||
                   r.override.personalCommission != null ||
                   r.override.overrideAmount != null ||
                   r.override.bonusAmount != null ||
+                  r.override.carePlanCommission != null ||
                   r.override.clawbackAmount != null
                 );
                 const sharePath = buildSharePath(r.tyCode, yearMonth);
@@ -247,6 +255,7 @@ export default function SettlementSheetAdminClient({
                     <td className="px-3 py-2 text-right tabular-nums text-slate-900">{fmtWon(pc)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-900">{fmtWon(ovAmt)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-900">{fmtWon(bn)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-orange-800">{fmtWon(cp)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-rose-800">{fmtWon(cb)}</td>
                     <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-900">{fmtWon(total)}</td>
                     <td className="px-3 py-2 text-center">
@@ -369,6 +378,9 @@ function EditOverrideModal({
   const [bonus, setBonus] = useState(
     row.override?.bonusAmount != null ? String(row.override.bonusAmount) : '',
   );
+  const [carePlan, setCarePlan] = useState(
+    row.override?.carePlanCommission != null ? String(row.override.carePlanCommission) : '',
+  );
   const [clawback, setClawback] = useState(
     row.override?.clawbackAmount != null
       ? String(row.override.clawbackAmount)
@@ -386,6 +398,7 @@ function EditOverrideModal({
       personal_commission: toIntOrNull(personalCommission),
       override_amount: toIntOrNull(overrideAmount),
       bonus_amount: toIntOrNull(bonus),
+      care_plan_commission: toIntOrNull(carePlan),
       clawback_amount: toIntOrNull(clawback),
     };
     for (const k of Object.keys(fields) as Array<keyof typeof fields>) {
@@ -396,6 +409,10 @@ function EditOverrideModal({
     }
     if (fields.clawback_amount.value != null && fields.clawback_amount.value < 0) {
       onError('환수금은 0 이상이어야 합니다.');
+      return;
+    }
+    if (fields.care_plan_commission.value != null && fields.care_plan_commission.value < 0) {
+      onError('케어플랜 수당은 0 이상이어야 합니다.');
       return;
     }
     setBusy(true);
@@ -410,6 +427,7 @@ function EditOverrideModal({
           personal_commission: fields.personal_commission.value,
           override_amount: fields.override_amount.value,
           bonus_amount: fields.bonus_amount.value,
+          care_plan_commission: fields.care_plan_commission.value,
           clawback_amount: fields.clawback_amount.value ?? 0,
           memo: memo.trim() || null,
         }),
@@ -488,6 +506,14 @@ function EditOverrideModal({
             base={row.base.bonusAmount.toLocaleString('ko-KR')}
             value={bonus}
             onChange={setBonus}
+            placeholder="자동 계산값 사용"
+            disabled={busy}
+          />
+          <FieldRow
+            label="케어플랜 수당 (원)"
+            base={row.base.carePlanCommission.toLocaleString('ko-KR')}
+            value={carePlan}
+            onChange={setCarePlan}
             placeholder="자동 계산값 사용"
             disabled={busy}
           />

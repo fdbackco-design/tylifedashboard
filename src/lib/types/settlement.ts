@@ -189,6 +189,19 @@ export interface SettlementCalculationDetail {
   /** 특정 멤버 예외/수동 조정(합계 수당에 가감) */
   manual_adjustment_won?: number;
   manual_adjustment_reason?: string | null;
+  /** TY케어플랜 모집수당 + 유지수당(직급·롤업과 무관한 고정액) */
+  care_plan_commission_amount?: number;
+  /** 계약코드·회차별 케어플랜 지급 근거 */
+  care_plan_commission_lines?: Array<{
+    contract_id: string | null;
+    contract_code: string;
+    commission_type: 'recruitment' | 'maintenance' | 'retroactive';
+    installment_no: number;
+    unit_count: number;
+    unit_amount_won: number;
+    amount_won: number;
+    payment_status: 'pending' | 'paid' | 'held' | 'void';
+  }>;
 }
 
 export interface MonthlySettlement {
@@ -204,6 +217,7 @@ export interface MonthlySettlement {
   base_commission: number;
   rollup_commission: number;
   incentive_amount: number;
+  care_plan_commission: number;
   total_amount: number;
   calculation_detail: SettlementCalculationDetail | null;
   is_finalized: boolean;
@@ -222,6 +236,7 @@ export interface MonthlySettlementInsert {
   base_commission: number;
   rollup_commission: number;
   incentive_amount: number;
+  care_plan_commission: number;
   total_amount: number;
   calculation_detail: SettlementCalculationDetail;
   is_finalized?: boolean;

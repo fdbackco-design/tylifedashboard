@@ -89,7 +89,7 @@ export default async function OrganizationStatementPage({
         db
           .from('monthly_settlements')
           .select(
-            'year_month, member_id, rank, direct_unit_count, base_commission, rollup_commission, incentive_amount, total_amount, calculation_detail',
+            'year_month, member_id, rank, direct_unit_count, base_commission, rollup_commission, incentive_amount, care_plan_commission, total_amount, calculation_detail',
           )
           .eq('year_month', label_year_month)
           .eq('member_id', memberId as string)
@@ -111,6 +111,7 @@ export default async function OrganizationStatementPage({
         base_commission: number;
         rollup_commission: number;
         incentive_amount: number;
+        care_plan_commission: number;
         total_amount: number;
       }
     | null;
@@ -129,6 +130,7 @@ export default async function OrganizationStatementPage({
     base_commission: 0,
     rollup_commission: 0,
     incentive_amount: 0,
+    care_plan_commission: 0,
     total_amount: 0,
   };
   const ss = isUnmapped ? emptySettlement : s;
@@ -196,12 +198,13 @@ export default async function OrganizationStatementPage({
   }
 
   // /admin/settlement_sheet 수동 보정(settlement_statement_overrides)을 공유 명세서와 동일하게 반영.
-  // 총지급액(합계) = 개인수당 + 오버라이드 + 보너스 − 환수금.
+  // 총지급액(합계) = 개인수당 + 오버라이드 + 보너스 + 케어플랜 수당 − 환수금.
   let displayPersonalUnits = Number(ss.direct_unit_count ?? 0);
   let displayDownlineUnits = downlineAttributedUnits;
   let displayPersonalCommission = Number(ss.base_commission ?? 0);
   let displayOverrideAmount = Number(ss.rollup_commission ?? 0);
   let displayBonusAmount = Number(ss.incentive_amount ?? 0);
+  let displayCarePlanCommission = Number(ss.care_plan_commission ?? 0);
   let displayClawbackAmount = 0;
   let displayGrossTotal = Number(ss.total_amount ?? 0);
 
@@ -227,6 +230,7 @@ export default async function OrganizationStatementPage({
           base_commission: s.base_commission,
           rollup_commission: s.rollup_commission,
           incentive_amount: s.incentive_amount,
+          care_plan_commission: s.care_plan_commission,
           total_amount: s.total_amount,
         },
       },
@@ -236,6 +240,7 @@ export default async function OrganizationStatementPage({
     displayPersonalCommission = sheet.personalCommission;
     displayOverrideAmount = sheet.overrideAmount;
     displayBonusAmount = sheet.bonusAmount;
+    displayCarePlanCommission = sheet.carePlanCommission;
     displayClawbackAmount = sheet.clawbackAmount;
     displayGrossTotal = sheet.grossTotal;
   }
@@ -744,6 +749,12 @@ export default async function OrganizationStatementPage({
             <div className="grid grid-cols-2 px-4 py-3 border-b border-gray-100">
               <div className="text-sm text-gray-600">보너스</div>
               <div className="text-sm text-right tabular-nums">{formatWon(displayBonusAmount)}</div>
+            </div>
+            <div className="grid grid-cols-2 px-4 py-3 border-b border-gray-100">
+              <div className="text-sm text-gray-600">케어플랜 수당</div>
+              <div className="text-sm text-right tabular-nums">
+                {formatWon(displayCarePlanCommission)}
+              </div>
             </div>
             <div className="grid grid-cols-2 px-4 py-3 border-b border-gray-100">
               <div className="text-sm text-gray-600">환수금</div>

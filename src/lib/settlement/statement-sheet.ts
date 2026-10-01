@@ -25,6 +25,7 @@ export interface StatementOverrideRow {
   personal_commission: number | null;
   override_amount: number | null;
   bonus_amount: number | null;
+  care_plan_commission: number | null;
   clawback_amount: number | null;
   memo: string | null;
   updated_at: string;
@@ -55,9 +56,11 @@ export interface StatementSheetData {
   personalCommission: number;
   overrideAmount: number;
   bonusAmount: number;
+  /** TY케어플랜 모집·유지수당 */
+  carePlanCommission: number;
   /** 수동 환수금(원). 합계에서 차감 */
   clawbackAmount: number;
-  /** = personalCommission + overrideAmount + bonusAmount - clawbackAmount */
+  /** = personalCommission + overrideAmount + bonusAmount + carePlanCommission - clawbackAmount */
   grossTotal: number;
   /** = floor(grossTotal * 0.033) */
   withholdingTax: number;
@@ -71,6 +74,7 @@ export interface StatementSheetData {
     base_commission: number;
     rollup_commission: number;
     incentive_amount: number;
+    care_plan_commission: number;
     total_amount: number;
   };
   override: StatementOverrideRow | null;
@@ -84,6 +88,7 @@ interface MonthlySettlementsRow {
   base_commission: number | null;
   rollup_commission: number | null;
   incentive_amount: number | null;
+  care_plan_commission: number | null;
   total_amount: number | null;
 }
 
@@ -129,7 +134,7 @@ export async function buildStatementSheetData(
   } else {
     const r = await db
       .from('monthly_settlements')
-      .select('year_month, member_id, rank, direct_unit_count, base_commission, rollup_commission, incentive_amount, total_amount')
+      .select('year_month, member_id, rank, direct_unit_count, base_commission, rollup_commission, incentive_amount, care_plan_commission, total_amount')
       .eq('year_month', label_year_month)
       .eq('member_id', member.id)
       .maybeSingle();
@@ -142,14 +147,14 @@ export async function buildStatementSheetData(
   } else {
     const r = await db
       .from('settlement_statement_overrides')
-      .select('id, year_month, member_id, personal_unit_count, downline_unit_count, personal_commission, override_amount, bonus_amount, clawback_amount, memo, updated_at')
+      .select('id, year_month, member_id, personal_unit_count, downline_unit_count, personal_commission, override_amount, bonus_amount, care_plan_commission, clawback_amount, memo, updated_at')
       .eq('year_month', label_year_month)
       .eq('member_id', member.id)
       .maybeSingle();
     if (r.error && isMissingClawbackColumnError(r.error.message)) {
       const fallback = await db
         .from('settlement_statement_overrides')
-        .select('id, year_month, member_id, personal_unit_count, downline_unit_count, personal_commission, override_amount, bonus_amount, memo, updated_at')
+        .select('id, year_month, member_id, personal_unit_count, downline_unit_count, personal_commission, override_amount, bonus_amount, care_plan_commission, memo, updated_at')
         .eq('year_month', label_year_month)
         .eq('member_id', member.id)
         .maybeSingle();
@@ -177,6 +182,7 @@ export async function buildStatementSheetData(
   const baseBaseCommission = settlementRow?.base_commission ?? 0;
   const baseRollupCommission = settlementRow?.rollup_commission ?? 0;
   const baseIncentive = settlementRow?.incentive_amount ?? 0;
+  const baseCarePlanCommission = settlementRow?.care_plan_commission ?? 0;
   const baseTotal = settlementRow?.total_amount ?? 0;
 
   // override 적용된 표시값
@@ -185,14 +191,19 @@ export async function buildStatementSheetData(
   const personalCommission = pickOverride(override?.personal_commission, baseBaseCommission);
   const overrideAmount = pickOverride(override?.override_amount, baseRollupCommission);
   const bonusAmount = pickOverride(override?.bonus_amount, baseIncentive);
+  const carePlanCommission = pickOverride(
+    override?.care_plan_commission,
+    baseCarePlanCommission,
+  );
   const clawbackAmount = resolveClawbackWon(member.id, label_year_month, override?.clawback_amount);
 
-  const grossTotal = netPayoutAfterClawback(
-    personalCommission,
-    overrideAmount,
-    bonusAmount,
-    clawbackAmount,
-  );
+  const grossTotal =
+    netPayoutAfterClawback(
+      personalCommission,
+      overrideAmount,
+      bonusAmount,
+      clawbackAmount,
+    ) + carePlanCommission;
   const withholdingTax = floorNonNegative(grossTotal * TAX_RATE);
   const netPayment = grossTotal - withholdingTax;
 
@@ -208,6 +219,7 @@ export async function buildStatementSheetData(
     personalCommission,
     overrideAmount,
     bonusAmount,
+    carePlanCommission,
     clawbackAmount,
     grossTotal,
     withholdingTax,
@@ -218,6 +230,7 @@ export async function buildStatementSheetData(
       base_commission: baseBaseCommission,
       rollup_commission: baseRollupCommission,
       incentive_amount: baseIncentive,
+      care_plan_commission: baseCarePlanCommission,
       total_amount: baseTotal,
     },
     override,
@@ -251,6 +264,7 @@ export function hasStatementPayoutAmount(args: {
   personalCommission: number;
   overrideAmount: number;
   bonusAmount: number;
+  carePlanCommission?: number;
   clawbackAmount?: number;
 }): boolean {
   return (
@@ -259,7 +273,7 @@ export function hasStatementPayoutAmount(args: {
       args.overrideAmount,
       args.bonusAmount,
       args.clawbackAmount ?? 0,
-    ) !== 0
+    ) + (args.carePlanCommission ?? 0) !== 0
   );
 }
 

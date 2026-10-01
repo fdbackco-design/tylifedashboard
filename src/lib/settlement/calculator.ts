@@ -1414,6 +1414,7 @@ export function calculateMemberSettlement(
     base_commission: baseCommission,
     rollup_commission: rollupCommission,
     incentive_amount: bonusAmountCombined,
+    care_plan_commission: 0,
     total_amount: totalAmount,
     calculation_detail: detail,
     is_finalized: false,
